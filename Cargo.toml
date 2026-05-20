@@ -1,0 +1,45 @@
+[package]
+name = "driftfm"
+version = "0.1.0"
+edition = "2021"
+description = "A blazing-fast retrowave internet radio TUI"
+
+[[bin]]
+name = "driftfm"
+path = "src/main.rs"
+
+[dependencies]
+# TUI
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Audio playback
+rodio = { version = "0.20", features = ["symphonia-all"] }
+
+# HTTP + JSON
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+
+# Config directories
+dirs = "6"
+
+# Desktop Notifications
+notify-rust = "4"
+id3 = "1"
+
+# Logging (optional, useful for debugging)
+# tracing = "0.1"
+# tracing-subscriber = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
