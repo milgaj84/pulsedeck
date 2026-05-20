@@ -74,12 +74,12 @@ The most important keys to get started:
 | Key | What it does |
 | :--- | :--- |
 | `↑` / `↓` | Move between stations |
-| `Enter` | Play the selected station |
+| `Enter` | Play selected station |
 | `Tab` | Switch genre categories |
 | `/` | Search for any station worldwide |
 | `Space` | Pause / Resume |
 | `r` | Start / stop recording |
-| `f` | Save to favorites |
+| `f` | In search: add to library. In library: remove station |
 | `,` | Open settings |
 | `q` | Quit |
 
@@ -87,23 +87,22 @@ The most important keys to get started:
 
 ## Workflow
 
-**Finding a station you've never heard of:**
+**Finding and adding a new station:**
 
 1. Press `/` to open search, type a genre, city, or station name — results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide
-2. Use `↑` / `↓` to browse results, press `Enter` to tune in instantly
-3. Like it? Press `f` to save it to your favorites — it shows up in your **Favorites** tab from now on
-4. Don't like it? Just navigate to another station and press `Enter` — the old stream fades out automatically
+2. Use `↑` / `↓` to browse results
+3. Press `Enter` to tune in instantly — this also **automatically adds the station to your library** so it's there next time
+4. Alternatively, press `f` on a search result to save it to your library without playing it yet
 
-**Managing your favorites:**
+**Managing your library:**
 
-- Press `Shift+F` to switch to your Favorites view
-- Browse with `↑` / `↓`, play with `Enter` as usual
-- Press `f` again on any station to remove it from favorites
-- Switch between genre tabs with `Tab` / `Shift+Tab` to browse the pre-loaded catalog
+- Your library is the main station list you see on launch
+- To remove a station, highlight it in the main list and press `f`
+- Switch between genre categories with `Tab` / `Shift+Tab` to browse the pre-loaded catalog
 
 **Coming back tomorrow:**
 
-- DriftFM remembers everything between sessions
+- DriftFM remembers your library between sessions
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically
 
 ---
