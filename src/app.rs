@@ -240,7 +240,7 @@ impl App {
                     };
                     return;
                 }
-                Action::PlaySelected | Action::TogglePause | Action::ToggleSettingOption => {
+                Action::PlaySelected | Action::TogglePause => {
                     match self.selected_setting_idx {
                         0 => {
                             self.library.settings.notifications_enabled = !self.library.settings.notifications_enabled;
@@ -415,7 +415,7 @@ impl App {
                     }
                 }
             }
-            Action::ToggleFavoritesView => {}
+
             Action::NextGenre => {
                 if self.input_mode == InputMode::Normal {
                     let count = self.library.available_genres.len();
@@ -439,7 +439,7 @@ impl App {
                 }
             }
 
-            Action::RefreshStations => {}
+
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
                 if self.show_help {
@@ -452,7 +452,7 @@ impl App {
                     self.show_help = false;
                 }
             }
-            Action::ToggleSettingOption => {}
+
             Action::ToggleRecording => {
                 if self.playing_url.is_some() {
                     match self.recording_state {

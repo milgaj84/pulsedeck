@@ -54,7 +54,6 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
 
         // Favorites
-        (KeyModifiers::SHIFT, KeyCode::Char('F')) => Some(Action::ToggleFavoritesView),
         (_, KeyCode::Char('f')) => Some(Action::ToggleFavorite),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
