@@ -5,7 +5,7 @@
 [![Warnings](https://img.shields.io/badge/Warnings-0--clean-success.svg)](#)
 [![Clippy](https://img.shields.io/badge/Clippy-lint--free-blueviolet.svg)](#)
 
-> A blazing-fast, zero-warning, zero-lint **cyber-botanical retrowave audio deck & smart tape recorder TUI** engineered in Rust. Live-stream retro music directly to your terminal with pixel-perfect animations, circular buffering, and smart folder segmentation.
+> A blazing-fast, zero-warning, zero-lint **cyber-synthwave internet radio player & smart tape recorder TUI** engineered in Rust. While it features a gorgeous retro-futuristic aesthetic and comes pre-seeded with premium retrowave channels, DriftFM is a fully-featured, general-purpose streaming player. Search, stream, record, and archive any public internet radio stream worldwide with pixel-perfect animations, circular buffering, and automated metadata folder segmenting.
 
 ---
 

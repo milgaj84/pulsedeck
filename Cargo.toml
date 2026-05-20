@@ -2,7 +2,7 @@
 name = "driftfm"
 version = "0.1.0"
 edition = "2021"
-description = "A blazing-fast retrowave internet radio TUI"
+description = "A blazing-fast cyber-synthwave internet radio player & smart tape recorder TUI"
 
 [[bin]]
 name = "driftfm"
