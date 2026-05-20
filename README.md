@@ -7,7 +7,7 @@
 *Stream any radio station on Earth. Record tracks automatically. Never leave the command line.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-🦀-orange.svg)](https://www.rust-lang.org/)
+[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
 [![Zero warnings](https://img.shields.io/badge/cargo%20clippy-zero%20warnings-brightgreen.svg)](#)
 [![Memory safe](https://img.shields.io/badge/Memory-Safe-critical.svg)](https://www.rust-lang.org/)
@@ -82,6 +82,29 @@ The most important keys to get started:
 | `f` | Save to favorites |
 | `,` | Open settings |
 | `q` | Quit |
+
+---
+
+## Workflow
+
+**Finding a station you've never heard of:**
+
+1. Press `/` to open search, type a genre, city, or station name — results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide
+2. Use `↑` / `↓` to browse results, press `Enter` to tune in instantly
+3. Like it? Press `f` to save it to your favorites — it shows up in your **Favorites** tab from now on
+4. Don't like it? Just navigate to another station and press `Enter` — the old stream fades out automatically
+
+**Managing your favorites:**
+
+- Press `Shift+F` to switch to your Favorites view
+- Browse with `↑` / `↓`, play with `Enter` as usual
+- Press `f` again on any station to remove it from favorites
+- Switch between genre tabs with `Tab` / `Shift+Tab` to browse the pre-loaded catalog
+
+**Coming back tomorrow:**
+
+- DriftFM remembers everything between sessions
+- Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically
 
 ---
 
