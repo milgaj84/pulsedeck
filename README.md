@@ -22,7 +22,7 @@
 
 ## What is DriftFM?
 
-DriftFM is a **terminal internet radio player** with a retrowave soul. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal and is built with the kind of care usually reserved for production software.
+DriftFM is a **terminal internet radio player** with a retrowave soul, built in Rust. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal, starts instantly, and uses a few megabytes of RAM.
 
 It ships pre-loaded with handpicked synthwave, chiptune, and cyberpunk stations so it sounds great from the first keypress. But you can search, save, and play **any public internet radio station in the world**.
 
@@ -122,18 +122,9 @@ Settings are saved automatically to a JSON file in your config directory.
 
 ---
 
-## Why Rust?
-
-DriftFM is written in Rust — not because it's trendy, but because it matters for a radio player:
-
-- **Zero crashes** — memory safety is guaranteed at compile time. The app won't segfault because of a malformed ICY header or a bad stream packet.
-- **Zero overhead** — no garbage collector pauses, no JVM startup, no Python interpreter. Starts instantly, uses ~5 MB of RAM while playing.
-- **Fearless concurrency** — the network download thread, the audio decoder, and the UI tick loop all run simultaneously with no data races, enforced by the borrow checker.
-- **Tiny binary** — the release build strips to a single self-contained executable. Copy it anywhere, it just works.
-
----
-
 ## Built with
+
+*All native Rust — no ffmpeg, no Python, no Electron. A single self-contained binary.*
 
 - [Ratatui](https://ratatui.rs/) — Terminal UI framework
 - [Rodio](https://github.com/RustAudio/rodio) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio decoding & playback (native, no ffmpeg dependency)
