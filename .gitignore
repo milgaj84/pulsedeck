@@ -1,1 +1,24 @@
+# Rust build artifacts
 /target
+
+# Recorded audio captures (user-generated, not part of the project)
+/recordings/
+
+# User library / favorites / settings database
+library.json
+
+# macOS filesystem noise
+.DS_Store
+
+# Windows filesystem noise
+Thumbs.db
+desktop.ini
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
