@@ -317,10 +317,12 @@ impl App {
                 PlaybackState::Paused => {
                     self.audio.send(AudioCommand::Resume);
                 }
-                PlaybackState::Stopped => {
+                PlaybackState::Stopped | PlaybackState::Error(_) => {
                     self.update(Action::PlaySelected);
                 }
-                _ => {}
+                PlaybackState::Connecting => {
+                    self.update(Action::Stop);
+                }
             },
             Action::Stop => {
                 self.audio.send(AudioCommand::Stop);
