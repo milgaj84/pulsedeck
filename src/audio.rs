@@ -837,3 +837,43 @@ fn parse_stream_title(meta: &str) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("normal_file.mp3"), "normal_file.mp3");
+        assert_eq!(sanitize_filename("artist/song?.mp3"), "artist-song-.mp3");
+        assert_eq!(sanitize_filename("windows\\invalid:name*char\".mp3"), "windows-invalid-name-char-.mp3");
+        assert_eq!(sanitize_filename("<tag> | pipe.mp3"), "-tag- - pipe.mp3");
+    }
+
+    #[test]
+    fn test_parse_stream_title() {
+        // Valid metadata
+        assert_eq!(
+            parse_stream_title("StreamTitle='Lazerhawk - King of The Streets';StreamUrl='';"),
+            Some("Lazerhawk - King of The Streets".to_string())
+        );
+
+        // Whitespace trim
+        assert_eq!(
+            parse_stream_title("StreamTitle='  Kavinsky - Nightcall  ';StreamUrl='';"),
+            Some("Kavinsky - Nightcall".to_string())
+        );
+
+        // Missing StreamTitle
+        assert_eq!(
+            parse_stream_title("StreamUrl='';"),
+            None
+        );
+
+        // Malformed or empty title
+        assert_eq!(
+            parse_stream_title("StreamTitle='';"),
+            Some("".to_string())
+        );
+    }
+}
