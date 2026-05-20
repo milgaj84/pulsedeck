@@ -1,107 +1,135 @@
+<div align="center">
+
 # ✦ DriftFM ✦
 
+**A cyber-synthwave internet radio player for your terminal.**
+
+*Stream any radio station on Earth. Record tracks automatically. Never leave the command line.*
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![Warnings](https://img.shields.io/badge/Warnings-0--clean-success.svg)](#)
-[![Clippy](https://img.shields.io/badge/Clippy-lint--free-blueviolet.svg)](#)
+[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
+[![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
+[![Clippy: lint-free](https://img.shields.io/badge/Clippy-lint--free-blueviolet.svg)](#)
 
-> A blazing-fast, zero-warning, zero-lint **cyber-synthwave internet radio player & smart tape recorder TUI** engineered in Rust. While it features a gorgeous retro-futuristic aesthetic and comes pre-seeded with premium retrowave channels, DriftFM is a fully-featured, general-purpose streaming player. Search, stream, record, and archive any public internet radio stream worldwide with pixel-perfect animations, circular buffering, and automated metadata folder segmenting.
-
----
-
-## 📸 Interface Preview
-
-![DriftFM Cyber-Deck TUI Interface](assets/screenshot.png)
+</div>
 
 ---
 
-## ⚡ Key Features
-
-*   **🌀 Bounded Circular Resiliency Buffer**: Decouples connection socket streaming from Symphonia's audio blocks using a thread-safe lock-free `BufferQueue` (`1 MB` ring-buffer). Playback remains immune to temporary network jitter and packet stutters.
-*   **🔊 Non-Blocking Playback Crossfading**: Ramps stream volumes exponentially on pause, resume, and station switches (dimming over `150ms` and swelling over `250ms`), emulating the tactile sensation of physical vacuum-tube tuning dials with zero GUI lag.
-*   **📼 Smart Segmenting Tape Recorder**: Intercepts StreamTitle changes inside incoming ICY metadata packets, dynamically flushes current track frames, and starts a fresh file with zero boundary latency.
-*   **📂 Dynamic Subgenre Folder Sorter**: Heuristically resolves parent genres (e.g. Synthwave, Chiptune, Cyberpunk) and dynamically constructs folder hierarchies to automatically store tracks inside `recordings/<Subgenre>/<Artist> - <Title>.mp3`.
-*   **🏷️ ID3v2 Tagging Engine**: Automatically injects parsed artist name, track title, and station album tags into the capture metadata upon finalization.
-*   **🗑️ Smart Content Sweep & Snippet Discarder**: Matches parsed metadata against known advertisement strings (`ADVERT`, `COMMERCIAL`, `WEATHER`, `NEWS`, `DJ SPEECH`) and automatically purges recorded tracks under `90 seconds` from disk unless configured otherwise in the settings.
-*   **💫 animated Cassette Tape Deck UI**: Dual spinning cassette reels that dynamically resize, real-time buffer progress bar alerts, and a gorgeous composite wave Braille Canvas audio oscilloscope.
-*   **🎛️ Neon Config Console popup**: Press `,` to pull down a glowing settings panel. Features toggleable options for persistent startup stations, OS notifications, and snippet purges, saving instantly to `library.json`.
+![DriftFM — Cyber-Deck TUI Interface](assets/screenshot.png)
 
 ---
 
-## ⌨️ Control HUD Hotkey Bindings
+## What is DriftFM?
 
-Press **`h`** or **`?`** to summon the Control HUD inside the application at any time.
+DriftFM is a **terminal internet radio player** with a retrowave soul. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal and is built with the kind of care usually reserved for production software.
 
-| Category | Keybinding | Action Description |
-| :--- | :--- | :--- |
-| **Navigation** | `Up` / `k` | Highlight previous station in current category |
-| | `Down` / `j` | Highlight next station in current category |
-| | `Enter` | Tune and play highlighted station |
-| | `Tab` | Cycle forward through genre categories |
-| | `Shift + Tab` | Cycle backward through genre categories |
-| **Playback** | `Space` | Toggle pause/resume (with smooth fading) |
-| | `s` | Stop active playback stream |
-| | `+` / `=` | Increase volume by 5% |
-| | `-` | Decrease volume by 5% |
-| | `m` | Mute/unmute stream volume |
-| | `r` | Toggle smart tape recording |
-| **Search** | `/` | Enter interactive catalog search input mode |
-| | `f` | Toggle favorite status on highlighted station |
-| **Bento Toggles** | `b` | Toggle right-hand bento widgets panel ON/OFF |
-| | `p` | Cycle right-hand page views (Cassette Tape ↔ History) |
-| | `,` | Open Neon Configuration Settings modal |
-| | `Esc` | Dismiss active overlay or exit the application |
+It ships pre-loaded with handpicked synthwave, chiptune, and cyberpunk stations so it sounds great from the first keypress. But you can search, save, and play **any public internet radio station in the world**.
+
+Think of it as: *VLC for internet radio, but it fits in your terminal and records tracks into named folders automatically.*
 
 ---
 
-## 🛠️ System Prerequisites
+## What makes it different?
 
-DriftFM relies on `rodio` and `symphonia` for audio decoding, which interacts directly with your native host soundcard.
+Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
 
-### Windows (MSRV 1.75+)
-*   No external dependencies required! Compiles natively with MSVC toolchains out of the box.
+- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog — by name, tag, or country
+- 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
+- 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
+- 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
+- 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
+- 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
+- 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
 
-### Linux (Debian/Ubuntu)
-Install development libraries for ALSA:
+---
+
+## Installation
+
+**Prerequisites:** [Rust & Cargo](https://rustup.rs/) (1.75+)
+
+> On Linux, also install ALSA dev headers first:
+> ```bash
+> sudo apt-get install libasound2-dev   # Debian/Ubuntu
+> sudo dnf install alsa-lib-devel       # Fedora
+> ```
+
 ```bash
-sudo apt-get install libasound2-dev
+# Clone and run
+git clone https://github.com/yourusername/driftfm.git
+cd driftfm
+cargo run --release
 ```
 
-### macOS
-*   Native CoreAudio bindings are resolved automatically.
+That's it. No config files to write. No API keys. Stations are pre-loaded and the player starts immediately.
 
 ---
 
-## 🚀 Installation & Running
+## How to use it
 
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/driftfm.git
-    cd driftfm
-    ```
-2.  Build and run in release mode for maximum rendering performance:
-    ```bash
-    cargo run --release
-    ```
+DriftFM is keyboard-driven. Press **`h`** at any time to see the full control reference.
 
----
+The most important keys to get started:
 
-## 🧪 Advanced Quality Verification
-
-To run unit tests:
-```bash
-cargo test
-```
-
-To run standard clippy lints to guarantee a warning-free state:
-```bash
-cargo clippy --all-targets -- -D warnings
-```
-
-Refer to the complete [Advanced Testing Playbook](testing_playbook.md) for automated layout integration test examples using Ratatui's virtual `TestBackend`, parallel testing with `cargo-nextest`, and coverage reports using `cargo-tarpaulin`.
+| Key | What it does |
+| :--- | :--- |
+| `↑` / `↓` | Move between stations |
+| `Enter` | Play the selected station |
+| `Tab` | Switch genre categories |
+| `/` | Search for any station worldwide |
+| `Space` | Pause / Resume |
+| `r` | Start / stop recording |
+| `f` | Save to favorites |
+| `,` | Open settings |
+| `q` | Quit |
 
 ---
 
-## 📄 License
+## Recording
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Press `r` while a station is playing. DriftFM will:
+
+1. Wait for the next song boundary (so you never capture a partial intro)
+2. Record each track to its own file: `recordings/Synthwave/Perturbator - Venger.mp3`
+3. Embed the correct ID3 tags (artist, title, station name as album)
+4. Discard anything under 90 seconds — DJ speech, ads, station IDs are swept automatically
+5. Stop cleanly when you press `r` again
+
+The minimum song duration and whether to keep short clips are configurable in the settings (`,`).
+
+---
+
+## Settings
+
+Press `,` to open the settings panel. Current options:
+
+- **Auto-resume last station on startup** — picks up where you left off
+- **Desktop notifications** — show track info when a song changes
+- **Keep partial recordings** — whether short clips are kept or silently deleted
+- **Keep ad snippets** — whether to keep non-music audio segments
+
+Settings are saved automatically to a JSON file in your config directory.
+
+---
+
+## Platform Support
+
+| Platform | Status |
+| :--- | :--- |
+| Windows | ✅ Full support (native WASAPI audio) |
+| Linux | ✅ Full support (ALSA) |
+| macOS | ✅ Full support (CoreAudio) |
+
+---
+
+## Built with
+
+- [Ratatui](https://ratatui.rs/) — Terminal UI framework
+- [Rodio](https://github.com/RustAudio/rodio) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio decoding & playback
+- [Tokio](https://tokio.rs/) — Async runtime for API search
+- [reqwest](https://docs.rs/reqwest) — HTTP streaming with ICY metadata support
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
