@@ -1,6 +1,6 @@
 [package]
 name = "driftfm"
-version = "0.2.0"
+version = "0.1.0"
 edition = "2021"
 description = "A blazing-fast cyber-synthwave internet radio player & smart tape recorder TUI"
 
