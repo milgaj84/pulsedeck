@@ -105,7 +105,7 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
     }
 
     let client = reqwest::Client::builder()
-        .user_agent("DriftFM/0.1.0")
+        .user_agent("DriftFM/0.2.0")
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
 

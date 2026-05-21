@@ -38,6 +38,7 @@ Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch i
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
+- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte). Switch live in settings.
 - 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
@@ -125,10 +126,11 @@ The minimum song duration and whether to keep short clips are configurable in th
 
 Press `,` to open the settings panel. Current options:
 
-- **Auto-resume last station on startup** — picks up where you left off
 - **Desktop notifications** — show track info when a song changes
-- **Keep partial recordings** — whether short clips are kept or silently deleted
-- **Keep ad snippets** — whether to keep non-music audio segments
+- **Auto-resume last station on startup** — picks up where you left off
+- **Tape capture folder** — cycle between preset recording directories
+- **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted
+- **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte
 
 Settings are saved automatically to a JSON file in your config directory.
 

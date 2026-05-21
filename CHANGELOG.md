@@ -4,6 +4,18 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ---
 
+## [0.2.0] - 2026-05-21
+
+### Added
+*   **Catppuccin Theming System**: 5 built-in themes — Retrowave (default), Catppuccin Mocha, Macchiato, Frappé, and Latte. Cycle live in the settings panel (`,` → Theme → `Space`). Theme persists between sessions.
+*   **Semantic Color Architecture**: Replaced all 61 hardcoded color constants with a `ThemePalette` struct mapped to 14 semantic UI roles. Adding a new theme requires only one new function — zero UI file changes.
+
+### Changed
+*   Settings panel expanded from 4 to 5 rows to accommodate the theme selector.
+*   Removed dead code: `ToggleFavoritesView`, `RefreshStations`, `ToggleSettingOption` action variants.
+
+---
+
 ## [0.1.0] - 2026-05-20
 
 Initial release of the DriftFM cyber-botanical retrowave audio deck and smart tape recorder.
