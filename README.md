@@ -55,8 +55,15 @@ Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch i
 > sudo dnf install alsa-lib-devel       # Fedora
 > ```
 
+### From crates.io (recommended)
+
 ```bash
-# Clone and run
+cargo install driftfm
+```
+
+### From source
+
+```bash
 git clone https://github.com/milgaj84/driftFM.git
 cd driftFM
 cargo run --release
