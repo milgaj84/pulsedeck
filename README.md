@@ -56,8 +56,8 @@ Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch i
 
 ```bash
 # Clone and run
-git clone https://github.com/yourusername/driftfm.git
-cd driftfm
+git clone https://github.com/milgaj84/driftFM.git
+cd driftFM
 cargo run --release
 ```
 
