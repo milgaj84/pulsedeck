@@ -17,7 +17,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
     // Fill background with pure black
-    let bg = Block::default().style(Style::default().bg(theme::BG));
+    let bg = Block::default().style(Style::default().bg(theme::bg()));
     frame.render_widget(bg, size);
 
     let is_searching = app.input_mode == InputMode::Search;
@@ -96,7 +96,7 @@ fn render_separator(frame: &mut Frame, area: Rect) {
     let line_str = "═".repeat(width);
     let sep = Paragraph::new(Line::from(Span::styled(
         line_str,
-        Style::default().fg(theme::DEEP_PURPLE).bg(theme::BG),
+        Style::default().fg(theme::accent()).bg(theme::bg()),
     )));
     frame.render_widget(sep, area);
 }

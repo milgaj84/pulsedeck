@@ -40,7 +40,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .style(theme::dim())
         .highlight_style(
             Style::default()
-                .fg(theme::NEON_CYAN)
+                .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -77,7 +77,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             };
 
             let genre_style = if is_selected {
-                Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::ITALIC)
+                Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::ITALIC)
             } else {
                 theme::dim()
             };
@@ -144,7 +144,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(theme::border())
                 .border_type(ratatui::widgets::BorderType::Rounded)
-                .style(Style::default().bg(theme::BG)),
+                .style(Style::default().bg(theme::bg())),
         )
         .highlight_style(theme::selected())
         .highlight_symbol("▸ ");

@@ -28,7 +28,7 @@ fn render_logo(frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::NONE)
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::bg()));
 
     let paragraph = Paragraph::new(logo).block(block).alignment(Alignment::Left);
     frame.render_widget(paragraph, area);
@@ -54,7 +54,7 @@ fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) {
         (PlaybackState::Connecting, _) => {
             Line::from(vec![
                 Span::styled("◌ ", theme::neon()),
-                Span::styled("Connecting...", Style::default().fg(theme::SUNSET_ORANGE)),
+                Span::styled("Connecting...", Style::default().fg(theme::warm())),
             ])
         }
         (PlaybackState::Error(e), _) => {
@@ -73,7 +73,7 @@ fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) {
 
     let block = Block::default()
         .borders(Borders::NONE)
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::bg()));
 
     let paragraph = Paragraph::new(vec![content])
         .block(block)

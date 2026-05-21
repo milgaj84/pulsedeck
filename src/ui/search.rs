@@ -9,7 +9,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let result_count = app.search_results.len();
 
     let api_indicator = if app.searching_api {
-        Span::styled("  ◌ searching...", Style::default().fg(theme::SUNSET_ORANGE))
+        Span::styled("  ◌ searching...", Style::default().fg(theme::warm()))
     } else if result_count > 0 {
         Span::styled(format!("  {} found", result_count), theme::dim())
     } else {
@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let spans = vec![
         Span::styled(" 🔍 ", theme::neon()),
         Span::styled(&app.search_query, theme::cyan()),
-        Span::styled("█", Style::default().fg(theme::NEON_CYAN)),
+        Span::styled("█", Style::default().fg(theme::highlight())),
         api_indicator,
     ];
 

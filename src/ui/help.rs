@@ -14,14 +14,14 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
     let block = Block::default()
         .title(Span::styled(" ✦ DriftFM Control HUD ✦ ", theme::title()))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::bg()));
 
     // Define table rows for key mappings
     let header_row = Row::new(vec![
-        Cell::from(Span::styled("Hotkey", Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("Action Description", Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD))),
+        Cell::from(Span::styled("Hotkey", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))),
+        Cell::from(Span::styled("Action Description", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))),
     ])
     .bottom_margin(1);
 
@@ -31,23 +31,23 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(""),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Up / k  ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Up / k  ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Highlight previous station", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Down / j", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Down / j", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Highlight next station", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Enter   ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Enter   ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Play highlighted station", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Tab     ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Tab     ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Cycle genre categories forward", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Shift+Tab", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Shift+Tab", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Cycle genre categories backward", theme::text())),
         ]),
         Row::new(vec![
@@ -55,23 +55,23 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(""),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Space   ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Space   ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Toggle Pause / Play", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  s       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  s       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Stop playback stream", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  + / -   ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  + / -   ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Adjust volume (scales wave)", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  m       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  m       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Mute/unmute stream volume", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  r       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  r       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Toggle Tape capture recording", theme::text())),
         ]),
         Row::new(vec![
@@ -79,11 +79,11 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(""),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  /       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  /       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Open interactive catalog search", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  f       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  f       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Add/Remove favorite station", theme::text())),
         ]),
         Row::new(vec![
@@ -91,23 +91,23 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(""),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  b       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  b       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Toggle Right Bento panel ON/OFF", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  p       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  p       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Cycle Right deck pages (Reels ↔ History)", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  ,       ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  ,       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Toggle Config / Settings menu", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  h / ?   ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  h / ?   ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Toggle this Help HUD", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Esc     ", Style::default().fg(theme::NEON_CYAN))),
+            Cell::from(Span::styled("  Esc     ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Dismiss help overlay or quit app", theme::text())),
         ]),
     ];

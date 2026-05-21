@@ -229,12 +229,12 @@ impl App {
         if self.show_settings {
             match action {
                 Action::NextStation => {
-                    self.selected_setting_idx = (self.selected_setting_idx + 1) % 4;
+                    self.selected_setting_idx = (self.selected_setting_idx + 1) % 5;
                     return;
                 }
                 Action::PrevStation => {
                     self.selected_setting_idx = if self.selected_setting_idx == 0 {
-                        3
+                        4
                     } else {
                         self.selected_setting_idx - 1
                     };
@@ -257,6 +257,13 @@ impl App {
                         }
                         3 => {
                             self.library.settings.keep_snippets = !self.library.settings.keep_snippets;
+                        }
+                        4 => {
+                            use crate::ui::theme::ThemeName;
+                            let current = ThemeName::from_key(&self.library.settings.theme);
+                            let next = current.next();
+                            self.library.settings.theme = next.key().to_string();
+                            crate::ui::theme::set_active(next);
                         }
                         _ => {}
                     }

@@ -17,6 +17,11 @@ use radio::fallback_stations;
 async fn main() -> Result<()> {
     // Load your station library (seeds with starter stations on first launch)
     let library = Library::load(fallback_stations());
+
+    // Initialize theme from saved settings
+    let saved_theme = ui::theme::ThemeName::from_key(&library.settings.theme);
+    ui::theme::set_active(saved_theme);
+
     let mut app = App::new(library);
 
     // Initialize terminal

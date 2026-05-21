@@ -1,5 +1,6 @@
 /// All possible actions in DriftFM.
 /// These flow from event handlers → app.update() to drive state changes.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// Navigation
     NextStation,

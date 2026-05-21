@@ -26,7 +26,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(station.name.as_str(), theme::cyan()));
             if let Some(ref track) = app.current_track {
                 spans.push(Span::styled(" ♫ ", theme::playing()));
-                spans.push(Span::styled(track.as_str(), Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD)));
+                spans.push(Span::styled(track.as_str(), Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD)));
             }
         }
         (PlaybackState::Paused, Some(station)) => {
@@ -37,7 +37,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(" ◌ ", theme::neon()));
             spans.push(Span::styled(
                 "Connecting...",
-                Style::default().fg(theme::SUNSET_ORANGE),
+                Style::default().fg(theme::warm()),
             ));
         }
         (PlaybackState::Error(e), _) => {
@@ -69,7 +69,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(vec![line])
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
 }
@@ -87,7 +87,7 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Back  [", theme::dim()),
             Span::styled("↑↓", theme::cyan()),
             Span::styled("] Navigate  ", theme::dim()),
-            Span::styled("Type to search...", Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::ITALIC)),
+            Span::styled("Type to search...", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::ITALIC)),
         ]),
         InputMode::Normal => Line::from(vec![
             Span::styled(" [", theme::dim()),
@@ -111,7 +111,7 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let paragraph = Paragraph::new(vec![hints])
-        .style(Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
 }

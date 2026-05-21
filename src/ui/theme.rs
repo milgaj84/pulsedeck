@@ -1,101 +1,327 @@
 use ratatui::style::{Color, Modifier, Style};
+use std::sync::RwLock;
 
-// ── Retrowave Color Palette ──────────────────────────────────────────
+// ── Semantic Theme Palette ───────────────────────────────────────────
 
-/// Pure void black background
-pub const BG: Color = Color::Rgb(0, 0, 0);
+/// A complete color palette mapped to semantic UI roles.
+/// Every theme implements the exact same set of roles so UI code
+/// never needs to reference raw color names.
+#[derive(Debug, Clone)]
+pub struct ThemePalette {
+    // Backgrounds
+    pub bg:           Color,
+    pub bg_highlight: Color,
+    pub surface:      Color,
 
-/// Neon magenta — primary accent
-pub const NEON_MAGENTA: Color = Color::Rgb(255, 46, 151);
+    // Text
+    pub text_primary: Color,
+    pub text_dim:     Color,
 
-/// Hot pink — secondary accent
-pub const HOT_PINK: Color = Color::Rgb(255, 106, 193);
+    // Accents (semantic UI roles)
+    pub accent:            Color,
+    pub accent_secondary:  Color,
+    pub highlight:         Color,
+    pub warm:              Color,
 
-/// Electric cyan — highlights
-pub const NEON_CYAN: Color = Color::Rgb(0, 240, 255);
+    // Status
+    pub success: Color,
+    pub error:   Color,
 
-/// Deep purple — borders, subtle elements
-pub const DEEP_PURPLE: Color = Color::Rgb(123, 47, 190);
+    // Volume bar
+    pub vol_filled: Color,
+    pub vol_empty:  Color,
+}
 
-/// Sunset orange — warm accent
-pub const SUNSET_ORANGE: Color = Color::Rgb(255, 140, 66);
+// ── Theme Registry ───────────────────────────────────────────────────
 
-/// Soft lavender white — primary text
-pub const TEXT_PRIMARY: Color = Color::Rgb(224, 212, 255);
+/// All available theme names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeName {
+    Retrowave,
+    CatppuccinMocha,
+    CatppuccinMacchiato,
+    CatppuccinFrappe,
+    CatppuccinLatte,
+}
 
-/// Dim text — secondary, hints
-pub const TEXT_DIM: Color = Color::Rgb(120, 100, 160);
+impl ThemeName {
+    /// All themes in display order.
+    pub const ALL: &[ThemeName] = &[
+        ThemeName::Retrowave,
+        ThemeName::CatppuccinMocha,
+        ThemeName::CatppuccinMacchiato,
+        ThemeName::CatppuccinFrappe,
+        ThemeName::CatppuccinLatte,
+    ];
 
-/// Scanline dark — alternating row tint
-pub const SCANLINE_DIM: Color = Color::Rgb(10, 8, 18);
+    /// Human-readable display name.
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeName::Retrowave           => "Retrowave",
+            ThemeName::CatppuccinMocha     => "Catppuccin Mocha",
+            ThemeName::CatppuccinMacchiato => "Catppuccin Macchiato",
+            ThemeName::CatppuccinFrappe    => "Catppuccin Frappé",
+            ThemeName::CatppuccinLatte     => "Catppuccin Latte",
+        }
+    }
 
-/// Green for "LIVE" indicators
-pub const NEON_GREEN: Color = Color::Rgb(57, 255, 20);
+    /// Resolve from a persisted string key.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "Retrowave"              => ThemeName::Retrowave,
+            "CatppuccinMocha"        => ThemeName::CatppuccinMocha,
+            "CatppuccinMacchiato"    => ThemeName::CatppuccinMacchiato,
+            "CatppuccinFrappe"       => ThemeName::CatppuccinFrappe,
+            "CatppuccinLatte"        => ThemeName::CatppuccinLatte,
+            _                        => ThemeName::Retrowave,
+        }
+    }
 
-/// Error/warning red
-pub const ERROR_RED: Color = Color::Rgb(255, 60, 60);
+    /// Serializable key for persistence.
+    pub fn key(self) -> &'static str {
+        match self {
+            ThemeName::Retrowave           => "Retrowave",
+            ThemeName::CatppuccinMocha     => "CatppuccinMocha",
+            ThemeName::CatppuccinMacchiato => "CatppuccinMacchiato",
+            ThemeName::CatppuccinFrappe    => "CatppuccinFrappe",
+            ThemeName::CatppuccinLatte     => "CatppuccinLatte",
+        }
+    }
+
+    /// Get the palette for this theme.
+    pub fn palette(self) -> ThemePalette {
+        match self {
+            ThemeName::Retrowave           => palette_retrowave(),
+            ThemeName::CatppuccinMocha     => palette_mocha(),
+            ThemeName::CatppuccinMacchiato => palette_macchiato(),
+            ThemeName::CatppuccinFrappe    => palette_frappe(),
+            ThemeName::CatppuccinLatte     => palette_latte(),
+        }
+    }
+
+    /// Cycle to the next theme in the list.
+    pub fn next(self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|&t| t == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+}
+
+// ── Palette Definitions ──────────────────────────────────────────────
+
+fn palette_retrowave() -> ThemePalette {
+    ThemePalette {
+        bg:               Color::Rgb(0, 0, 0),
+        bg_highlight:     Color::Rgb(20, 15, 40),
+        surface:          Color::Rgb(10, 8, 18),
+
+        text_primary:     Color::Rgb(224, 212, 255),
+        text_dim:         Color::Rgb(120, 100, 160),
+
+        accent:           Color::Rgb(255, 46, 151),   // Neon magenta
+        accent_secondary: Color::Rgb(255, 106, 193),  // Hot pink
+        highlight:        Color::Rgb(0, 240, 255),    // Neon cyan
+        warm:             Color::Rgb(255, 140, 66),   // Sunset orange
+
+        success:          Color::Rgb(57, 255, 20),    // Neon green
+        error:            Color::Rgb(255, 60, 60),
+
+        vol_filled:       Color::Rgb(0, 240, 255),
+        vol_empty:        Color::Rgb(40, 30, 60),
+    }
+}
+
+fn palette_mocha() -> ThemePalette {
+    ThemePalette {
+        bg:               Color::Rgb(30, 30, 46),      // Base
+        bg_highlight:     Color::Rgb(69, 71, 90),      // Surface 1
+        surface:          Color::Rgb(49, 50, 68),       // Surface 0
+
+        text_primary:     Color::Rgb(205, 214, 244),    // Text
+        text_dim:         Color::Rgb(166, 173, 200),    // Subtext 0
+
+        accent:           Color::Rgb(203, 166, 247),    // Mauve
+        accent_secondary: Color::Rgb(245, 194, 231),    // Pink
+        highlight:        Color::Rgb(116, 199, 236),    // Sapphire
+        warm:             Color::Rgb(250, 179, 135),    // Peach
+
+        success:          Color::Rgb(166, 227, 161),    // Green
+        error:            Color::Rgb(243, 139, 168),    // Red
+
+        vol_filled:       Color::Rgb(137, 180, 250),    // Blue
+        vol_empty:        Color::Rgb(88, 91, 112),      // Surface 2
+    }
+}
+
+fn palette_macchiato() -> ThemePalette {
+    ThemePalette {
+        bg:               Color::Rgb(36, 39, 58),       // Base
+        bg_highlight:     Color::Rgb(73, 77, 100),      // Surface 1
+        surface:          Color::Rgb(54, 58, 79),        // Surface 0
+
+        text_primary:     Color::Rgb(202, 211, 245),    // Text
+        text_dim:         Color::Rgb(165, 173, 203),    // Subtext 0
+
+        accent:           Color::Rgb(198, 160, 246),    // Mauve
+        accent_secondary: Color::Rgb(245, 189, 230),    // Pink
+        highlight:        Color::Rgb(125, 196, 228),    // Sapphire
+        warm:             Color::Rgb(245, 169, 127),    // Peach
+
+        success:          Color::Rgb(166, 218, 149),    // Green
+        error:            Color::Rgb(237, 135, 150),    // Red
+
+        vol_filled:       Color::Rgb(138, 173, 244),    // Blue
+        vol_empty:        Color::Rgb(91, 96, 120),      // Surface 2
+    }
+}
+
+fn palette_frappe() -> ThemePalette {
+    ThemePalette {
+        bg:               Color::Rgb(48, 52, 70),       // Base
+        bg_highlight:     Color::Rgb(81, 87, 109),      // Surface 1
+        surface:          Color::Rgb(65, 69, 89),        // Surface 0
+
+        text_primary:     Color::Rgb(198, 208, 245),    // Text
+        text_dim:         Color::Rgb(165, 173, 206),    // Subtext 0
+
+        accent:           Color::Rgb(202, 158, 230),    // Mauve
+        accent_secondary: Color::Rgb(244, 184, 228),    // Pink
+        highlight:        Color::Rgb(133, 193, 220),    // Sapphire
+        warm:             Color::Rgb(239, 159, 118),    // Peach
+
+        success:          Color::Rgb(166, 209, 137),    // Green
+        error:            Color::Rgb(231, 130, 132),    // Red
+
+        vol_filled:       Color::Rgb(140, 170, 238),    // Blue
+        vol_empty:        Color::Rgb(98, 104, 128),     // Surface 2
+    }
+}
+
+fn palette_latte() -> ThemePalette {
+    ThemePalette {
+        bg:               Color::Rgb(239, 241, 245),    // Base
+        bg_highlight:     Color::Rgb(188, 192, 204),    // Surface 1
+        surface:          Color::Rgb(204, 208, 218),    // Surface 0
+
+        text_primary:     Color::Rgb(76, 79, 105),      // Text
+        text_dim:         Color::Rgb(108, 111, 133),    // Subtext 0
+
+        accent:           Color::Rgb(136, 57, 239),     // Mauve
+        accent_secondary: Color::Rgb(234, 118, 203),    // Pink
+        highlight:        Color::Rgb(32, 159, 181),     // Sapphire
+        warm:             Color::Rgb(254, 100, 11),     // Peach
+
+        success:          Color::Rgb(64, 160, 43),      // Green
+        error:            Color::Rgb(210, 15, 57),      // Red
+
+        vol_filled:       Color::Rgb(30, 102, 245),     // Blue
+        vol_empty:        Color::Rgb(172, 176, 190),    // Surface 2
+    }
+}
+
+// ── Global Active Palette ────────────────────────────────────────────
+
+static ACTIVE_PALETTE: RwLock<Option<ThemePalette>> = RwLock::new(None);
+
+/// Initialize or change the active theme.
+pub fn set_active(name: ThemeName) {
+    let palette = name.palette();
+    let mut lock = ACTIVE_PALETTE.write().unwrap();
+    *lock = Some(palette);
+}
+
+/// Read the current active palette (falls back to Retrowave).
+fn active() -> ThemePalette {
+    let lock = ACTIVE_PALETTE.read().unwrap();
+    lock.clone().unwrap_or_else(palette_retrowave)
+}
+
+// ── Semantic Color Accessors ─────────────────────────────────────────
+// These replace the old `pub const` color values.
+// UI files call these instead of referencing raw constants.
+
+pub fn bg() -> Color          { active().bg }
+pub fn surface_color() -> Color { active().surface }
+pub fn accent() -> Color      { active().accent }
+pub fn accent_secondary() -> Color { active().accent_secondary }
+pub fn highlight() -> Color   { active().highlight }
+pub fn warm() -> Color        { active().warm }
 
 // ── Style Helpers ────────────────────────────────────────────────────
+// These have the same signatures as before. All 118 existing call sites
+// continue to work with zero changes.
 
 /// Default text style
 pub fn text() -> Style {
-    Style::default().fg(TEXT_PRIMARY).bg(BG)
+    let p = active();
+    Style::default().fg(p.text_primary).bg(p.bg)
 }
 
 /// Dim/secondary text
 pub fn dim() -> Style {
-    Style::default().fg(TEXT_DIM).bg(BG)
+    let p = active();
+    Style::default().fg(p.text_dim).bg(p.bg)
 }
 
-/// Neon magenta accent text
+/// Primary accent text (bold)
 pub fn neon() -> Style {
-    Style::default().fg(NEON_MAGENTA).bg(BG).add_modifier(Modifier::BOLD)
+    let p = active();
+    Style::default().fg(p.accent).bg(p.bg).add_modifier(Modifier::BOLD)
 }
 
-/// Cyan highlight text
+/// Highlight text (secondary color)
 pub fn cyan() -> Style {
-    Style::default().fg(NEON_CYAN).bg(BG)
+    let p = active();
+    Style::default().fg(p.highlight).bg(p.bg)
 }
 
 /// Selected/highlighted item in lists
 pub fn selected() -> Style {
+    let p = active();
     Style::default()
-        .fg(NEON_CYAN)
-        .bg(Color::Rgb(20, 15, 40))
+        .fg(p.highlight)
+        .bg(p.bg_highlight)
         .add_modifier(Modifier::BOLD)
 }
 
 /// The playing station indicator
 pub fn playing() -> Style {
-    Style::default().fg(NEON_GREEN).bg(BG).add_modifier(Modifier::BOLD)
+    let p = active();
+    Style::default().fg(p.success).bg(p.bg).add_modifier(Modifier::BOLD)
 }
 
 /// Error style
 pub fn error() -> Style {
-    Style::default().fg(ERROR_RED).bg(BG)
+    let p = active();
+    Style::default().fg(p.error).bg(p.bg)
 }
 
 /// Border style for blocks
 pub fn border() -> Style {
-    Style::default().fg(DEEP_PURPLE).bg(BG)
+    let p = active();
+    Style::default().fg(p.accent).bg(p.bg)
 }
 
 /// Title style for blocks
 pub fn title() -> Style {
-    Style::default().fg(NEON_MAGENTA).bg(BG).add_modifier(Modifier::BOLD)
+    let p = active();
+    Style::default().fg(p.accent).bg(p.bg).add_modifier(Modifier::BOLD)
 }
 
-/// Scanline effect — slightly darker background for alternating rows
+/// Scanline effect — slightly different background for alternating rows
 pub fn scanline() -> Style {
-    Style::default().fg(TEXT_PRIMARY).bg(SCANLINE_DIM)
+    let p = active();
+    Style::default().fg(p.text_primary).bg(p.surface)
 }
 
 /// Volume bar filled style
 pub fn vol_filled() -> Style {
-    Style::default().fg(NEON_CYAN).bg(BG)
+    let p = active();
+    Style::default().fg(p.vol_filled).bg(p.bg)
 }
 
-/// Volume bar empty style  
+/// Volume bar empty style
 pub fn vol_empty() -> Style {
-    Style::default().fg(Color::Rgb(40, 30, 60)).bg(BG)
+    let p = active();
+    Style::default().fg(p.vol_empty).bg(p.bg)
 }

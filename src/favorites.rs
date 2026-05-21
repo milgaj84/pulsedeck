@@ -25,6 +25,8 @@ pub struct Settings {
     pub keep_snippets: bool,
     #[serde(default = "default_min_duration")]
     pub min_song_duration_secs: u32,
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_true() -> bool {
@@ -43,6 +45,10 @@ fn default_min_duration() -> u32 {
     90
 }
 
+fn default_theme() -> String {
+    "Retrowave".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -52,6 +58,7 @@ impl Default for Settings {
             recording_dir: "./recordings".to_string(),
             keep_snippets: false,
             min_song_duration_secs: 90,
+            theme: "Retrowave".to_string(),
         }
     }
 }

@@ -90,8 +90,8 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let cassette_color = theme::dim();
-    let label_style = Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD);
-    let reel_style = Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD);
+    let reel_style = Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD);
 
     lines.push(Line::from(vec![
         Span::styled("   ┌───────────────────────────────┐", cassette_color),
@@ -151,7 +151,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
     // Status string
     let (status_text, status_style) = match app.playback {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
-        PlaybackState::Connecting => ("TUNING...", Style::default().fg(theme::SUNSET_ORANGE).add_modifier(Modifier::BOLD)),
+        PlaybackState::Connecting => ("TUNING...", Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
         PlaybackState::Paused => ("PAUSED", theme::neon()),
         PlaybackState::Error(_) => ("OFFLINE / ERROR", theme::error()),
         PlaybackState::Stopped => ("STOPPED", theme::dim()),
@@ -179,7 +179,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
     lines.push(Line::from(vec![
         Span::styled("  Buffer:  ", theme::dim()),
-        Span::styled(format!("[{}] ", bar), Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("[{}] ", bar), Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
         Span::styled(format!("{}% ", app.buffer_percent), theme::cyan()),
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
@@ -263,7 +263,7 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
         _ => {}
     }
 
-    let active_style = Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD);
+    let active_style = Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD);
     let lines = canvas.to_lines(active_style, theme::dim());
 
     let paragraph = Paragraph::new(lines);
@@ -347,7 +347,7 @@ fn render_history(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
     
     lines.push(Line::from(vec![
-        Span::styled("   📼 Captured Session Mixtape ", Style::default().fg(theme::HOT_PINK).add_modifier(Modifier::BOLD)),
+        Span::styled("   📼 Captured Session Mixtape ", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::from(vec![
         Span::styled("   ════════════════════════════", theme::dim()),
@@ -374,7 +374,7 @@ fn render_history(frame: &mut Frame, area: Rect, app: &App) {
             let track_tag = format!("   Track {:02}: ", track_num);
             
             lines.push(Line::from(vec![
-                Span::styled(track_tag, Style::default().fg(theme::NEON_CYAN).add_modifier(Modifier::BOLD)),
+                Span::styled(track_tag, Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
                 Span::styled(song.as_str(), theme::text()),
             ]));
         }
