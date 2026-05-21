@@ -229,12 +229,12 @@ impl App {
         if self.show_settings {
             match action {
                 Action::NextStation => {
-                    self.selected_setting_idx = (self.selected_setting_idx + 1) % 5;
+                    self.selected_setting_idx = (self.selected_setting_idx + 1) % 6;
                     return;
                 }
                 Action::PrevStation => {
                     self.selected_setting_idx = if self.selected_setting_idx == 0 {
-                        4
+                        5
                     } else {
                         self.selected_setting_idx - 1
                     };
@@ -259,6 +259,16 @@ impl App {
                             self.library.settings.keep_snippets = !self.library.settings.keep_snippets;
                         }
                         4 => {
+                            // Cycle min duration: 30 → 60 → 90 → 120 → 180
+                            self.library.settings.min_song_duration_secs = match self.library.settings.min_song_duration_secs {
+                                30 => 60,
+                                60 => 90,
+                                90 => 120,
+                                120 => 180,
+                                _ => 30,
+                            };
+                        }
+                        5 => {
                             use crate::ui::theme::ThemeName;
                             let current = ThemeName::from_key(&self.library.settings.theme);
                             let next = current.next();

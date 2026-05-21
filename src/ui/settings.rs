@@ -5,8 +5,8 @@ use super::theme;
 use super::theme::ThemeName;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    // Elegant config popup at 54% width, 58% height to fit the new theme row
-    let popup_area = super::centered_rect(54, 58, area);
+    // Elegant config popup at 54% width, 64% height to fit all setting rows
+    let popup_area = super::centered_rect(54, 64, area);
 
     // Clear background
     frame.render_widget(Clear, popup_area);
@@ -31,7 +31,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(2), // Setting 2: Autoplay
             Constraint::Length(2), // Setting 3: Recording directory
             Constraint::Length(2), // Setting 4: Keep Snippets
-            Constraint::Length(2), // Setting 5: Theme
+            Constraint::Length(2), // Setting 5: Min Song Duration
+            Constraint::Length(2), // Setting 6: Theme
             Constraint::Min(0),    // Footer/help guide
         ])
         .split(inner_area);
@@ -41,6 +42,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let autoplay_enabled = app.library.settings.autoplay_last;
     let rec_dir = &app.library.settings.recording_dir;
     let keep_snippets = app.library.settings.keep_snippets;
+    let min_duration = app.library.settings.min_song_duration_secs;
     let current_theme = ThemeName::from_key(&app.library.settings.theme);
 
     // Define highlight styles
@@ -122,17 +124,49 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
     frame.render_widget(snippets_para, chunks[4]);
 
-    // Row 5: Theme Selector
-    let theme_spans = vec![
+    // Row 5: Min Song Duration (dimmed when keep_snippets is ON)
+    let duration_dimmed = keep_snippets;
+    let duration_fg = if duration_dimmed {
+        theme::dim().fg.unwrap()
+    } else {
+        theme::highlight()
+    };
+    let duration_spans = vec![
         Span::styled(
             if app.selected_setting_idx == 4 { " ▸  " } else { "    " },
+            if duration_dimmed { theme::dim() } else { active_style }
+        ),
+        Span::styled(
+            "[ ⏱ ] ",
+            Style::default().fg(duration_fg).add_modifier(Modifier::BOLD)
+        ),
+        Span::styled("Min Song Duration: ", if app.selected_setting_idx == 4 && !duration_dimmed { active_style } else if duration_dimmed { theme::dim() } else { normal_style }),
+        Span::styled(
+            format!("{}s ", min_duration),
+            Style::default().fg(duration_fg).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if duration_dimmed { "(disabled — keeping all)" } else { "(Press Space to cycle)" },
+            theme::dim(),
+        ),
+    ];
+    let mut duration_para = Paragraph::new(Line::from(duration_spans));
+    if app.selected_setting_idx == 4 {
+        duration_para = duration_para.style(active_bg);
+    }
+    frame.render_widget(duration_para, chunks[5]);
+
+    // Row 6: Theme Selector
+    let theme_spans = vec![
+        Span::styled(
+            if app.selected_setting_idx == 5 { " ▸  " } else { "    " },
             active_style
         ),
         Span::styled(
             "[ 🎨 ] ",
             Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)
         ),
-        Span::styled("Theme: ", if app.selected_setting_idx == 4 { active_style } else { normal_style }),
+        Span::styled("Theme: ", if app.selected_setting_idx == 5 { active_style } else { normal_style }),
         Span::styled(
             format!("{} ", current_theme.label()),
             Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD),
@@ -140,10 +174,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled("(Press Space to cycle)", theme::dim()),
     ];
     let mut theme_para = Paragraph::new(Line::from(theme_spans));
-    if app.selected_setting_idx == 4 {
+    if app.selected_setting_idx == 5 {
         theme_para = theme_para.style(active_bg);
     }
-    frame.render_widget(theme_para, chunks[5]);
+    frame.render_widget(theme_para, chunks[6]);
 
     // Footer instruction bar
     let footer_line = Line::from(vec![
@@ -156,5 +190,5 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     let footer = Paragraph::new(vec![Line::from(""), footer_line])
         .alignment(Alignment::Center);
-    frame.render_widget(footer, chunks[6]);
+    frame.render_widget(footer, chunks[7]);
 }
