@@ -451,6 +451,7 @@ fn try_connect_and_decode_once(
         .timeout(None)
         .connect_timeout(Duration::from_secs(5))
         .user_agent("DriftFM/0.1.0")
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
@@ -471,6 +472,20 @@ fn try_connect_and_decode_once(
     if active_conn_id.load(Ordering::SeqCst) != conn_id {
         return Err("Abandoned".into());
     }
+
+    let metaint = response
+        .headers()
+        .get("icy-metaint")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+
+    let bitrate_kbps = response
+        .headers()
+        .get("icy-br")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(128);
+    let bytes_per_sec = (bitrate_kbps * 1000 / 8).max(1) as usize;
 
     // Decouple download from decoding: Spawn Bounded Producer-Consumer resiliences
     let buffer_capacity = 1024 * 1024; // 1 MB circular byte queue
@@ -501,8 +516,7 @@ fn try_connect_and_decode_once(
                     let len = queue_clone.len();
                     let cap = queue_clone.capacity;
                     let percent = ((len * 100) / cap) as u8;
-                    // Assume 16 KB/sec standard decoding bandwidth
-                    let seconds = (len / 16000) as u32;
+                    let seconds = (len / bytes_per_sec) as u32;
                     let _ = status_tx_clone.send(AudioStatus::BufferLevel { percent, seconds });
                 }
                 Err(_) => {
@@ -513,7 +527,7 @@ fn try_connect_and_decode_once(
         }
     });
 
-    let reader = StreamReader::new(url.to_string(), queue, status_tx, conn_id, active_conn_id, record_state);
+    let reader = StreamReader::new(url.to_string(), queue, status_tx, conn_id, active_conn_id, record_state, metaint);
 
     let source = Decoder::new(reader)
         .map_err(|e| format!("Decode error: {}", e))?;
@@ -553,15 +567,14 @@ impl StreamReader {
         conn_id: u64,
         active_conn_id: Arc<AtomicU64>,
         record_state: Arc<RecordStateShared>,
+        metaint: Option<usize>,
     ) -> Self {
-        // We will default to a heuristic 16000 bytes boundary check if metaint is unknown,
-        // but typically internet radio servers provide metaint headers.
         Self {
             url,
             queue,
             pos: 0,
-            metaint: Some(16000), // Standard default if header not found
-            bytes_until_meta: 16000,
+            metaint,
+            bytes_until_meta: metaint.unwrap_or(0),
             status_tx,
             conn_id,
             active_conn_id,

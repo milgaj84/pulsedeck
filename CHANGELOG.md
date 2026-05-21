@@ -13,6 +13,8 @@ Initial release of the DriftFM cyber-synthwave internet radio player and smart t
 *   **Volume Crossfade Transition Engine**: Smooth exponential playback volume ramping (fading out over `150ms` and swelling in over `250ms`) on active playback transitions, pauses, resumes, and station switching.
 *   **Smart Tape Recording & Category Organizer**:
     *   Boundary-perfect ICY metadata stream segmenter.
+*   **Dynamic ICY Metadata Sync**: Replaced hardcoded metadata intervals with dynamic header extraction (`icy-metaint`), resolving audio corruption and "analog antenna" distortion on non-standard streams.
+*   **Enhanced Station Compatibility**: Added support for stations with self-signed or expired SSL certificates and improved buffer time accuracy via `icy-br` bitrate detection.
     *   Dynamic parent-genre directory resolver, writing to structured paths: `recordings/<ParentGenre>/<Artist> - <Title>.mp3`.
     *   Automatic metadata tagging injecting ID3v2 Tags (Artist, Title, Station Album) into capture output.
 *   **Smart Discarder & Sweep Filter**: Dynamic file purge discarding short audio fragments (under `90 seconds`) and commercial sweep tracks matching DJ speech or commercial metadata categories unless toggled otherwise in config.
