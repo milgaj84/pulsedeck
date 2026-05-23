@@ -92,11 +92,15 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         ]),
         Row::new(vec![
             Cell::from(Span::styled("  b       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle Right Bento panel ON/OFF", theme::text())),
+            Cell::from(Span::styled("Cycle layout modes (Split ↔ Closed ↔ Full Bento)", theme::text())),
         ]),
         Row::new(vec![
             Cell::from(Span::styled("  p       ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("Cycle Right deck pages (Reels ↔ History)", theme::text())),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("  v       ", Style::default().fg(theme::highlight()))),
+            Cell::from(Span::styled("Toggle Visualizer (Spectrum ↔ Osc ↔ Sim)", theme::text())),
         ]),
         Row::new(vec![
             Cell::from(Span::styled("  ,       ", Style::default().fg(theme::highlight()))),

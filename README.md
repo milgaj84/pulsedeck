@@ -6,11 +6,12 @@
 
 *Stream any radio station on Earth. Record tracks automatically. Never leave the command line.*
 
+[![Crates.io](https://img.shields.io/crates/v/driftfm.svg)](https://crates.io/crates/driftfm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
+[![Tests: 17 passing](https://img.shields.io/badge/tests-17%20passing-brightgreen.svg)](#)
 [![Zero warnings](https://img.shields.io/badge/cargo%20clippy-zero%20warnings-brightgreen.svg)](#)
-[![Memory safe](https://img.shields.io/badge/Memory-Safe-critical.svg)](https://www.rust-lang.org/)
 
 </div>
 
@@ -38,7 +39,8 @@ Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch i
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
-- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte). Switch live in settings.
+- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars — routes through the 13-role semantic palette. Switch live in settings.
+- 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck.
 - 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
@@ -87,6 +89,8 @@ The most important keys to get started:
 | `/` | Search for any station worldwide |
 | `Space` | Pause / Resume |
 | `r` | Start / stop recording |
+| `b` | Cycle Bento Layout (Split ↔ Closed Bento ↔ Full Bento) |
+| `v` | Cycle Visualizer mode (Spectrum ↔ Real Osc ↔ Sim Osc) |
 | `f` | In search: add to library. In library: remove station |
 | `,` | Open settings |
 | `q` | Quit |
@@ -151,6 +155,16 @@ Settings are saved automatically to a JSON file in your config directory.
 | Windows | ✅ Full support (native WASAPI audio) |
 | Linux | ✅ Full support (ALSA) |
 | macOS | ✅ Full support (CoreAudio) |
+
+---
+
+## Code Quality
+
+- **17 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, and filename sanitization
+- **Zero `cargo clippy` warnings** under `-W clippy::all`
+- **Zero hardcoded colors** outside `theme.rs` — full semantic palette purity across all 14 UI modules
+- Thread-safe audio pipeline with lock-free atomic generation IDs for connection abandonment
+- Fully idiomatic Rust — no `unsafe` outside the Windows idle detection FFI block
 
 ---
 

@@ -241,3 +241,134 @@ impl Library {
 fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("driftfm").join("library.json"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_parent_genre_synthwave_variants() {
+        assert_eq!(resolve_parent_genre("Synthwave"), "Synthwave");
+        assert_eq!(resolve_parent_genre("chillsynth"), "Synthwave");
+        assert_eq!(resolve_parent_genre("darksynth"), "Synthwave");
+        assert_eq!(resolve_parent_genre("Retrowave"), "Synthwave");
+        assert_eq!(resolve_parent_genre("Neon Synthwave Beats"), "Synthwave");
+    }
+
+    #[test]
+    fn test_resolve_parent_genre_ambient_variants() {
+        assert_eq!(resolve_parent_genre("Ambient"), "Ambient");
+        assert_eq!(resolve_parent_genre("chillout"), "Ambient");
+        assert_eq!(resolve_parent_genre("drone"), "Ambient");
+        assert_eq!(resolve_parent_genre("space music"), "Ambient");
+        assert_eq!(resolve_parent_genre("Drone Ambient"), "Ambient");
+    }
+
+    #[test]
+    fn test_resolve_parent_genre_rock() {
+        assert_eq!(resolve_parent_genre("rock"), "Rock");
+        assert_eq!(resolve_parent_genre("Metal"), "Rock");
+        assert_eq!(resolve_parent_genre("guitar solo"), "Rock");
+    }
+
+    #[test]
+    fn test_resolve_parent_genre_vaporwave() {
+        assert_eq!(resolve_parent_genre("vaporwave"), "Vaporwave");
+        assert_eq!(resolve_parent_genre("plaza"), "Vaporwave");
+        assert_eq!(resolve_parent_genre("synthpop"), "Vaporwave");
+    }
+
+    #[test]
+    fn test_resolve_parent_genre_other() {
+        assert_eq!(resolve_parent_genre("classical"), "Other");
+        assert_eq!(resolve_parent_genre("jazz"), "Other");
+        assert_eq!(resolve_parent_genre(""), "Other");
+    }
+
+    #[test]
+    fn test_resolve_parent_genre_case_insensitive() {
+        assert_eq!(resolve_parent_genre("SYNTHWAVE"), "Synthwave");
+        assert_eq!(resolve_parent_genre("AMBIENT"), "Ambient");
+        assert_eq!(resolve_parent_genre("ROCK"), "Rock");
+        assert_eq!(resolve_parent_genre("VAPORWAVE"), "Vaporwave");
+    }
+
+    #[test]
+    fn test_library_add_deduplicates() {
+        let mut lib = Library {
+            stations: vec![],
+            available_genres: vec![],
+            settings: Settings::default(),
+            path: None, // No disk persistence for test
+        };
+
+        let station = Station {
+            name: "Test".into(),
+            url: "http://test.com/stream".into(),
+            genre: "Synthwave".into(),
+            country: "US".into(),
+            bitrate: 128,
+        };
+
+        assert!(lib.add(station.clone()));
+        assert!(!lib.add(station)); // duplicate
+        assert_eq!(lib.stations.len(), 1);
+    }
+
+    #[test]
+    fn test_library_remove() {
+        let mut lib = Library {
+            stations: vec![Station {
+                name: "Test".into(),
+                url: "http://test.com/stream".into(),
+                genre: "Synthwave".into(),
+                country: "US".into(),
+                bitrate: 128,
+            }],
+            available_genres: vec![],
+            settings: Settings::default(),
+            path: None,
+        };
+
+        assert!(!lib.remove("http://nonexistent.com"));
+        assert!(lib.remove("http://test.com/stream"));
+        assert!(lib.stations.is_empty());
+    }
+
+    #[test]
+    fn test_library_contains() {
+        let lib = Library {
+            stations: vec![Station {
+                name: "Test".into(),
+                url: "http://test.com/stream".into(),
+                genre: "Synthwave".into(),
+                country: "US".into(),
+                bitrate: 128,
+            }],
+            available_genres: vec![],
+            settings: Settings::default(),
+            path: None,
+        };
+
+        assert!(lib.contains("http://test.com/stream"));
+        assert!(!lib.contains("http://other.com"));
+    }
+
+    #[test]
+    fn test_rebuild_genres_includes_all() {
+        let mut lib = Library {
+            stations: vec![
+                Station { name: "A".into(), url: "a".into(), genre: "Synthwave".into(), country: "US".into(), bitrate: 128 },
+                Station { name: "B".into(), url: "b".into(), genre: "Ambient".into(), country: "US".into(), bitrate: 128 },
+            ],
+            available_genres: vec![],
+            settings: Settings::default(),
+            path: None,
+        };
+        lib.rebuild_genres();
+
+        assert_eq!(lib.available_genres[0], "All");
+        assert!(lib.available_genres.contains(&"Synthwave".to_string()));
+        assert!(lib.available_genres.contains(&"Ambient".to_string()));
+    }
+}

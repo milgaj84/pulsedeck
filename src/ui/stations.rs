@@ -88,7 +88,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             if app.input_mode == InputMode::Search
                 && app.library.contains(&station.url)
             {
-                spans.push(Span::styled("★ ", Style::default().fg(Color::Rgb(255, 200, 50))));
+                spans.push(Span::styled("★ ", Style::default().fg(theme::warm())));
             }
 
             let name_len = station.name.chars().count();

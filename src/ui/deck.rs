@@ -102,15 +102,15 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
         crate::app::RecordingState::Active => {
             let flash = (app.tick_count % 2) == 0;
             vec![
-                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                Span::styled("REC [ACTIVE]  ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
+                Span::styled("REC [ACTIVE]  ", Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
             ]
         }
         crate::app::RecordingState::Pending => {
             let flash = (app.tick_count % 2) == 0;
             vec![
-                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled("PENDING...    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
+                Span::styled("PENDING...    ", Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
             ]
         }
         crate::app::RecordingState::Off => {
@@ -193,7 +193,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
                 .unwrap_or(filepath);
             lines.push(Line::from(vec![
                 Span::styled("  Tape:    ", theme::dim()),
-                Span::styled(format!("🔴 capture -> {}", filename), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("🔴 capture -> {}", filename), Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
             ]));
         }
     }
@@ -210,24 +210,105 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    // Mode 0: Spectrum Analyzer (renders vertical block bars with neon tri-color gradient)
+    if app.playback == PlaybackState::Playing && app.visualizer_mode == 0 {
+        let mut lines = Vec::with_capacity(height);
+        for row in 0..height {
+            let mut spans = Vec::with_capacity(width);
+            let y_factor = (height - 1 - row) as f32 / (height.max(2) - 1) as f32;
+            let color = if y_factor < 0.35 {
+                theme::highlight()
+            } else if y_factor < 0.7 {
+                theme::accent_secondary()
+            } else {
+                theme::warm()
+            };
+            let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+
+            for col in 0..width {
+                let val = if app.visualizer_peaks.is_empty() {
+                    0.0
+                } else {
+                    let t = col as f32 / width as f32;
+                    let peak_idx = t * (app.visualizer_peaks.len() - 1) as f32;
+                    let idx_floor = peak_idx.floor() as usize;
+                    let idx_ceil = (idx_floor + 1).min(app.visualizer_peaks.len() - 1);
+                    let frac = peak_idx - idx_floor as f32;
+                    app.visualizer_peaks[idx_floor] * (1.0 - frac) + app.visualizer_peaks[idx_ceil] * frac
+                };
+
+                let h = val * height as f32;
+                let height_in_row = h - (height - 1 - row) as f32;
+
+                let char_str = if height_in_row <= 0.0 {
+                    " "
+                } else if height_in_row >= 1.0 {
+                    "█"
+                } else {
+                    let level = (height_in_row * 8.0).round() as usize;
+                    let blocks = [" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+                    blocks[level.min(8)]
+                };
+
+                spans.push(Span::styled(char_str, style));
+            }
+            lines.push(Line::from(spans));
+        }
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
     let mut canvas = BrailleCanvas::new(width, height);
     match app.playback {
         PlaybackState::Playing => {
-            let pixel_width = width * 2;
-            let pixel_height = height * 4;
-            let center_y = pixel_height as f32 * 0.5;
-            let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.4);
+            match app.visualizer_mode {
+                1 => {
+                    // Mode 1: Real-Time Oscilloscope using sample buffer
+                    let pixel_width = width * 2;
+                    let pixel_height = height * 4;
+                    let center_y = pixel_height as f32 * 0.5;
+                    let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.45);
 
-            for x in 0..pixel_width {
-                let t = app.tick_count as f32 * 0.15;
-                let bass = (x as f32 * 0.05 + t).sin() * 0.6;
-                let mid = (x as f32 * 0.15 - t * 0.8).cos() * 0.3;
-                let high = (x as f32 * 0.45 + t * 2.0).sin() * 0.1;
+                    let mut samples = Vec::with_capacity(pixel_width);
+                    if let Ok(buf) = app.sample_buffer.lock() {
+                        let n = buf.len();
+                        if n >= pixel_width {
+                            let start_idx = n - pixel_width;
+                            samples.extend(buf.iter().skip(start_idx).take(pixel_width).copied());
+                        } else {
+                            samples.extend(vec![0.0; pixel_width - n]);
+                            samples.extend(buf.iter().copied());
+                        }
+                    } else {
+                        samples.extend(vec![0.0; pixel_width]);
+                    }
 
-                let wave_sum = bass + mid + high;
-                let y_float = center_y + wave_sum * amplitude;
-                let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
-                canvas.set_pixel(x, y);
+                    for (x, sample_val) in samples.iter().enumerate().take(pixel_width) {
+                        let y_float = center_y - (sample_val * amplitude);
+                        let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
+                        canvas.set_pixel(x, y);
+                    }
+                }
+                _ => {
+                    // Mode 2: Simulated Oscilloscope (fallback / original math wave)
+                    let pixel_width = width * 2;
+                    let pixel_height = height * 4;
+                    let center_y = pixel_height as f32 * 0.5;
+                    let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.4);
+
+                    for x in 0..pixel_width {
+                        let t = app.tick_count as f32 * 0.15;
+                        let bass = (x as f32 * 0.05 + t).sin() * 0.6;
+                        let mid = (x as f32 * 0.15 - t * 0.8).cos() * 0.3;
+                        let high = (x as f32 * 0.45 + t * 2.0).sin() * 0.1;
+
+                        let wave_sum = bass + mid + high;
+                        let y_float = center_y + wave_sum * amplitude;
+                        let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
+                        canvas.set_pixel(x, y);
+                    }
+                }
             }
         }
         PlaybackState::Connecting => {

@@ -105,16 +105,22 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
     }
 
     let client = reqwest::Client::builder()
-        .user_agent("DriftFM/0.1.0")
+        .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
 
-    let url = format!(
-        "https://de1.api.radio-browser.info/json/stations/search?name={}&hidebroken=true&order=clickcount&reverse=true&limit=20",
-        query
-    );
+    let url = "https://de1.api.radio-browser.info/json/stations/search";
 
-    let resp = client.get(&url).send().await?;
+    let resp = client.get(url)
+        .query(&[
+            ("name", query),
+            ("hidebroken", "true"),
+            ("order", "clickcount"),
+            ("reverse", "true"),
+            ("limit", "20"),
+        ])
+        .send()
+        .await?;
     let api_stations = resp.json::<Vec<ApiBrowseStation>>().await?;
 
     let stations = api_stations

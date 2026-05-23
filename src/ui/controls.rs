@@ -105,6 +105,8 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Config  [", theme::dim()),
             Span::styled("h", theme::cyan()),
             Span::styled("] Help  [", theme::dim()),
+            Span::styled("v", theme::cyan()),
+            Span::styled("] Visualizer  [", theme::dim()),
             Span::styled("q", theme::cyan()),
             Span::styled("] Quit", theme::dim()),
         ]),

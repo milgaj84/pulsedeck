@@ -61,11 +61,14 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Help overlay
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => Some(Action::ToggleHelp),
 
-        // Bento panel toggle
-        (_, KeyCode::Char('b')) => Some(Action::ToggleRightPanel),
+        // Bento layout cycle
+        (_, KeyCode::Char('b')) => Some(Action::CycleLayout),
 
         // Deck page cycle
         (_, KeyCode::Char('p')) => Some(Action::NextDeckPage),
+
+        // Visualizer mode toggle
+        (_, KeyCode::Char('v')) => Some(Action::ToggleVisualizerMode),
 
         // Settings overlay
         (_, KeyCode::Char(',')) => Some(Action::ToggleSettings),

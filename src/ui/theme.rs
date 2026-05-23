@@ -325,3 +325,43 @@ pub fn vol_empty() -> Style {
     let p = active();
     Style::default().fg(p.vol_empty).bg(p.bg)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_theme_cycle_wraps_around() {
+        let last = *ThemeName::ALL.last().unwrap();
+        let first = *ThemeName::ALL.first().unwrap();
+        assert_eq!(last.next(), first);
+    }
+
+    #[test]
+    fn test_theme_cycle_advances() {
+        assert_eq!(ThemeName::Retrowave.next(), ThemeName::CatppuccinMocha);
+        assert_eq!(ThemeName::CatppuccinMocha.next(), ThemeName::CatppuccinMacchiato);
+    }
+
+    #[test]
+    fn test_theme_key_roundtrip() {
+        for &theme in ThemeName::ALL {
+            let key = theme.key();
+            let restored = ThemeName::from_key(key);
+            assert_eq!(theme, restored, "Key roundtrip failed for {:?}", theme);
+        }
+    }
+
+    #[test]
+    fn test_theme_from_key_unknown_defaults_retrowave() {
+        assert_eq!(ThemeName::from_key("NonExistentTheme"), ThemeName::Retrowave);
+        assert_eq!(ThemeName::from_key(""), ThemeName::Retrowave);
+    }
+
+    #[test]
+    fn test_all_themes_have_labels() {
+        for &theme in ThemeName::ALL {
+            assert!(!theme.label().is_empty());
+        }
+    }
+}

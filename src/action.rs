@@ -29,11 +29,12 @@ pub enum Action {
     PrevGenre,
 
     /// Dynamic TUI Modules
-    ToggleRightPanel,
+    CycleLayout,
     ToggleHelp,
     NextDeckPage,
     ToggleSettings,
     ToggleRecording,
+    ToggleVisualizerMode,
 
     /// App lifecycle
     Tick,

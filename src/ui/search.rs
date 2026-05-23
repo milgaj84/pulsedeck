@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(spans);
 
     let search_bar = Paragraph::new(vec![line])
-        .style(Style::default().bg(Color::Rgb(15, 10, 30)));
+        .style(Style::default().bg(theme::surface_color()));
 
     frame.render_widget(search_bar, area);
 }

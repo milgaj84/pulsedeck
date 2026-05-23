@@ -1,4 +1,5 @@
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStream, Sink, Source as RodioSource, Sample as RodioSample};
+use rodio::cpal::Sample as CpalSample;
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::sync::atomic::{AtomicU64, AtomicU8, AtomicBool, Ordering};
@@ -114,19 +115,22 @@ impl BufferQueue {
 pub struct AudioEngine {
     cmd_tx: mpsc::Sender<AudioCommand>,
     pub status_rx: mpsc::Receiver<AudioStatus>,
+    #[allow(dead_code)]
+    pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
 
 impl AudioEngine {
     /// Spawn the audio engine on a dedicated OS thread.
-    pub fn spawn() -> Self {
+    pub fn spawn(sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
         let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
 
+        let sample_buffer_clone = sample_buffer.clone();
         std::thread::spawn(move || {
-            audio_loop(cmd_rx, status_tx);
+            audio_loop(cmd_rx, status_tx, sample_buffer_clone);
         });
 
-        Self { cmd_tx, status_rx }
+        Self { cmd_tx, status_rx, sample_buffer }
     }
 
     pub fn send(&self, cmd: AudioCommand) {
@@ -138,6 +142,7 @@ impl AudioEngine {
 fn audio_loop(
     cmd_rx: mpsc::Receiver<AudioCommand>,
     status_tx: mpsc::Sender<AudioStatus>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
     // Keep OutputStream alive for the lifetime of this thread.
     let (_stream, handle) = match OutputStream::try_default() {
@@ -170,6 +175,30 @@ fn audio_loop(
     let mut pending_action: Option<AudioCommand> = None;
 
     loop {
+        // Helper closure to spawn a connection thread (used from 3 dispatch sites)
+        let spawn_connection = |
+            url: String,
+            conn_id_ref: &mut u64,
+            active_ref: &Arc<AtomicU64>,
+            connect_ref: &mut Option<std::thread::JoinHandle<Result<Sink, String>>>,
+        | {
+            *conn_id_ref += 1;
+            active_ref.store(*conn_id_ref, Ordering::SeqCst);
+            let _ = status_tx.send(AudioStatus::Connecting);
+
+            let handle_clone = handle.clone();
+            let status_tx_clone = status_tx.clone();
+            let conn_id = *conn_id_ref;
+            let active_conn_id_clone = active_ref.clone();
+            let record_state_clone = record_state.clone();
+            let sample_buffer_clone = sample_buffer.clone();
+
+            drop(connect_ref.take());
+            *connect_ref = Some(std::thread::spawn(move || {
+                connect_and_decode(&url, &handle_clone, status_tx_clone, conn_id, active_conn_id_clone, record_state_clone, sample_buffer_clone)
+            }));
+        };
+
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
             Ok(cmd) => {
@@ -178,23 +207,7 @@ fn audio_loop(
                         if current_sink.is_some() {
                             pending_action = Some(AudioCommand::Play(url));
                         } else {
-                            drop(connect_thread.take());
-
-                            // Cancel any previous in-flight connection thread
-                            current_conn_id += 1;
-                            active_conn_id.store(current_conn_id, Ordering::SeqCst);
-
-                            let _ = status_tx.send(AudioStatus::Connecting);
-
-                            let handle_clone = handle.clone();
-                            let status_tx_clone = status_tx.clone();
-                            let conn_id = current_conn_id;
-                            let active_conn_id_clone = active_conn_id.clone();
-                            let record_state_clone = record_state.clone();
-                            
-                            connect_thread = Some(std::thread::spawn(move || {
-                                connect_and_decode(&url, &handle_clone, status_tx_clone, conn_id, active_conn_id_clone, record_state_clone)
-                            }));
+                            spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
                         }
                     }
                     AudioCommand::Pause => {
@@ -259,27 +272,11 @@ fn audio_loop(
                     let cmd = pending_action.take().unwrap();
                     match cmd {
                         AudioCommand::Play(url) => {
-                            // Cancel any previous in-flight connection thread
-                            current_conn_id += 1;
-                            active_conn_id.store(current_conn_id, Ordering::SeqCst);
-
-                            let _ = status_tx.send(AudioStatus::Connecting);
-
-                            let handle_clone = handle.clone();
-                            let status_tx_clone = status_tx.clone();
-                            let conn_id = current_conn_id;
-                            let active_conn_id_clone = active_conn_id.clone();
-                            let record_state_clone = record_state.clone();
-                            
-                            // Stop current sink
+                            // Stop current sink before spawning new connection
                             if let Some(old_sink) = current_sink.take() {
                                 old_sink.stop();
                             }
-                            drop(connect_thread.take());
-
-                            connect_thread = Some(std::thread::spawn(move || {
-                                connect_and_decode(&url, &handle_clone, status_tx_clone, conn_id, active_conn_id_clone, record_state_clone)
-                            }));
+                            spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
                         }
                         AudioCommand::Stop => {
                             active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
@@ -305,22 +302,7 @@ fn audio_loop(
                 let cmd = pending_action.take().unwrap();
                 match cmd {
                     AudioCommand::Play(url) => {
-                        current_conn_id += 1;
-                        active_conn_id.store(current_conn_id, Ordering::SeqCst);
-
-                        let _ = status_tx.send(AudioStatus::Connecting);
-
-                        let handle_clone = handle.clone();
-                        let status_tx_clone = status_tx.clone();
-                        let conn_id = current_conn_id;
-                        let active_conn_id_clone = active_conn_id.clone();
-                        let record_state_clone = record_state.clone();
-                        
-                        drop(connect_thread.take());
-
-                        connect_thread = Some(std::thread::spawn(move || {
-                            connect_and_decode(&url, &handle_clone, status_tx_clone, conn_id, active_conn_id_clone, record_state_clone)
-                        }));
+                        spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
                     }
                     AudioCommand::Stop => {
                         active_conn_id.store(0, Ordering::SeqCst);
@@ -397,6 +379,7 @@ fn connect_and_decode(
     conn_id: u64,
     active_conn_id: Arc<AtomicU64>,
     record_state: Arc<RecordStateShared>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) -> Result<Sink, String> {
     let mut retries = 0;
     let max_retries = 5;
@@ -408,7 +391,7 @@ fn connect_and_decode(
             return Err("Abandoned".into());
         }
 
-        match try_connect_and_decode_once(url, handle, status_tx.clone(), conn_id, active_conn_id.clone(), record_state.clone()) {
+        match try_connect_and_decode_once(url, handle, status_tx.clone(), conn_id, active_conn_id.clone(), record_state.clone(), sample_buffer.clone()) {
             Ok(sink) => return Ok(sink),
             Err(e) => {
                 if e == "Abandoned" {
@@ -446,11 +429,12 @@ fn try_connect_and_decode_once(
     conn_id: u64,
     active_conn_id: Arc<AtomicU64>,
     record_state: Arc<RecordStateShared>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) -> Result<Sink, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(None)
         .connect_timeout(Duration::from_secs(5))
-        .user_agent("DriftFM/0.1.0")
+        .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
         .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
@@ -532,12 +516,89 @@ fn try_connect_and_decode_once(
     let source = Decoder::new(reader)
         .map_err(|e| format!("Decode error: {}", e))?;
 
+    let wrapped_source = VisualizerSource::new(source, sample_buffer);
+
     let sink = Sink::try_new(handle)
         .map_err(|e| format!("Sink error: {}", e))?;
 
-    sink.append(source);
+    sink.append(wrapped_source);
 
     Ok(sink)
+}
+
+/// A custom source wrapper that intercepts audio sample frames, buffers them,
+/// and writes them to a thread-safe circular sample buffer for rendering.
+pub struct VisualizerSource<S>
+where
+    S: RodioSource,
+    S::Item: RodioSample + CpalSample<Float = f32>,
+{
+    inner: S,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+    local_buf: Vec<f32>,
+}
+
+impl<S> VisualizerSource<S>
+where
+    S: RodioSource,
+    S::Item: RodioSample + CpalSample<Float = f32>,
+{
+    pub fn new(inner: S, sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
+        Self {
+            inner,
+            sample_buffer,
+            local_buf: Vec::with_capacity(128),
+        }
+    }
+}
+
+impl<S> Iterator for VisualizerSource<S>
+where
+    S: RodioSource,
+    S::Item: RodioSample + CpalSample<Float = f32>,
+{
+    type Item = S::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sample = self.inner.next();
+        if let Some(s) = sample {
+            let float_sample = s.to_float_sample();
+            self.local_buf.push(float_sample);
+            if self.local_buf.len() >= 128 {
+                if let Ok(mut buffer) = self.sample_buffer.lock() {
+                    buffer.extend(self.local_buf.drain(..));
+                    while buffer.len() > 4096 {
+                        buffer.pop_front();
+                    }
+                } else {
+                    self.local_buf.clear();
+                }
+            }
+        }
+        sample
+    }
+}
+
+impl<S> RodioSource for VisualizerSource<S>
+where
+    S: RodioSource,
+    S::Item: RodioSample + CpalSample<Float = f32>,
+{
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
 }
 
 /// StreamReader consuming from thread-safe ring-buffer and stripping metadata boundaries
