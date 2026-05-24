@@ -4,6 +4,16 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+*   **Search Add Shortcut Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`. Adding a highlighted search result without playing now uses `Ctrl+A`.
+
+### Improved
+*   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `Ctrl+A` adds from search, while `f` removes from the library.
+
+---
+
 ## [0.1.3] - 2026-05-23
 
 ### Fixed
@@ -87,4 +97,3 @@ Initial release of the DriftFM cyber-synthwave internet radio player and smart t
 *   **System Notifications**: Desktop popups triggering alerts on fresh track changes with a silent notifier queue.
 *   **Persistent Configuration**: Settings stored persistently inside JSON databases to retain favorites, last played channels, startup parameters, themes, and recording directories.
 *   **Advanced Quality Suite**: Integrated modular unit testing systems for filename sanitizers and ICY metadata parsers.
-
