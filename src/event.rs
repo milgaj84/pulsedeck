@@ -37,7 +37,9 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Search
         (_, KeyCode::Char('/')) => Some(Action::EnterSearch),
-        (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::EnterSearch),
+        (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::EnterSearch)
+        }
 
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),

@@ -1,8 +1,8 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-use crate::app::{App, InputMode, PlaybackState};
 use super::theme;
+use crate::app::{App, AppNotice, InputMode, PlaybackState};
 
 /// Render the bottom control bar: playback status + volume + keybinds.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -26,7 +26,12 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             spans.push(Span::styled(station.name.as_str(), theme::cyan()));
             if let Some(ref track) = app.current_track {
                 spans.push(Span::styled(" ♫ ", theme::playing()));
-                spans.push(Span::styled(track.as_str(), Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD)));
+                spans.push(Span::styled(
+                    track.as_str(),
+                    Style::default()
+                        .fg(theme::accent_secondary())
+                        .add_modifier(Modifier::BOLD),
+                ));
             }
         }
         (PlaybackState::Paused, Some(station)) => {
@@ -62,14 +67,30 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled(vol_label, theme::dim()));
 
     // Visual volume bar
-    let filled = if app.muted { 0 } else { app.volume as usize / 5 };
+    let filled = if app.muted {
+        0
+    } else {
+        app.volume as usize / 5
+    };
     let empty = 20 - filled;
     spans.push(Span::styled("█".repeat(filled), theme::vol_filled()));
     spans.push(Span::styled("░".repeat(empty), theme::vol_empty()));
 
+    if let Some(ref notice) = app.notice {
+        spans.push(Span::styled("  |  ", theme::dim()));
+        match notice {
+            AppNotice::Info(message) => {
+                spans.push(Span::styled(message.as_str(), theme::playing()));
+            }
+            AppNotice::Error(message) => {
+                spans.push(Span::styled("Save warning: ", theme::error()));
+                spans.push(Span::styled(message.as_str(), theme::error()));
+            }
+        }
+    }
+
     let line = Line::from(spans);
-    let paragraph = Paragraph::new(vec![line])
-        .style(Style::default().bg(theme::bg()));
+    let paragraph = Paragraph::new(vec![line]).style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
 }
@@ -85,7 +106,12 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Back  [", theme::dim()),
             Span::styled("↑↓", theme::cyan()),
             Span::styled("] Results  ", theme::dim()),
-            Span::styled("Type to search...", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::ITALIC)),
+            Span::styled(
+                "Type to search...",
+                Style::default()
+                    .fg(theme::accent_secondary())
+                    .add_modifier(Modifier::ITALIC),
+            ),
         ]),
         InputMode::Normal => Line::from(vec![
             Span::styled(" [", theme::dim()),
@@ -108,8 +134,7 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
         ]),
     };
 
-    let paragraph = Paragraph::new(vec![hints])
-        .style(Style::default().bg(theme::bg()));
+    let paragraph = Paragraph::new(vec![hints]).style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
 }

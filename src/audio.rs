@@ -1,13 +1,13 @@
-use rodio::{Decoder, OutputStream, Sink, Source as RodioSource, Sample as RodioSample};
 use rodio::cpal::Sample as CpalSample;
-use std::io::{Read, Write};
-use std::sync::mpsc;
-use std::sync::atomic::{AtomicU64, AtomicU8, AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Condvar};
+use rodio::{Decoder, OutputStream, Sample as RodioSample, Sink, Source as RodioSource};
 use std::collections::VecDeque;
-use std::time::Duration;
 use std::fs::File;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
@@ -71,7 +71,8 @@ impl BufferQueue {
     fn push(&self, bytes: &[u8]) {
         let mut queue = self.queue.lock().unwrap();
         // Block downloader thread if buffer capacity limit is reached
-        while queue.len() + bytes.len() > self.capacity && !self.disconnected.load(Ordering::SeqCst) {
+        while queue.len() + bytes.len() > self.capacity && !self.disconnected.load(Ordering::SeqCst)
+        {
             queue = self.cv_write.wait(queue).unwrap();
         }
         if self.disconnected.load(Ordering::SeqCst) {
@@ -130,7 +131,11 @@ impl AudioEngine {
             audio_loop(cmd_rx, status_tx, sample_buffer_clone);
         });
 
-        Self { cmd_tx, status_rx, sample_buffer }
+        Self {
+            cmd_tx,
+            status_rx,
+            sample_buffer,
+        }
     }
 
     pub fn send(&self, cmd: AudioCommand) {
@@ -155,7 +160,7 @@ fn audio_loop(
 
     let mut current_sink: Option<Sink> = None;
     let mut connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>> = None;
-    
+
     // Concurrency guard to abandon stale threads instantly
     let active_conn_id = Arc::new(AtomicU64::new(0));
     let mut current_conn_id: u64 = 0;
@@ -176,28 +181,35 @@ fn audio_loop(
 
     loop {
         // Helper closure to spawn a connection thread (used from 3 dispatch sites)
-        let spawn_connection = |
-            url: String,
-            conn_id_ref: &mut u64,
-            active_ref: &Arc<AtomicU64>,
-            connect_ref: &mut Option<std::thread::JoinHandle<Result<Sink, String>>>,
-        | {
-            *conn_id_ref += 1;
-            active_ref.store(*conn_id_ref, Ordering::SeqCst);
-            let _ = status_tx.send(AudioStatus::Connecting);
+        let spawn_connection =
+            |url: String,
+             conn_id_ref: &mut u64,
+             active_ref: &Arc<AtomicU64>,
+             connect_ref: &mut Option<std::thread::JoinHandle<Result<Sink, String>>>| {
+                *conn_id_ref += 1;
+                active_ref.store(*conn_id_ref, Ordering::SeqCst);
+                let _ = status_tx.send(AudioStatus::Connecting);
 
-            let handle_clone = handle.clone();
-            let status_tx_clone = status_tx.clone();
-            let conn_id = *conn_id_ref;
-            let active_conn_id_clone = active_ref.clone();
-            let record_state_clone = record_state.clone();
-            let sample_buffer_clone = sample_buffer.clone();
+                let handle_clone = handle.clone();
+                let status_tx_clone = status_tx.clone();
+                let conn_id = *conn_id_ref;
+                let active_conn_id_clone = active_ref.clone();
+                let record_state_clone = record_state.clone();
+                let sample_buffer_clone = sample_buffer.clone();
 
-            drop(connect_ref.take());
-            *connect_ref = Some(std::thread::spawn(move || {
-                connect_and_decode(&url, &handle_clone, status_tx_clone, conn_id, active_conn_id_clone, record_state_clone, sample_buffer_clone)
-            }));
-        };
+                drop(connect_ref.take());
+                *connect_ref = Some(std::thread::spawn(move || {
+                    connect_and_decode(
+                        &url,
+                        &handle_clone,
+                        status_tx_clone,
+                        conn_id,
+                        active_conn_id_clone,
+                        record_state_clone,
+                        sample_buffer_clone,
+                    )
+                }));
+            };
 
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
@@ -207,7 +219,12 @@ fn audio_loop(
                         if current_sink.is_some() {
                             pending_action = Some(AudioCommand::Play(url));
                         } else {
-                            spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
+                            spawn_connection(
+                                url,
+                                &mut current_conn_id,
+                                &active_conn_id,
+                                &mut connect_thread,
+                            );
                         }
                     }
                     AudioCommand::Pause => {
@@ -242,17 +259,32 @@ fn audio_loop(
                             }
                         }
                     }
-                    AudioCommand::StartRecording { recording_dir, category, keep_snippets, min_song_duration_secs } => {
+                    AudioCommand::StartRecording {
+                        recording_dir,
+                        category,
+                        keep_snippets,
+                        min_song_duration_secs,
+                    } => {
                         *record_state.recording_dir.lock().unwrap() = recording_dir;
                         *record_state.category.lock().unwrap() = category;
-                        record_state.keep_snippets.store(keep_snippets, Ordering::SeqCst);
-                        record_state.min_song_duration_secs.store(min_song_duration_secs, Ordering::SeqCst);
+                        record_state
+                            .keep_snippets
+                            .store(keep_snippets, Ordering::SeqCst);
+                        record_state
+                            .min_song_duration_secs
+                            .store(min_song_duration_secs, Ordering::SeqCst);
                         record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged { state: 1, filepath: None });
+                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                            state: 1,
+                            filepath: None,
+                        });
                     }
                     AudioCommand::StopRecording => {
                         record_state.state.store(0, Ordering::SeqCst); // Transition to Off
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged { state: 0, filepath: None });
+                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                            state: 0,
+                            filepath: None,
+                        });
                     }
                 }
             }
@@ -276,7 +308,12 @@ fn audio_loop(
                             if let Some(old_sink) = current_sink.take() {
                                 old_sink.stop();
                             }
-                            spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
+                            spawn_connection(
+                                url,
+                                &mut current_conn_id,
+                                &active_conn_id,
+                                &mut connect_thread,
+                            );
                         }
                         AudioCommand::Stop => {
                             active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
@@ -302,7 +339,12 @@ fn audio_loop(
                 let cmd = pending_action.take().unwrap();
                 match cmd {
                     AudioCommand::Play(url) => {
-                        spawn_connection(url, &mut current_conn_id, &active_conn_id, &mut connect_thread);
+                        spawn_connection(
+                            url,
+                            &mut current_conn_id,
+                            &active_conn_id,
+                            &mut connect_thread,
+                        );
                     }
                     AudioCommand::Stop => {
                         active_conn_id.store(0, Ordering::SeqCst);
@@ -353,9 +395,8 @@ fn audio_loop(
                         }
                     }
                     Err(_) => {
-                        let _ = status_tx.send(AudioStatus::Error(
-                            "Connection thread panicked".into(),
-                        ));
+                        let _ =
+                            status_tx.send(AudioStatus::Error("Connection thread panicked".into()));
                     }
                 }
             }
@@ -391,7 +432,15 @@ fn connect_and_decode(
             return Err("Abandoned".into());
         }
 
-        match try_connect_and_decode_once(url, handle, status_tx.clone(), conn_id, active_conn_id.clone(), record_state.clone(), sample_buffer.clone()) {
+        match try_connect_and_decode_once(
+            url,
+            handle,
+            status_tx.clone(),
+            conn_id,
+            active_conn_id.clone(),
+            record_state.clone(),
+            sample_buffer.clone(),
+        ) {
             Ok(sink) => return Ok(sink),
             Err(e) => {
                 if e == "Abandoned" {
@@ -435,7 +484,6 @@ fn try_connect_and_decode_once(
         .timeout(None)
         .connect_timeout(Duration::from_secs(5))
         .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
-        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
@@ -474,7 +522,7 @@ fn try_connect_and_decode_once(
     // Decouple download from decoding: Spawn Bounded Producer-Consumer resiliences
     let buffer_capacity = 1024 * 1024; // 1 MB circular byte queue
     let queue = Arc::new(BufferQueue::new(buffer_capacity));
-    
+
     let queue_clone = queue.clone();
     let active_conn_id_clone = active_conn_id.clone();
     let conn_id_clone = conn_id;
@@ -511,15 +559,21 @@ fn try_connect_and_decode_once(
         }
     });
 
-    let reader = StreamReader::new(url.to_string(), queue, status_tx, conn_id, active_conn_id, record_state, metaint);
+    let reader = StreamReader::new(
+        url.to_string(),
+        queue,
+        status_tx,
+        conn_id,
+        active_conn_id,
+        record_state,
+        metaint,
+    );
 
-    let source = Decoder::new(reader)
-        .map_err(|e| format!("Decode error: {}", e))?;
+    let source = Decoder::new(reader).map_err(|e| format!("Decode error: {}", e))?;
 
     let wrapped_source = VisualizerSource::new(source, sample_buffer);
 
-    let sink = Sink::try_new(handle)
-        .map_err(|e| format!("Sink error: {}", e))?;
+    let sink = Sink::try_new(handle).map_err(|e| format!("Sink error: {}", e))?;
 
     sink.append(wrapped_source);
 
@@ -611,7 +665,7 @@ struct StreamReader {
     status_tx: mpsc::Sender<AudioStatus>,
     conn_id: u64,
     active_conn_id: Arc<AtomicU64>,
-    
+
     // Recording state trackers
     record_state: Arc<RecordStateShared>,
     active_writer: Option<File>,
@@ -704,7 +758,10 @@ impl StreamReader {
         path.push(&clean_category);
 
         if let Err(e) = std::fs::create_dir_all(&path) {
-            let _ = self.status_tx.send(AudioStatus::Error(format!("Failed to create folders: {}", e)));
+            let _ = self.status_tx.send(AudioStatus::Error(format!(
+                "Failed to create folders: {}",
+                e
+            )));
             return;
         }
 
@@ -731,7 +788,10 @@ impl StreamReader {
                 });
             }
             Err(e) => {
-                let _ = self.status_tx.send(AudioStatus::Error(format!("Failed to create segment file: {}", e)));
+                let _ = self.status_tx.send(AudioStatus::Error(format!(
+                    "Failed to create segment file: {}",
+                    e
+                )));
             }
         }
     }
@@ -741,12 +801,17 @@ impl StreamReader {
             let _ = file.flush();
             drop(file); // Closes file handle
 
-            let duration = self.active_track_start_time.take()
+            let duration = self
+                .active_track_start_time
+                .take()
                 .map(|t| t.elapsed())
                 .unwrap_or(std::time::Duration::ZERO);
 
             let keep_snippets = self.record_state.keep_snippets.load(Ordering::SeqCst);
-            let min_secs = self.record_state.min_song_duration_secs.load(Ordering::SeqCst);
+            let min_secs = self
+                .record_state
+                .min_song_duration_secs
+                .load(Ordering::SeqCst);
 
             let mut is_ad_or_speech = false;
             if let Some(ref title) = self.active_track_title {
@@ -773,13 +838,25 @@ impl StreamReader {
                 if (is_short || is_ad_or_speech) && !keep_snippets {
                     // Purge file from disk!
                     if let Err(e) = std::fs::remove_file(filepath) {
-                        let _ = self.status_tx.send(AudioStatus::Error(format!("Failed to delete partial file: {}", e)));
+                        let _ = self.status_tx.send(AudioStatus::Error(format!(
+                            "Failed to delete partial file: {}",
+                            e
+                        )));
                     } else {
-                        let title = self.active_track_title.as_deref().unwrap_or("Unknown Track");
-                        let reason = if is_ad_or_speech { "Speech/Ad Filter" } else { "Short Snippet" };
+                        let title = self
+                            .active_track_title
+                            .as_deref()
+                            .unwrap_or("Unknown Track");
+                        let reason = if is_ad_or_speech {
+                            "Speech/Ad Filter"
+                        } else {
+                            "Short Snippet"
+                        };
                         let _ = self.status_tx.send(AudioStatus::Error(format!(
                             "🗑️ Discarded {} - {} ({:.1}s)",
-                            reason, title, duration.as_secs_f32()
+                            reason,
+                            title,
+                            duration.as_secs_f32()
                         )));
                     }
                 } else {
@@ -920,7 +997,10 @@ mod tests {
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("normal_file.mp3"), "normal_file.mp3");
         assert_eq!(sanitize_filename("artist/song?.mp3"), "artist-song-.mp3");
-        assert_eq!(sanitize_filename("windows\\invalid:name*char\".mp3"), "windows-invalid-name-char-.mp3");
+        assert_eq!(
+            sanitize_filename("windows\\invalid:name*char\".mp3"),
+            "windows-invalid-name-char-.mp3"
+        );
         assert_eq!(sanitize_filename("<tag> | pipe.mp3"), "-tag- - pipe.mp3");
     }
 
@@ -939,15 +1019,9 @@ mod tests {
         );
 
         // Missing StreamTitle
-        assert_eq!(
-            parse_stream_title("StreamUrl='';"),
-            None
-        );
+        assert_eq!(parse_stream_title("StreamUrl='';"), None);
 
         // Malformed or empty title
-        assert_eq!(
-            parse_stream_title("StreamTitle='';"),
-            Some("".to_string())
-        );
+        assert_eq!(parse_stream_title("StreamTitle='';"), Some("".to_string()));
     }
 }

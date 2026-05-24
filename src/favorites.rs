@@ -116,9 +116,17 @@ impl From<SavedStation> for Station {
 /// Helper to map dynamic micro-genres to static parent categories.
 pub fn resolve_parent_genre(subgenre: &str) -> &'static str {
     let s = subgenre.to_lowercase();
-    if s.contains("synthwave") || s.contains("chillsynth") || s.contains("darksynth") || s.contains("retrowave") {
+    if s.contains("synthwave")
+        || s.contains("chillsynth")
+        || s.contains("darksynth")
+        || s.contains("retrowave")
+    {
         "Synthwave"
-    } else if s.contains("ambient") || s.contains("chillout") || s.contains("drone") || s.contains("space") {
+    } else if s.contains("ambient")
+        || s.contains("chillout")
+        || s.contains("drone")
+        || s.contains("space")
+    {
         "Ambient"
     } else if s.contains("rock") || s.contains("metal") || s.contains("guitar") {
         "Rock"
@@ -140,9 +148,10 @@ impl Library {
                 match fs::read_to_string(p) {
                     Ok(contents) => {
                         match serde_json::from_str::<LibraryFile>(&contents) {
-                            Ok(file) => {
-                                (file.stations.into_iter().map(Station::from).collect(), file.settings)
-                            }
+                            Ok(file) => (
+                                file.stations.into_iter().map(Station::from).collect(),
+                                file.settings,
+                            ),
                             Err(_) => (seed_stations, Settings::default()), // corrupt file → use seeds
                         }
                     }
@@ -157,7 +166,8 @@ impl Library {
                     path: path.clone(),
                 };
                 lib.rebuild_genres();
-                lib.save();
+                // TODO: return load warnings to App so first-launch seed save failures can be shown.
+                let _ = lib.save();
                 return lib;
             }
         } else {
@@ -189,31 +199,32 @@ impl Library {
 
     /// Add a station to the library (deduplicates by URL).
     /// Returns true if actually added (not a duplicate).
-    pub fn add(&mut self, station: Station) -> bool {
+    pub fn add(&mut self, station: Station) -> anyhow::Result<bool> {
         if self.stations.iter().any(|s| s.url == station.url) {
-            return false;
+            return Ok(false);
         }
         self.stations.push(station);
         self.rebuild_genres();
-        self.save();
-        true
+        self.save()?;
+        Ok(true)
     }
 
     /// Remove a station by URL. Returns true if removed.
-    pub fn remove(&mut self, url: &str) -> bool {
+    pub fn remove(&mut self, url: &str) -> anyhow::Result<bool> {
         let before = self.stations.len();
         self.stations.retain(|s| s.url != url);
         let removed = self.stations.len() < before;
         if removed {
             self.rebuild_genres();
-            self.save();
+            self.save()?;
         }
-        removed
+        Ok(removed)
     }
 
     /// Dynamically rebuild unique genres list, sorting them with "All" at the front.
     pub fn rebuild_genres(&mut self) {
-        let genres: std::collections::HashSet<String> = self.stations
+        let genres: std::collections::HashSet<String> = self
+            .stations
             .iter()
             .map(|s| resolve_parent_genre(&s.genre).to_string())
             .filter(|g| !g.is_empty())
@@ -231,11 +242,13 @@ impl Library {
     }
 
     /// Save library to disk (best-effort).
-    pub fn save(&self) {
-        let Some(ref path) = self.path else { return };
+    pub fn save(&self) -> anyhow::Result<()> {
+        let Some(ref path) = self.path else {
+            return Ok(());
+        };
 
         if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+            fs::create_dir_all(parent)?;
         }
 
         let file = LibraryFile {
@@ -244,9 +257,10 @@ impl Library {
             settings: self.settings.clone(),
         };
 
-        if let Ok(json) = serde_json::to_string_pretty(&file) {
-            let _ = fs::write(path, json);
-        }
+        let json = serde_json::to_string_pretty(&file)?;
+        fs::write(path, json)?;
+
+        Ok(())
     }
 }
 
@@ -321,8 +335,8 @@ mod tests {
             country: "US".to_string(),
             bitrate: 128,
         };
-        assert!(lib.add(station.clone()));
-        assert!(!lib.add(station));
+        assert!(lib.add(station.clone()).unwrap());
+        assert!(!lib.add(station).unwrap());
         assert_eq!(lib.stations.len(), 1);
     }
 
@@ -340,8 +354,8 @@ mod tests {
             settings: Settings::default(),
             path: None,
         };
-        assert!(lib.remove("http://test"));
-        assert!(!lib.remove("http://missing"));
+        assert!(lib.remove("http://test").unwrap());
+        assert!(!lib.remove("http://missing").unwrap());
         assert!(lib.stations.is_empty());
     }
 

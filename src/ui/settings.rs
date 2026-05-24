@@ -1,8 +1,8 @@
-use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Clear};
-use crate::app::App;
 use super::theme;
 use super::theme::ThemeName;
+use crate::app::App;
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Elegant config popup at 54% width, 64% height to fit all setting rows
@@ -15,7 +15,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(" ✦ DriftFM Config Console ✦ ", theme::title()))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))
+        .border_style(
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        )
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(Style::default().bg(theme::bg()));
 
@@ -46,21 +50,44 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let current_theme = ThemeName::from_key(&app.library.settings.theme);
 
     // Define highlight styles
-    let active_style = Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD);
+    let active_style = Style::default()
+        .fg(theme::accent_secondary())
+        .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().fg(theme::text().fg.unwrap());
     let active_bg = Style::default().bg(theme::surface_color());
 
     // Row 1: Notifications
     let notify_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 0 { " ▸  " } else { "    " },
-            active_style
+            if app.selected_setting_idx == 0 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            active_style,
         ),
         Span::styled(
-            if notify_enabled { "[ ▣ ] " } else { "[ ▢ ] " },
-            Style::default().fg(if notify_enabled { theme::accent_secondary() } else { theme::dim().fg.unwrap() }).add_modifier(Modifier::BOLD)
+            if notify_enabled {
+                "[ ▣ ] "
+            } else {
+                "[ ▢ ] "
+            },
+            Style::default()
+                .fg(if notify_enabled {
+                    theme::accent_secondary()
+                } else {
+                    theme::dim().fg.unwrap()
+                })
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Desktop Song Notifications", if app.selected_setting_idx == 0 { active_style } else { normal_style }),
+        Span::styled(
+            "Desktop Song Notifications",
+            if app.selected_setting_idx == 0 {
+                active_style
+            } else {
+                normal_style
+            },
+        ),
     ];
     let mut notify_para = Paragraph::new(Line::from(notify_spans));
     if app.selected_setting_idx == 0 {
@@ -71,14 +98,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Row 2: Autoplay last played on boot
     let autoplay_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 1 { " ▸  " } else { "    " },
-            active_style
+            if app.selected_setting_idx == 1 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            active_style,
         ),
         Span::styled(
-            if autoplay_enabled { "[ ▣ ] " } else { "[ ▢ ] " },
-            Style::default().fg(if autoplay_enabled { theme::accent_secondary() } else { theme::dim().fg.unwrap() }).add_modifier(Modifier::BOLD)
+            if autoplay_enabled {
+                "[ ▣ ] "
+            } else {
+                "[ ▢ ] "
+            },
+            Style::default()
+                .fg(if autoplay_enabled {
+                    theme::accent_secondary()
+                } else {
+                    theme::dim().fg.unwrap()
+                })
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Autoplay Last Played Station on Boot", if app.selected_setting_idx == 1 { active_style } else { normal_style }),
+        Span::styled(
+            "Autoplay Last Played Station on Boot",
+            if app.selected_setting_idx == 1 {
+                active_style
+            } else {
+                normal_style
+            },
+        ),
     ];
     let mut autoplay_para = Paragraph::new(Line::from(autoplay_spans));
     if app.selected_setting_idx == 1 {
@@ -89,15 +137,34 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Row 3: Recording Directory Preset Selector
     let rec_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 2 { " ▸  " } else { "    " },
-            active_style
+            if app.selected_setting_idx == 2 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            active_style,
         ),
         Span::styled(
             "[ 🗁 ] ",
-            Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Tape Capture Folder: ", if app.selected_setting_idx == 2 { active_style } else { normal_style }),
-        Span::styled(format!("{} ", rec_dir), Style::default().fg(theme::highlight()).add_modifier(Modifier::UNDERLINED).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Tape Capture Folder: ",
+            if app.selected_setting_idx == 2 {
+                active_style
+            } else {
+                normal_style
+            },
+        ),
+        Span::styled(
+            format!("{} ", rec_dir),
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("(Press Space to cycle)", theme::dim()),
     ];
     let mut rec_para = Paragraph::new(Line::from(rec_spans));
@@ -109,14 +176,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Row 4: Keep Partial Snippets / Advertisements
     let snippets_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 3 { " ▸  " } else { "    " },
-            active_style
+            if app.selected_setting_idx == 3 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            active_style,
         ),
         Span::styled(
-            if keep_snippets { "[ ▣ ] " } else { "[ ▢ ] " },
-            Style::default().fg(if keep_snippets { theme::accent_secondary() } else { theme::dim().fg.unwrap() }).add_modifier(Modifier::BOLD)
+            if keep_snippets {
+                "[ ▣ ] "
+            } else {
+                "[ ▢ ] "
+            },
+            Style::default()
+                .fg(if keep_snippets {
+                    theme::accent_secondary()
+                } else {
+                    theme::dim().fg.unwrap()
+                })
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Keep Partial Snippets & Commercial Ads", if app.selected_setting_idx == 3 { active_style } else { normal_style }),
+        Span::styled(
+            "Keep Partial Snippets & Commercial Ads",
+            if app.selected_setting_idx == 3 {
+                active_style
+            } else {
+                normal_style
+            },
+        ),
     ];
     let mut snippets_para = Paragraph::new(Line::from(snippets_spans));
     if app.selected_setting_idx == 3 {
@@ -133,20 +221,45 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
     let duration_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 4 { " ▸  " } else { "    " },
-            if duration_dimmed { theme::dim() } else { active_style }
+            if app.selected_setting_idx == 4 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            if duration_dimmed {
+                theme::dim()
+            } else {
+                active_style
+            },
         ),
         Span::styled(
             "[ ⏱ ] ",
-            Style::default().fg(duration_fg).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(duration_fg)
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Min Song Duration: ", if app.selected_setting_idx == 4 && !duration_dimmed { active_style } else if duration_dimmed { theme::dim() } else { normal_style }),
+        Span::styled(
+            "Min Song Duration: ",
+            if app.selected_setting_idx == 4 && !duration_dimmed {
+                active_style
+            } else if duration_dimmed {
+                theme::dim()
+            } else {
+                normal_style
+            },
+        ),
         Span::styled(
             format!("{}s ", min_duration),
-            Style::default().fg(duration_fg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(duration_fg)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            if duration_dimmed { "(disabled — keeping all)" } else { "(Press Space to cycle)" },
+            if duration_dimmed {
+                "(disabled — keeping all)"
+            } else {
+                "(Press Space to cycle)"
+            },
             theme::dim(),
         ),
     ];
@@ -159,17 +272,32 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Row 6: Theme Selector
     let theme_spans = vec![
         Span::styled(
-            if app.selected_setting_idx == 5 { " ▸  " } else { "    " },
-            active_style
+            if app.selected_setting_idx == 5 {
+                " ▸  "
+            } else {
+                "    "
+            },
+            active_style,
         ),
         Span::styled(
             "[ 🎨 ] ",
-            Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Theme: ", if app.selected_setting_idx == 5 { active_style } else { normal_style }),
+        Span::styled(
+            "Theme: ",
+            if app.selected_setting_idx == 5 {
+                active_style
+            } else {
+                normal_style
+            },
+        ),
         Span::styled(
             format!("{} ", current_theme.label()),
-            Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled("(Press Space to cycle)", theme::dim()),
     ];
@@ -181,14 +309,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Footer instruction bar
     let footer_line = Line::from(vec![
-        Span::styled("  j/k", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  j/k",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Navigate  •  ", theme::dim()),
-        Span::styled("Space", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Space",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Toggle / Cycle  •  ", theme::dim()),
-        Span::styled("Esc/,", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc/,",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Exit Config", theme::dim()),
     ]);
-    let footer = Paragraph::new(vec![Line::from(""), footer_line])
-        .alignment(Alignment::Center);
+    let footer = Paragraph::new(vec![Line::from(""), footer_line]).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[7]);
 }

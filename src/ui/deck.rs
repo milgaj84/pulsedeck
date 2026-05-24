@@ -1,7 +1,7 @@
+use super::theme;
+use crate::app::{App, PlaybackState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use crate::app::{App, PlaybackState};
-use super::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let title_text = match app.active_deck_page {
@@ -81,36 +81,59 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
                 format!(" (( {} )) ", "█".repeat(right_size)),
             )
         }
-        _ => {
-            (
-                format!(" (( {} )) ", spin_char),
-                format!(" (( {} )) ", spin_char),
-            )
-        }
+        _ => (
+            format!(" (( {} )) ", spin_char),
+            format!(" (( {} )) ", spin_char),
+        ),
     };
 
     let cassette_color = theme::dim();
-    let label_style = Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD);
-    let reel_style = Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD);
+    let label_style = Style::default()
+        .fg(theme::accent_secondary())
+        .add_modifier(Modifier::BOLD);
+    let reel_style = Style::default()
+        .fg(theme::highlight())
+        .add_modifier(Modifier::BOLD);
 
-    lines.push(Line::from(vec![
-        Span::styled("   ┌───────────────────────────────┐", cassette_color),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "   ┌───────────────────────────────┐",
+        cassette_color,
+    )]));
 
     // Compact smart cassette capture status flashes inside the tape label!
     let label_spans = match app.recording_state {
         crate::app::RecordingState::Active => {
             let flash = (app.tick_count % 2) == 0;
             vec![
-                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
-                Span::styled("REC [ACTIVE]  ", Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if flash { " ● " } else { "   " },
+                    Style::default()
+                        .fg(theme::error().fg.unwrap_or_default())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "REC [ACTIVE]  ",
+                    Style::default()
+                        .fg(theme::error().fg.unwrap_or_default())
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]
         }
         crate::app::RecordingState::Pending => {
             let flash = (app.tick_count % 2) == 0;
             vec![
-                Span::styled(if flash { " ● " } else { "   " }, Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
-                Span::styled("PENDING...    ", Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if flash { " ● " } else { "   " },
+                    Style::default()
+                        .fg(theme::warm())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "PENDING...    ",
+                    Style::default()
+                        .fg(theme::warm())
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]
         }
         crate::app::RecordingState::Off => {
@@ -123,9 +146,10 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
     rec_line.push(Span::styled("   │", cassette_color));
     lines.push(Line::from(rec_line));
 
-    lines.push(Line::from(vec![
-        Span::styled("   │  ___________________________  │", cassette_color),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "   │  ___________________________  │",
+        cassette_color,
+    )]));
     lines.push(Line::from(vec![
         Span::styled("   │ /  ", cassette_color),
         Span::styled(l_bra, reel_style),
@@ -133,15 +157,16 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(r_bra, reel_style),
         Span::styled("  \\ │", cassette_color),
     ]));
-    lines.push(Line::from(vec![
-        Span::styled("   │ \\___________________________/ │", cassette_color),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("   └───────────────────────────────┘", cassette_color),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "   │ \\___________________________/ │",
+        cassette_color,
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        "   └───────────────────────────────┘",
+        cassette_color,
+    )]));
 
-    let paragraph = Paragraph::new(lines)
-        .alignment(Alignment::Center);
+    let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
 }
 
@@ -151,7 +176,12 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
     // Status string
     let (status_text, status_style) = match app.playback {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
-        PlaybackState::Connecting => ("TUNING...", Style::default().fg(theme::warm()).add_modifier(Modifier::BOLD)),
+        PlaybackState::Connecting => (
+            "TUNING...",
+            Style::default()
+                .fg(theme::warm())
+                .add_modifier(Modifier::BOLD),
+        ),
         PlaybackState::Paused => ("PAUSED", theme::neon()),
         PlaybackState::Error(_) => ("OFFLINE / ERROR", theme::error()),
         PlaybackState::Stopped => ("STOPPED", theme::dim()),
@@ -179,7 +209,12 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
     lines.push(Line::from(vec![
         Span::styled("  Buffer:  ", theme::dim()),
-        Span::styled(format!("[{}] ", bar), Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("[{}] ", bar),
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(format!("{}% ", app.buffer_percent), theme::cyan()),
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
@@ -193,7 +228,12 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
                 .unwrap_or(filepath);
             lines.push(Line::from(vec![
                 Span::styled("  Tape:    ", theme::dim()),
-                Span::styled(format!("🔴 capture -> {}", filename), Style::default().fg(theme::error().fg.unwrap_or_default()).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("🔴 capture -> {}", filename),
+                    Style::default()
+                        .fg(theme::error().fg.unwrap_or_default())
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
         }
     }
@@ -234,7 +274,8 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
                     let idx_floor = peak_idx.floor() as usize;
                     let idx_ceil = (idx_floor + 1).min(app.visualizer_peaks.len() - 1);
                     let frac = peak_idx - idx_floor as f32;
-                    app.visualizer_peaks[idx_floor] * (1.0 - frac) + app.visualizer_peaks[idx_ceil] * frac
+                    app.visualizer_peaks[idx_floor] * (1.0 - frac)
+                        + app.visualizer_peaks[idx_ceil] * frac
                 };
 
                 let h = val * height as f32;
@@ -321,7 +362,7 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
                 let t = app.tick_count as f32 * 0.4;
                 let carrier = (x as f32 * 0.3 + t).sin();
                 let envelope = (x as f32 * 0.04 - t * 0.25).cos().abs();
-                
+
                 let y_float = center_y + carrier * envelope * amplitude;
                 let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
                 canvas.set_pixel(x, y);
@@ -344,7 +385,9 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
         _ => {}
     }
 
-    let active_style = Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD);
+    let active_style = Style::default()
+        .fg(theme::accent_secondary())
+        .add_modifier(Modifier::BOLD);
     let lines = canvas.to_lines(active_style, theme::dim());
 
     let paragraph = Paragraph::new(lines);
@@ -426,36 +469,48 @@ impl BrailleCanvas {
 
 fn render_history(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
-    
-    lines.push(Line::from(vec![
-        Span::styled("   📼 Captured Session Mixtape ", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("   ════════════════════════════", theme::dim()),
-    ]));
+
+    lines.push(Line::from(vec![Span::styled(
+        "   📼 Captured Session Mixtape ",
+        Style::default()
+            .fg(theme::accent_secondary())
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        "   ════════════════════════════",
+        theme::dim(),
+    )]));
     lines.push(Line::from(""));
 
     if app.song_history.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("   [ No tracks captured yet ]", theme::dim()),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "   [ No tracks captured yet ]",
+            theme::dim(),
+        )]));
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("   Music playback will record", theme::dim()),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("   inline ICY metadata here...", theme::dim()),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "   Music playback will record",
+            theme::dim(),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            "   inline ICY metadata here...",
+            theme::dim(),
+        )]));
     } else {
         // Render song history in reverse (newest on top)
         let visible_rows = (area.height as usize).saturating_sub(4);
-        
+
         for (idx, song) in app.song_history.iter().enumerate().rev().take(visible_rows) {
             let track_num = idx + 1;
             let track_tag = format!("   Track {:02}: ", track_num);
-            
+
             lines.push(Line::from(vec![
-                Span::styled(track_tag, Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    track_tag,
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(song.as_str(), theme::text()),
             ]));
         }
