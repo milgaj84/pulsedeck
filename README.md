@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
-[![Tests: 23 passing](https://img.shields.io/badge/tests-23%20passing-brightgreen.svg)](#)
+[![Tests: 32 passing](https://img.shields.io/badge/tests-32%20passing-brightgreen.svg)](#)
 [![Zero warnings](https://img.shields.io/badge/cargo%20clippy-zero%20warnings-brightgreen.svg)](#)
 
 </div>
@@ -110,10 +110,12 @@ There is intentionally no separate “add without playing” shortcut in search 
 
 **Finding and adding a new station:**
 
-1. Press `/` to open search, then type a genre, city, country, or station name. Results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide.
+1. Press `/` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
 2. Use `↑` / `↓` to highlight a result.
 3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch DriftFM.
 4. Press `Esc` instead to leave search without adding anything.
+
+The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or `Search failed. Check connection.` Older search responses are ignored if you have already typed a newer query.
 
 **Managing your library:**
 
@@ -169,7 +171,7 @@ Settings are saved automatically to a JSON file in your config directory.
 
 ## Code Quality
 
-- **23 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, filename sanitization, and mode-specific key mappings
+- **32 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, filename sanitization, mode-specific key mappings, and search-state transitions
 - **Zero `cargo clippy` warnings** under `-W clippy::all`
 - **Zero hardcoded colors** outside `theme.rs` — full semantic palette purity across all 14 UI modules
 - Thread-safe audio pipeline with lock-free atomic generation IDs for connection abandonment
