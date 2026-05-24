@@ -80,11 +80,11 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
         InputMode::Search => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
-            Span::styled("] Add+Play  [", theme::dim()),
+            Span::styled("] Add to Library+Play  [", theme::dim()),
             Span::styled("Esc", theme::cyan()),
             Span::styled("] Back  [", theme::dim()),
             Span::styled("↑↓", theme::cyan()),
-            Span::styled("] Navigate  ", theme::dim()),
+            Span::styled("] Results  ", theme::dim()),
             Span::styled("Type to search...", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::ITALIC)),
         ]),
         InputMode::Normal => Line::from(vec![
@@ -98,7 +98,7 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("/", theme::cyan()),
             Span::styled("] Search  [", theme::dim()),
             Span::styled("b", theme::cyan()),
-            Span::styled("] Bento  [", theme::dim()),
+            Span::styled("] Layout  [", theme::dim()),
             Span::styled(",", theme::cyan()),
             Span::styled("] Config  [", theme::dim()),
             Span::styled("h", theme::cyan()),
