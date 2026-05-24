@@ -54,7 +54,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
 
         // Library management
-        (_, KeyCode::Char('f')) => Some(Action::ManageLibrarySelection),
+        (_, KeyCode::Char('f')) => Some(Action::RemoveLibrarySelection),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
@@ -80,13 +80,14 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// Key mapping for search mode — printable chars go to search input; commands use non-text keys.
+/// Key mapping for search mode.
+/// Printable characters remain search input; Enter is the only add-from-search action.
 fn map_search(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         // Exit search
         (_, KeyCode::Esc) => Some(Action::ExitSearch),
 
-        // Confirm search (select highlighted + exit)
+        // Confirm search: add highlighted result, play it, and leave search
         (_, KeyCode::Enter) => Some(Action::SearchConfirm),
 
         // Navigate within filtered results
@@ -95,14 +96,6 @@ fn map_search(key: KeyEvent) -> Option<Action> {
 
         // Delete character
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),
-
-        // Add selected result without leaving search. Bare `f` stays available for typing queries.
-        // F2 is the visible cross-platform shortcut. Ctrl+A and Insert are accepted as fallbacks.
-        (_, KeyCode::F(2)) | (_, KeyCode::Insert) => Some(Action::ManageLibrarySelection),
-        (mods, KeyCode::Char('a' | 'A')) if mods.contains(KeyModifiers::CONTROL) => {
-            Some(Action::ManageLibrarySelection)
-        }
-        (_, KeyCode::Char('\u{1}')) => Some(Action::ManageLibrarySelection),
 
         // Ctrl+C still quits
         (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
@@ -123,10 +116,6 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    fn ctrl_key(c: char) -> KeyEvent {
-        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
-    }
-
     #[test]
     fn search_mode_treats_plain_f_as_text_input() {
         assert_eq!(
@@ -136,54 +125,28 @@ mod tests {
     }
 
     #[test]
-    fn search_mode_f2_adds_selected_result() {
+    fn search_mode_treats_plain_a_as_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::F(2)), &InputMode::Search),
-            Some(Action::ManageLibrarySelection),
+            map_key(key(KeyCode::Char('a')), &InputMode::Search),
+            Some(Action::SearchInput('a')),
         );
     }
 
     #[test]
-    fn search_mode_insert_adds_selected_result() {
-        assert_eq!(
-            map_key(key(KeyCode::Insert), &InputMode::Search),
-            Some(Action::ManageLibrarySelection),
-        );
+    fn search_mode_f2_does_not_add_selected_result() {
+        assert_eq!(map_key(key(KeyCode::F(2)), &InputMode::Search), None,);
     }
 
     #[test]
-    fn search_mode_ctrl_a_adds_selected_result() {
-        assert_eq!(
-            map_key(ctrl_key('a'), &InputMode::Search),
-            Some(Action::ManageLibrarySelection),
-        );
+    fn search_mode_insert_does_not_add_selected_result() {
+        assert_eq!(map_key(key(KeyCode::Insert), &InputMode::Search), None,);
     }
 
     #[test]
-    fn search_mode_ctrl_shift_a_also_adds_selected_result() {
-        let key = KeyEvent::new(
-            KeyCode::Char('A'),
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        );
-        assert_eq!(
-            map_key(key, &InputMode::Search),
-            Some(Action::ManageLibrarySelection),
-        );
-    }
-
-    #[test]
-    fn search_mode_ctrl_a_control_byte_adds_selected_result() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('\u{1}')), &InputMode::Search),
-            Some(Action::ManageLibrarySelection),
-        );
-    }
-
-    #[test]
-    fn normal_mode_f_manages_library_selection() {
+    fn normal_mode_f_removes_library_selection() {
         assert_eq!(
             map_key(key(KeyCode::Char('f')), &InputMode::Normal),
-            Some(Action::ManageLibrarySelection),
+            Some(Action::RemoveLibrarySelection),
         );
     }
 
