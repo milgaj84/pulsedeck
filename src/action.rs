@@ -24,7 +24,7 @@ pub enum Action {
     SearchConfirm,
 
     /// Library management
-    ToggleFavorite,
+    ManageLibrarySelection,
     NextGenre,
     PrevGenre,
 
