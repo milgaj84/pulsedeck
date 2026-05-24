@@ -732,7 +732,7 @@ impl Complex {
     fn mul(self, other: Self) -> Self {
         Self {
             re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im,
+            im: self.re * other.im + self.im * other.re,
         }
     }
 
