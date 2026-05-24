@@ -11,6 +11,10 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ### Improved
 *   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `Ctrl+A` adds from search, while `f` removes from the library.
+*   **Saved Result Feedback**: The search bar now shows `★ Saved to library` when the highlighted search result is already in the user's library.
+
+### Added
+*   **Search Shortcut Tests**: Added keymap tests covering plain `f` text entry in search, `Ctrl+A` search add, library-mode `f`, and search-mode `Enter`.
 
 ---
 
