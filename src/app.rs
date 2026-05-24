@@ -437,24 +437,15 @@ impl App {
             }
 
             // ── Library management ───────────────────────────────
-            Action::ManageLibrarySelection => {
-                // In Normal mode: remove station from library
-                // In Search mode: add station to library
-                match self.input_mode {
-                    InputMode::Normal => {
-                        if let Some(station) = self.visible_stations().get(self.selected) {
-                            let url = station.url.clone();
-                            self.library.remove(&url);
-                            // Clamp selection
-                            let count = self.visible_count();
-                            if self.selected >= count && self.selected > 0 {
-                                self.selected = count - 1;
-                            }
-                        }
-                    }
-                    InputMode::Search => {
-                        if let Some(station) = self.search_results.get(self.selected).cloned() {
-                            self.library.add(station);
+            Action::RemoveLibrarySelection => {
+                if self.input_mode == InputMode::Normal {
+                    if let Some(station) = self.visible_stations().get(self.selected) {
+                        let url = station.url.clone();
+                        self.library.remove(&url);
+                        // Clamp selection
+                        let count = self.visible_count();
+                        if self.selected >= count && self.selected > 0 {
+                            self.selected = count - 1;
                         }
                     }
                 }
@@ -741,7 +732,7 @@ impl Complex {
     fn mul(self, other: Self) -> Self {
         Self {
             re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im * other.re,
+            im: self.re * other.im + self.im,
         }
     }
 
