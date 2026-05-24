@@ -80,7 +80,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// Key mapping for search mode — all printable chars go to search input.
+/// Key mapping for search mode — printable chars go to search input; commands use non-text keys.
 fn map_search(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         // Exit search
@@ -95,6 +95,9 @@ fn map_search(key: KeyEvent) -> Option<Action> {
 
         // Delete character
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),
+
+        // Add selected result without leaving search. Bare `f` stays available for typing queries.
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => Some(Action::ToggleFavorite),
 
         // Ctrl+C still quits
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
