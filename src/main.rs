@@ -6,12 +6,20 @@ mod favorites;
 mod radio;
 mod ui;
 
-use std::time::Duration;
 use anyhow::Result;
+use std::time::Duration;
 
-use app::App;
+use app::{App, InputMode};
 use favorites::Library;
 use radio::fallback_stations;
+
+struct TerminalRestoreGuard;
+
+impl Drop for TerminalRestoreGuard {
+    fn drop(&mut self) {
+        ratatui::restore();
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,12 +32,13 @@ async fn main() -> Result<()> {
 
     let mut app = App::new(library);
 
-    // Initialize terminal
+    // Initialize terminal. The guard restores the terminal even if the loop exits early with an error.
     let mut terminal = ratatui::init();
+    let _terminal_restore = TerminalRestoreGuard;
 
     // ── Channel for API search results ───────────────────────────
     let (search_tx, mut search_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Vec<radio::Station>>();
+        tokio::sync::mpsc::unbounded_channel::<(String, Vec<radio::Station>)>();
 
     // ── Main Loop ────────────────────────────────────────────────
     let tick_rate = Duration::from_millis(66); // ~15 FPS
@@ -45,28 +54,34 @@ async fn main() -> Result<()> {
             app.update(action::Action::Tick);
         }
 
+        // Keep short search queries honest: API search starts at 2+ chars, so clear older results below that.
+        if matches!(app.input_mode, InputMode::Search) && app.search_query.trim().len() < 2 {
+            app.search_results.clear();
+            app.searching_api = false;
+        }
+
         // ── Check for pending API search requests ────────────────
         if let Some(query) = app.pending_api_search.take() {
             let tx = search_tx.clone();
             tokio::spawn(async move {
                 if let Ok(results) = radio::search_stations(&query).await {
-                    let _ = tx.send(results);
+                    let _ = tx.send((query, results));
                 }
             });
         }
 
         // ── Check for API search results (non-blocking) ─────────
-        if let Ok(results) = search_rx.try_recv() {
-            app.set_search_results(results);
+        while let Ok((query, results)) = search_rx.try_recv() {
+            let current_query = app.search_query.trim();
+            if matches!(app.input_mode, InputMode::Search) && query == current_query {
+                app.set_search_results(results);
+            }
         }
 
         if app.should_quit {
             break;
         }
     }
-
-    // Restore terminal
-    ratatui::restore();
 
     Ok(())
 }
