@@ -81,8 +81,6 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
             Span::styled("] Add+Play  [", theme::dim()),
-            Span::styled("F2", theme::cyan()),
-            Span::styled("] Add  [", theme::dim()),
             Span::styled("Esc", theme::cyan()),
             Span::styled("] Back  [", theme::dim()),
             Span::styled("↑↓", theme::cyan()),
