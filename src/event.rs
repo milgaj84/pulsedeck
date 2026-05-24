@@ -33,11 +33,11 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Quit
         (_, KeyCode::Char('q')) => Some(Action::Quit),
         (_, KeyCode::Esc) => Some(Action::Quit),
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
 
         // Search
         (_, KeyCode::Char('/')) => Some(Action::EnterSearch),
-        (KeyModifiers::CONTROL, KeyCode::Char('f')) => Some(Action::EnterSearch),
+        (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::EnterSearch),
 
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
@@ -97,10 +97,16 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),
 
         // Add selected result without leaving search. Bare `f` stays available for typing queries.
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) => Some(Action::ManageLibrarySelection),
+        // F2 is the visible cross-platform shortcut. Ctrl+A and Insert are accepted as fallbacks.
+        (_, KeyCode::F(2)) | (_, KeyCode::Insert) => Some(Action::ManageLibrarySelection),
+        (mods, KeyCode::Char('a' | 'A')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::ManageLibrarySelection)
+        }
+        (_, KeyCode::Char('\u{1}')) => Some(Action::ManageLibrarySelection),
 
         // Ctrl+C still quits
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Char('\u{3}')) => Some(Action::Quit),
 
         // All other printable characters go to search input
         (_, KeyCode::Char(c)) => Some(Action::SearchInput(c)),
@@ -130,9 +136,45 @@ mod tests {
     }
 
     #[test]
+    fn search_mode_f2_adds_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::F(2)), &InputMode::Search),
+            Some(Action::ManageLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn search_mode_insert_adds_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Insert), &InputMode::Search),
+            Some(Action::ManageLibrarySelection),
+        );
+    }
+
+    #[test]
     fn search_mode_ctrl_a_adds_selected_result() {
         assert_eq!(
             map_key(ctrl_key('a'), &InputMode::Search),
+            Some(Action::ManageLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn search_mode_ctrl_shift_a_also_adds_selected_result() {
+        let key = KeyEvent::new(
+            KeyCode::Char('A'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(
+            map_key(key, &InputMode::Search),
+            Some(Action::ManageLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn search_mode_ctrl_a_control_byte_adds_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('\u{1}')), &InputMode::Search),
             Some(Action::ManageLibrarySelection),
         );
     }
