@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
-[![Tests: 17 passing](https://img.shields.io/badge/tests-17%20passing-brightgreen.svg)](#)
+[![Tests: 23 passing](https://img.shields.io/badge/tests-23%20passing-brightgreen.svg)](#)
 [![Zero warnings](https://img.shields.io/badge/cargo%20clippy-zero%20warnings-brightgreen.svg)](#)
 
 </div>
@@ -79,21 +79,30 @@ That's it. No config files to write. No API keys. Stations are pre-loaded and th
 
 DriftFM is keyboard-driven. Press **`h`** at any time to see the full control reference.
 
-The most important keys to get started:
+### Core shortcuts
 
-| Key | What it does |
-| :--- | :--- |
-| `↑` / `↓` | Move between stations |
-| `Enter` | Play selected station |
-| `Tab` | Switch genre categories |
-| `/` | Search for any station worldwide |
-| `Space` | Pause / Resume |
-| `r` | Start / stop recording |
-| `b` | Cycle Bento Layout (Split ↔ Closed Bento ↔ Full Bento) |
-| `v` | Cycle Visualizer mode (Spectrum ↔ Real Osc ↔ Sim Osc) |
-| `f` | In search: add to library. In library: remove station |
-| `,` | Open settings |
-| `q` | Quit |
+| Key | Where | What it does |
+| :--- | :--- | :--- |
+| `↑` / `↓` or `j` / `k` | Library or search | Move through the visible list |
+| `Enter` | Library | Play the highlighted saved station |
+| `Enter` | Search | Save the highlighted result to your **Library**, then play it |
+| `/` | Anywhere in normal mode | Open worldwide station search |
+| `Esc` | Search or overlay | Leave search / close overlay |
+| `f` | Library only | Remove the highlighted station from your **Library** |
+| `Tab` / `Shift+Tab` | Library | Switch genre categories |
+| `Space` | Playback | Pause / resume |
+| `s` | Playback | Stop playback |
+| `+` / `-` | Playback | Volume up / down |
+| `m` | Playback | Mute / unmute |
+| `r` | Playback | Start / stop recording |
+| `b` | View | Cycle layout |
+| `p` | View | Cycle deck page |
+| `v` | View | Cycle visualizer |
+| `,` | App | Open settings |
+| `h` / `?` | App | Show / hide help |
+| `q` | App | Quit |
+
+There is intentionally no separate “add without playing” shortcut in search mode. `Enter` is the one search commit action: it adds the highlighted search result to your saved Library and starts playback.
 
 ---
 
@@ -101,16 +110,16 @@ The most important keys to get started:
 
 **Finding and adding a new station:**
 
-1. Press `/` to open search, type a genre, city, or station name — results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide
-2. Use `↑` / `↓` to browse results
-3. Press `Enter` to tune in instantly — this also **automatically adds the station to your library** so it's there next time
-4. Alternatively, press `f` on a search result to save it to your library without playing it yet
+1. Press `/` to open search, then type a genre, city, country, or station name. Results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide.
+2. Use `↑` / `↓` to highlight a result.
+3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch DriftFM.
+4. Press `Esc` instead to leave search without adding anything.
 
 **Managing your library:**
 
-- Your library is the main station list you see on launch
-- To remove a station, highlight it in the main list and press `f`
-- Switch between genre categories with `Tab` / `Shift+Tab` to browse the pre-loaded catalog
+- Your Library is the saved station list shown on launch.
+- To remove a saved station, highlight it in the Library and press `f`.
+- Switch between genre categories with `Tab` / `Shift+Tab`.
 
 **Coming back tomorrow:**
 
@@ -160,7 +169,7 @@ Settings are saved automatically to a JSON file in your config directory.
 
 ## Code Quality
 
-- **17 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, and filename sanitization
+- **23 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, filename sanitization, and mode-specific key mappings
 - **Zero `cargo clippy` warnings** under `-W clippy::all`
 - **Zero hardcoded colors** outside `theme.rs` — full semantic palette purity across all 14 UI modules
 - Thread-safe audio pipeline with lock-free atomic generation IDs for connection abandonment

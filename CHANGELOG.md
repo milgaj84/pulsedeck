@@ -4,6 +4,21 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+*   **Search Text Input Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`.
+*   **Search Add Flow Simplified**: Removed the add-without-play shortcut path after terminal compatibility testing showed it was unreliable on Ubuntu. Search results are now added only through `Enter`, which also starts playback.
+
+### Improved
+*   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `Enter` adds and plays from search, while `f` removes from the library.
+*   **Saved Result Feedback**: The search bar now shows `★ Saved to library` when the highlighted search result is already in the user's library.
+
+### Added
+*   **Search Shortcut Tests**: Added keymap tests covering plain text entry in search, disabled add-only keys, library-mode `f`, and search-mode `Enter`.
+
+---
+
 ## [0.1.3] - 2026-05-23
 
 ### Fixed
@@ -87,4 +102,3 @@ Initial release of the DriftFM cyber-synthwave internet radio player and smart t
 *   **System Notifications**: Desktop popups triggering alerts on fresh track changes with a silent notifier queue.
 *   **Persistent Configuration**: Settings stored persistently inside JSON databases to retain favorites, last played channels, startup parameters, themes, and recording directories.
 *   **Advanced Quality Suite**: Integrated modular unit testing systems for filename sanitizers and ICY metadata parsers.
-

@@ -1,129 +1,75 @@
-use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Table, Row, Cell, Clear};
 use crate::app::App;
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table};
+
 use super::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
-    // A popup rect centering at 60% horizontal, 65% vertical
-    let popup_area = super::centered_rect(60, 65, area);
+    // Keep the help compact so it still fits when terminal fonts are large.
+    let popup_area = super::centered_rect(68, 58, area);
 
-    // Clear the background of the popup area
     frame.render_widget(Clear, popup_area);
 
-    // Beautiful rounded deep purple block with neon pink border
     let block = Block::default()
-        .title(Span::styled(" ✦ DriftFM Control HUD ✦ ", theme::title()))
+        .title(Span::styled(" ✦ DriftFM Help ✦ ", theme::title()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(Style::default().bg(theme::bg()));
 
-    // Define table rows for key mappings
     let header_row = Row::new(vec![
-        Cell::from(Span::styled("Hotkey", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("Action Description", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))),
-    ])
-    .bottom_margin(1);
+        Cell::from(Span::styled("Key", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))),
+        Cell::from(Span::styled("Action", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))),
+    ]);
 
     let rows = vec![
-        Row::new(vec![
-            Cell::from(Span::styled(" ▸ Navigation ", Style::default().fg(theme::dim().fg.unwrap()).add_modifier(Modifier::UNDERLINED))),
-            Cell::from(""),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Up / k  ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Highlight previous station", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Down / j", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Highlight next station", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Enter   ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Play highlighted station", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Tab     ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Cycle genre categories forward", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Shift+Tab", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Cycle genre categories backward", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled(" ▸ Playback ", Style::default().fg(theme::dim().fg.unwrap()).add_modifier(Modifier::UNDERLINED))),
-            Cell::from(""),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Space   ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle Pause / Play", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  s       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Stop playback stream", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  + / -   ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Adjust volume (scales wave)", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  m       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Mute/unmute stream volume", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  r       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle Tape capture recording", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled(" ▸ Search ", Style::default().fg(theme::dim().fg.unwrap()).add_modifier(Modifier::UNDERLINED))),
-            Cell::from(""),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  /       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Open interactive catalog search", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  f       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Add/Remove favorite station", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled(" ▸ Layout Toggle ", Style::default().fg(theme::dim().fg.unwrap()).add_modifier(Modifier::UNDERLINED))),
-            Cell::from(""),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  b       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Cycle layout modes (Split ↔ Closed ↔ Full Bento)", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  p       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Cycle Right deck pages (Reels ↔ History)", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  v       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle Visualizer (Spectrum ↔ Osc ↔ Sim)", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  ,       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle Config / Settings menu", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  h / ?   ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Toggle this Help HUD", theme::text())),
-        ]),
-        Row::new(vec![
-            Cell::from(Span::styled("  Esc     ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Dismiss help overlay or quit app", theme::text())),
-        ]),
+        section("Playback"),
+        shortcut("Enter", "Play selected station; in search: add to Library + play"),
+        shortcut("Space", "Pause / resume"),
+        shortcut("s", "Stop playback"),
+        shortcut("+ / -", "Volume up / down"),
+        shortcut("m", "Mute / unmute"),
+        shortcut("r", "Start / stop tape recording"),
+        section("Library"),
+        shortcut("↑↓ / j k", "Move selection"),
+        shortcut("Tab / Shift+Tab", "Change genre category"),
+        shortcut("f", "Remove selected station from Library"),
+        section("Search"),
+        shortcut("/", "Open worldwide station search"),
+        shortcut("Type", "Filter/search by station, tag, city, or country"),
+        shortcut("↑↓", "Move through search results"),
+        shortcut("Enter", "Save highlighted result to Library and play it"),
+        shortcut("Esc", "Leave search without adding"),
+        section("Views & App"),
+        shortcut("b", "Cycle layout"),
+        shortcut("p", "Cycle deck page"),
+        shortcut("v", "Cycle visualizer"),
+        shortcut(",", "Open settings"),
+        shortcut("h / ?", "Show / hide help"),
+        shortcut("q / Esc", "Quit, or close overlay first"),
     ];
 
-    let widths = [
-        Constraint::Percentage(30),
-        Constraint::Percentage(70),
-    ];
-
-    let table = Table::new(rows, widths)
-        .header(header_row)
-        .block(block);
+    let widths = [Constraint::Percentage(30), Constraint::Percentage(70)];
+    let table = Table::new(rows, widths).header(header_row).block(block);
 
     frame.render_widget(table, popup_area);
+}
+
+fn section(label: &'static str) -> Row<'static> {
+    Row::new(vec![
+        Cell::from(Span::styled(
+            format!("▸ {label}"),
+            Style::default()
+                .fg(theme::dim().fg.unwrap())
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Cell::from(""),
+    ])
+}
+
+fn shortcut(key: &'static str, action: &'static str) -> Row<'static> {
+    Row::new(vec![
+        Cell::from(Span::styled(key, Style::default().fg(theme::highlight()))),
+        Cell::from(Span::styled(action, theme::text())),
+    ])
 }

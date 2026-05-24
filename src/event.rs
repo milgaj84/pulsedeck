@@ -33,11 +33,11 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Quit
         (_, KeyCode::Char('q')) => Some(Action::Quit),
         (_, KeyCode::Esc) => Some(Action::Quit),
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
 
         // Search
         (_, KeyCode::Char('/')) => Some(Action::EnterSearch),
-        (KeyModifiers::CONTROL, KeyCode::Char('f')) => Some(Action::EnterSearch),
+        (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::EnterSearch),
 
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
@@ -53,8 +53,8 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('-')) => Some(Action::VolumeDown),
         (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
 
-        // Favorites
-        (_, KeyCode::Char('f')) => Some(Action::ToggleFavorite),
+        // Library management
+        (_, KeyCode::Char('f')) => Some(Action::RemoveLibrarySelection),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
@@ -80,13 +80,14 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// Key mapping for search mode — all printable chars go to search input.
+/// Key mapping for search mode.
+/// Printable characters remain search input; Enter is the only add-from-search action.
 fn map_search(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         // Exit search
         (_, KeyCode::Esc) => Some(Action::ExitSearch),
 
-        // Confirm search (select highlighted + exit)
+        // Confirm search: add highlighted result, play it, and leave search
         (_, KeyCode::Enter) => Some(Action::SearchConfirm),
 
         // Navigate within filtered results
@@ -97,11 +98,63 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),
 
         // Ctrl+C still quits
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Char('\u{3}')) => Some(Action::Quit),
 
         // All other printable characters go to search input
         (_, KeyCode::Char(c)) => Some(Action::SearchInput(c)),
 
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn search_mode_treats_plain_f_as_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('f')), &InputMode::Search),
+            Some(Action::SearchInput('f')),
+        );
+    }
+
+    #[test]
+    fn search_mode_treats_plain_a_as_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('a')), &InputMode::Search),
+            Some(Action::SearchInput('a')),
+        );
+    }
+
+    #[test]
+    fn search_mode_f2_does_not_add_selected_result() {
+        assert_eq!(map_key(key(KeyCode::F(2)), &InputMode::Search), None,);
+    }
+
+    #[test]
+    fn search_mode_insert_does_not_add_selected_result() {
+        assert_eq!(map_key(key(KeyCode::Insert), &InputMode::Search), None,);
+    }
+
+    #[test]
+    fn normal_mode_f_removes_library_selection() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('f')), &InputMode::Normal),
+            Some(Action::RemoveLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn search_mode_enter_adds_and_plays_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Enter), &InputMode::Search),
+            Some(Action::SearchConfirm),
+        );
     }
 }
