@@ -7,14 +7,14 @@ All notable changes to the DriftFM project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-*   **Search Add Shortcut Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`. Adding a highlighted search result without playing now uses `Ctrl+A`.
+*   **Search Add Shortcut Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`. Adding a highlighted search result without playing now uses `F2`, with `Ctrl+A` and `Insert` accepted as fallback shortcuts.
 
 ### Improved
-*   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `Ctrl+A` adds from search, while `f` removes from the library.
+*   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `F2` adds from search, while `f` removes from the library.
 *   **Saved Result Feedback**: The search bar now shows `★ Saved to library` when the highlighted search result is already in the user's library.
 
 ### Added
-*   **Search Shortcut Tests**: Added keymap tests covering plain `f` text entry in search, `Ctrl+A` search add, library-mode `f`, and search-mode `Enter`.
+*   **Search Shortcut Tests**: Added keymap tests covering plain `f` text entry in search, `F2`, `Ctrl+A`, `Insert`, library-mode `f`, and search-mode `Enter`.
 
 ---
 
