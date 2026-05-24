@@ -84,14 +84,15 @@ The most important keys to get started:
 | Key | What it does |
 | :--- | :--- |
 | `↑` / `↓` | Move between stations |
-| `Enter` | Play selected station |
+| `Enter` | Play selected station; in search, add and play selected result |
 | `Tab` | Switch genre categories |
 | `/` | Search for any station worldwide |
+| `Ctrl+A` | In search: add selected result to library without playing |
 | `Space` | Pause / Resume |
 | `r` | Start / stop recording |
 | `b` | Cycle Bento Layout (Split ↔ Closed Bento ↔ Full Bento) |
 | `v` | Cycle Visualizer mode (Spectrum ↔ Real Osc ↔ Sim Osc) |
-| `f` | In search: add to library. In library: remove station |
+| `f` | In library: remove selected station |
 | `,` | Open settings |
 | `q` | Quit |
 
@@ -104,7 +105,7 @@ The most important keys to get started:
 1. Press `/` to open search, type a genre, city, or station name — results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide
 2. Use `↑` / `↓` to browse results
 3. Press `Enter` to tune in instantly — this also **automatically adds the station to your library** so it's there next time
-4. Alternatively, press `f` on a search result to save it to your library without playing it yet
+4. Alternatively, press `Ctrl+A` on a search result to save it to your library without playing it yet
 
 **Managing your library:**
 
