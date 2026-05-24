@@ -23,8 +23,8 @@ pub enum Action {
     SearchBackspace,
     SearchConfirm,
 
-    /// Favorites
-    ToggleFavorite,
+    /// Library management
+    ManageLibrarySelection,
     NextGenre,
     PrevGenre,
 
