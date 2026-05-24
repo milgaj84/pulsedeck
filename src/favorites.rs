@@ -174,6 +174,19 @@ impl Library {
         lib
     }
 
+    /// Create an in-memory library for tests without touching the user's config file.
+    #[cfg(test)]
+    pub fn in_memory(stations: Vec<Station>) -> Self {
+        let mut lib = Self {
+            stations,
+            available_genres: Vec::new(),
+            settings: Settings::default(),
+            path: None,
+        };
+        lib.rebuild_genres();
+        lib
+    }
+
     /// Add a station to the library (deduplicates by URL).
     /// Returns true if actually added (not a duplicate).
     pub fn add(&mut self, station: Station) -> bool {
@@ -299,19 +312,17 @@ mod tests {
             stations: vec![],
             available_genres: vec![],
             settings: Settings::default(),
-            path: None, // No disk persistence for test
+            path: None,
         };
-
         let station = Station {
-            name: "Test".into(),
-            url: "http://test.com/stream".into(),
-            genre: "Synthwave".into(),
-            country: "US".into(),
+            name: "Test".to_string(),
+            url: "http://test".to_string(),
+            genre: "Synthwave".to_string(),
+            country: "US".to_string(),
             bitrate: 128,
         };
-
         assert!(lib.add(station.clone()));
-        assert!(!lib.add(station)); // duplicate
+        assert!(!lib.add(station));
         assert_eq!(lib.stations.len(), 1);
     }
 
@@ -319,19 +330,18 @@ mod tests {
     fn test_library_remove() {
         let mut lib = Library {
             stations: vec![Station {
-                name: "Test".into(),
-                url: "http://test.com/stream".into(),
-                genre: "Synthwave".into(),
-                country: "US".into(),
+                name: "Test".to_string(),
+                url: "http://test".to_string(),
+                genre: "Synthwave".to_string(),
+                country: "US".to_string(),
                 bitrate: 128,
             }],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
         };
-
-        assert!(!lib.remove("http://nonexistent.com"));
-        assert!(lib.remove("http://test.com/stream"));
+        assert!(lib.remove("http://test"));
+        assert!(!lib.remove("http://missing"));
         assert!(lib.stations.is_empty());
     }
 
@@ -339,36 +349,59 @@ mod tests {
     fn test_library_contains() {
         let lib = Library {
             stations: vec![Station {
-                name: "Test".into(),
-                url: "http://test.com/stream".into(),
-                genre: "Synthwave".into(),
-                country: "US".into(),
+                name: "Test".to_string(),
+                url: "http://test".to_string(),
+                genre: "Synthwave".to_string(),
+                country: "US".to_string(),
                 bitrate: 128,
             }],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
         };
-
-        assert!(lib.contains("http://test.com/stream"));
-        assert!(!lib.contains("http://other.com"));
+        assert!(lib.contains("http://test"));
+        assert!(!lib.contains("http://missing"));
     }
 
     #[test]
-    fn test_rebuild_genres_includes_all() {
+    fn test_rebuild_genres() {
         let mut lib = Library {
             stations: vec![
-                Station { name: "A".into(), url: "a".into(), genre: "Synthwave".into(), country: "US".into(), bitrate: 128 },
-                Station { name: "B".into(), url: "b".into(), genre: "Ambient".into(), country: "US".into(), bitrate: 128 },
+                Station {
+                    name: "A".to_string(),
+                    url: "http://a".to_string(),
+                    genre: "Synthwave".to_string(),
+                    country: "US".to_string(),
+                    bitrate: 128,
+                },
+                Station {
+                    name: "B".to_string(),
+                    url: "http://b".to_string(),
+                    genre: "Ambient".to_string(),
+                    country: "US".to_string(),
+                    bitrate: 128,
+                },
             ],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
         };
         lib.rebuild_genres();
-
         assert_eq!(lib.available_genres[0], "All");
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
         assert!(lib.available_genres.contains(&"Ambient".to_string()));
+    }
+
+    #[test]
+    fn test_in_memory_library_rebuilds_genres_without_path() {
+        let lib = Library::in_memory(vec![Station {
+            name: "Test".to_string(),
+            url: "http://test".to_string(),
+            genre: "Synthwave".to_string(),
+            country: "US".to_string(),
+            bitrate: 128,
+        }]);
+        assert!(lib.path.is_none());
+        assert!(lib.available_genres.contains(&"Synthwave".to_string()));
     }
 }
