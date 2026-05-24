@@ -83,8 +83,16 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(Span::styled("Open interactive catalog search", theme::text())),
         ]),
         Row::new(vec![
+            Cell::from(Span::styled("  Enter   ", Style::default().fg(theme::highlight()))),
+            Cell::from(Span::styled("In search: add highlighted station and play", theme::text())),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("  Ctrl+A  ", Style::default().fg(theme::highlight()))),
+            Cell::from(Span::styled("In search: add highlighted station without playing", theme::text())),
+        ]),
+        Row::new(vec![
             Cell::from(Span::styled("  f       ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Add/Remove favorite station", theme::text())),
+            Cell::from(Span::styled("In library: remove highlighted station", theme::text())),
         ]),
         Row::new(vec![
             Cell::from(Span::styled(" ▸ Layout Toggle ", Style::default().fg(theme::dim().fg.unwrap()).add_modifier(Modifier::UNDERLINED))),
@@ -112,7 +120,7 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         ]),
         Row::new(vec![
             Cell::from(Span::styled("  Esc     ", Style::default().fg(theme::highlight()))),
-            Cell::from(Span::styled("Dismiss help overlay or quit app", theme::text())),
+            Cell::from(Span::styled("Dismiss help/search overlay or quit app", theme::text())),
         ]),
     ];
 
