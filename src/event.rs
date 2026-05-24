@@ -54,7 +54,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
 
         // Library management
-        (_, KeyCode::Char('f')) => Some(Action::ToggleFavorite),
+        (_, KeyCode::Char('f')) => Some(Action::ManageLibrarySelection),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
@@ -97,7 +97,7 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),
 
         // Add selected result without leaving search. Bare `f` stays available for typing queries.
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) => Some(Action::ToggleFavorite),
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => Some(Action::ManageLibrarySelection),
 
         // Ctrl+C still quits
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
@@ -133,7 +133,7 @@ mod tests {
     fn search_mode_ctrl_a_adds_selected_result() {
         assert_eq!(
             map_key(ctrl_key('a'), &InputMode::Search),
-            Some(Action::ToggleFavorite),
+            Some(Action::ManageLibrarySelection),
         );
     }
 
@@ -141,7 +141,7 @@ mod tests {
     fn normal_mode_f_manages_library_selection() {
         assert_eq!(
             map_key(key(KeyCode::Char('f')), &InputMode::Normal),
-            Some(Action::ToggleFavorite),
+            Some(Action::ManageLibrarySelection),
         );
     }
 
