@@ -7,9 +7,15 @@ use super::theme;
 /// Render the search input bar.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let result_count = app.search_results.len();
+    let selected_saved = app.search_results
+        .get(app.selected)
+        .map(|station| app.library.contains(&station.url))
+        .unwrap_or(false);
 
     let api_indicator = if app.searching_api {
         Span::styled("  ◌ searching...", Style::default().fg(theme::warm()))
+    } else if selected_saved {
+        Span::styled("  ★ Saved to library", Style::default().fg(theme::warm()))
     } else if result_count > 0 {
         Span::styled(format!("  {} found", result_count), theme::dim())
     } else {
