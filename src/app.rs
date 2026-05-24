@@ -436,8 +436,8 @@ impl App {
                 self.select_playing();
             }
 
-            // ── Favorites (library management) ────────────────────
-            Action::ToggleFavorite => {
+            // ── Library management ───────────────────────────────
+            Action::ManageLibrarySelection => {
                 // In Normal mode: remove station from library
                 // In Search mode: add station to library
                 match self.input_mode {
