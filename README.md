@@ -87,8 +87,6 @@ The most important keys to get started:
 | `Enter` | Play selected station; in search, add and play selected result |
 | `Tab` | Switch genre categories |
 | `/` | Search for any station worldwide |
-| `F2` | In search: add selected result to library without playing |
-| `Ctrl+A` / `Insert` | Fallback search add shortcuts |
 | `Space` | Pause / Resume |
 | `r` | Start / stop recording |
 | `b` | Cycle Bento Layout (Split ↔ Closed Bento ↔ Full Bento) |
@@ -106,7 +104,6 @@ The most important keys to get started:
 1. Press `/` to open search, type a genre, city, or station name — results come from the [radio-browser.info](https://www.radio-browser.info/) catalog of 30,000+ stations worldwide
 2. Use `↑` / `↓` to browse results
 3. Press `Enter` to tune in instantly — this also **automatically adds the station to your library** so it's there next time
-4. Alternatively, press `F2` on a search result to save it to your library without playing it yet. `Ctrl+A` and `Insert` are accepted as fallbacks on terminals that pass them through.
 
 **Managing your library:**
 
