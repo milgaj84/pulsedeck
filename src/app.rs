@@ -641,13 +641,6 @@ impl App {
         true
     }
 
-    /// Backward-compatible helper for callers that already know the response is current.
-    pub fn set_search_results(&mut self, results: Vec<Station>) {
-        self.searching_api = false;
-        self.search_results = results;
-        self.selected = 0;
-    }
-
     fn refresh_search_state(&mut self) {
         let query = self.search_query.trim().to_string();
 
@@ -1018,10 +1011,8 @@ mod tests {
         app.update(Action::SearchInput('o'));
         app.mark_search_started("lo");
 
-        let accepted = app.apply_search_response(
-            "lo".to_string(),
-            Err("network down".to_string()),
-        );
+        let accepted =
+            app.apply_search_response("lo".to_string(), Err("network down".to_string()));
 
         assert!(accepted);
         assert!(app.search_results.is_empty());
