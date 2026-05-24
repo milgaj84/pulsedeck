@@ -53,7 +53,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('-')) => Some(Action::VolumeDown),
         (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
 
-        // Favorites
+        // Library management
         (_, KeyCode::Char('f')) => Some(Action::ToggleFavorite),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
@@ -106,5 +106,50 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char(c)) => Some(Action::SearchInput(c)),
 
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn search_mode_treats_plain_f_as_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('f')), &InputMode::Search),
+            Some(Action::SearchInput('f')),
+        );
+    }
+
+    #[test]
+    fn search_mode_ctrl_a_adds_selected_result() {
+        assert_eq!(
+            map_key(ctrl_key('a'), &InputMode::Search),
+            Some(Action::ToggleFavorite),
+        );
+    }
+
+    #[test]
+    fn normal_mode_f_manages_library_selection() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('f')), &InputMode::Normal),
+            Some(Action::ToggleFavorite),
+        );
+    }
+
+    #[test]
+    fn search_mode_enter_adds_and_plays_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Enter), &InputMode::Search),
+            Some(Action::SearchConfirm),
+        );
     }
 }
