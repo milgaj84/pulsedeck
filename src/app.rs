@@ -2,14 +2,27 @@ use crate::action::Action;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 use crate::favorites::Library;
 use crate::radio::Station;
-use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+const SEARCH_MIN_CHARS: usize = 2;
 
 /// Input mode determines how keyboard events are routed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
     Normal,
     Search,
+}
+
+/// Explicit search state for UI messages and stale-response handling.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchStatus {
+    WaitingForInput,
+    Debouncing { query: String },
+    Searching { query: String },
+    Ready { query: String },
+    Empty { query: String },
+    Error { query: String, message: String },
 }
 
 /// Playback state visible to the UI.
@@ -55,7 +68,7 @@ pub struct App {
     pub selected: usize,
     pub playback: PlaybackState,
     pub playing_url: Option<String>,
-    pub volume: u8,         // 0–100
+    pub volume: u8, // 0-100
     pub muted: bool,
     pub should_quit: bool,
 
@@ -64,8 +77,9 @@ pub struct App {
 
     // Search state
     pub search_query: String,
+    pub search_status: SearchStatus,
 
-    // API search state — main.rs checks these to spawn async fetches
+    // API search state - main.rs checks these to spawn async fetches
     pub pending_api_search: Option<String>,
     pub searching_api: bool,
     last_api_query: String,
@@ -109,6 +123,7 @@ impl App {
             should_quit: false,
             input_mode: InputMode::Normal,
             search_query: String::new(),
+            search_status: SearchStatus::WaitingForInput,
             pending_api_search: None,
             searching_api: false,
             last_api_query: String::new(),
@@ -155,7 +170,7 @@ impl App {
                     if Some(&url) == self.playing_url.as_ref() {
                         let is_new = !title.is_empty() && self.current_track.as_ref() != Some(&title);
                         self.current_track = Some(title.clone());
-                        
+
                         if !title.is_empty() && self.song_history.back() != Some(&title) {
                             self.song_history.push_back(title.clone());
                             while self.song_history.len() > 100 {
@@ -167,18 +182,20 @@ impl App {
                         if is_new && self.library.settings.notifications_enabled {
                             let mut should_notify = true;
                             if let Some(idle_ms) = get_user_idle_ms() {
-                                if idle_ms > 120_000 { // 2 minutes of system idle suppresses toast popups
+                                if idle_ms > 120_000 {
+                                    // 2 minutes of system idle suppresses toast popups
                                     should_notify = false;
                                 }
                             }
 
                             if should_notify {
-                                let station_name = self.now_playing()
+                                let station_name = self
+                                    .now_playing()
                                     .map(|s| s.name.clone())
                                     .unwrap_or_else(|| "Radio Stream".to_string());
-                                
+
                                 let _ = notify_rust::Notification::new()
-                                    .summary("DriftFM ✦ Now Playing")
+                                    .summary("DriftFM - Now Playing")
                                     .body(&format!("♫ {}\nStation: {}", title, station_name))
                                     .icon("audio-card")
                                     .timeout(4000)
@@ -238,8 +255,13 @@ impl App {
                     if genre == "All" {
                         self.library.stations.iter().collect()
                     } else {
-                        self.library.stations.iter()
-                            .filter(|s| crate::favorites::resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
+                        self.library
+                            .stations
+                            .iter()
+                            .filter(|s| {
+                                crate::favorites::resolve_parent_genre(&s.genre)
+                                    .eq_ignore_ascii_case(genre)
+                            })
                             .collect()
                     }
                 } else {
@@ -269,30 +291,33 @@ impl App {
                 Action::PlaySelected | Action::TogglePause => {
                     match self.selected_setting_idx {
                         0 => {
-                            self.library.settings.notifications_enabled = !self.library.settings.notifications_enabled;
+                            self.library.settings.notifications_enabled =
+                                !self.library.settings.notifications_enabled;
                         }
                         1 => {
                             self.library.settings.autoplay_last = !self.library.settings.autoplay_last;
                         }
                         2 => {
-                            self.library.settings.recording_dir = match self.library.settings.recording_dir.as_str() {
-                                "./recordings" => "./music".to_string(),
-                                "./music" => "./driftfm-captures".to_string(),
-                                _ => "./recordings".to_string(),
-                            };
+                            self.library.settings.recording_dir =
+                                match self.library.settings.recording_dir.as_str() {
+                                    "./recordings" => "./music".to_string(),
+                                    "./music" => "./driftfm-captures".to_string(),
+                                    _ => "./recordings".to_string(),
+                                };
                         }
                         3 => {
                             self.library.settings.keep_snippets = !self.library.settings.keep_snippets;
                         }
                         4 => {
-                            // Cycle min duration: 30 → 60 → 90 → 120 → 180
-                            self.library.settings.min_song_duration_secs = match self.library.settings.min_song_duration_secs {
-                                30 => 60,
-                                60 => 90,
-                                90 => 120,
-                                120 => 180,
-                                _ => 30,
-                            };
+                            // Cycle min duration: 30 -> 60 -> 90 -> 120 -> 180
+                            self.library.settings.min_song_duration_secs =
+                                match self.library.settings.min_song_duration_secs {
+                                    30 => 60,
+                                    60 => 90,
+                                    90 => 120,
+                                    120 => 180,
+                                    _ => 30,
+                                };
                         }
                         5 => {
                             use crate::ui::theme::ThemeName;
@@ -320,7 +345,9 @@ impl App {
                     self.update_visualizer();
                     return;
                 }
-                _ => { return; } // Block all other actions while settings are open
+                _ => {
+                    return;
+                } // Block all other actions while settings are open
             }
         }
 
@@ -345,7 +372,7 @@ impl App {
                 let station = self.visible_stations().get(self.selected).copied().cloned();
                 if let Some(station) = station {
                     self.playing_url = Some(station.url.clone());
-                    
+
                     // Persist last played station URL
                     self.library.settings.last_played_url = Some(station.url.clone());
                     self.library.save();
@@ -386,12 +413,15 @@ impl App {
                 self.sync_volume();
             }
 
-            // ── Search ───────────────────────────────────────────
+            // -- Search -------------------------------------------------------
             Action::EnterSearch => {
                 self.input_mode = InputMode::Search;
                 self.search_query.clear();
                 self.search_results.clear();
                 self.last_api_query.clear();
+                self.search_status = SearchStatus::WaitingForInput;
+                self.searching_api = false;
+                self.pending_api_search = None;
                 self.selected = 0;
             }
             Action::ExitSearch => {
@@ -399,20 +429,20 @@ impl App {
                 self.search_query.clear();
                 self.search_results.clear();
                 self.last_api_query.clear();
+                self.search_status = SearchStatus::WaitingForInput;
+                self.searching_api = false;
+                self.pending_api_search = None;
                 self.selected = 0;
                 // Re-select the playing station in the library
                 self.select_playing();
             }
             Action::SearchInput(c) => {
                 self.search_query.push(c);
-                self.trigger_api_search();
+                self.refresh_search_state();
             }
             Action::SearchBackspace => {
                 self.search_query.pop();
-                if self.search_query.is_empty() {
-                    self.search_results.clear();
-                }
-                self.trigger_api_search();
+                self.refresh_search_state();
             }
             Action::SearchConfirm => {
                 // Add the selected search result to library + play it
@@ -432,11 +462,14 @@ impl App {
                 self.search_query.clear();
                 self.search_results.clear();
                 self.last_api_query.clear();
+                self.search_status = SearchStatus::WaitingForInput;
+                self.searching_api = false;
+                self.pending_api_search = None;
                 self.selected = 0;
                 self.select_playing();
             }
 
-            // ── Library management ───────────────────────────────
+            // -- Library management ------------------------------------------
             Action::RemoveLibrarySelection => {
                 if self.input_mode == InputMode::Normal {
                     if let Some(station) = self.visible_stations().get(self.selected) {
@@ -474,7 +507,6 @@ impl App {
                 }
             }
 
-
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
                 if self.show_help {
@@ -492,13 +524,14 @@ impl App {
                 if self.playing_url.is_some() {
                     match self.recording_state {
                         RecordingState::Off => {
-                            let category = self.now_playing()
+                            let category = self
+                                .now_playing()
                                 .map(|s| s.genre.clone())
                                 .unwrap_or_else(|| "Unknown".to_string());
                             let rec_dir = self.library.settings.recording_dir.clone();
                             let keep_snippets = self.library.settings.keep_snippets;
                             let min_secs = self.library.settings.min_song_duration_secs;
-                            
+
                             self.audio.send(AudioCommand::StartRecording {
                                 recording_dir: rec_dir,
                                 category,
@@ -544,21 +577,107 @@ impl App {
         }
     }
 
-    /// Merge API search results (replaces current results for that query).
+    /// Return the query currently waiting for debounce, if any.
+    pub fn current_debounce_query(&self) -> Option<&str> {
+        match &self.search_status {
+            SearchStatus::Debouncing { query } => Some(query.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Mark a debounced query as actively searching.
+    pub fn mark_search_started(&mut self, query: &str) -> bool {
+        let current_query = self.search_query.trim();
+        if self.input_mode != InputMode::Search || current_query != query {
+            return false;
+        }
+
+        if matches!(&self.search_status, SearchStatus::Debouncing { query: q } if q == query) {
+            self.search_status = SearchStatus::Searching {
+                query: query.to_string(),
+            };
+            self.searching_api = true;
+            self.last_api_query = query.to_string();
+            self.pending_api_search = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Apply a query-tagged search response. Returns false when the response was stale.
+    pub fn apply_search_response(
+        &mut self,
+        query: String,
+        result: Result<Vec<Station>, String>,
+    ) -> bool {
+        let current_query = self.search_query.trim();
+        let is_current_search = self.input_mode == InputMode::Search
+            && current_query == query
+            && matches!(&self.search_status, SearchStatus::Searching { query: q } if q == &query);
+
+        if !is_current_search {
+            return false;
+        }
+
+        self.searching_api = false;
+        self.selected = 0;
+
+        match result {
+            Ok(results) => {
+                self.search_results = results;
+                if self.search_results.is_empty() {
+                    self.search_status = SearchStatus::Empty { query };
+                } else {
+                    self.search_status = SearchStatus::Ready { query };
+                }
+            }
+            Err(message) => {
+                self.search_results.clear();
+                self.search_status = SearchStatus::Error { query, message };
+            }
+        }
+
+        true
+    }
+
+    /// Backward-compatible helper for callers that already know the response is current.
     pub fn set_search_results(&mut self, results: Vec<Station>) {
         self.searching_api = false;
         self.search_results = results;
         self.selected = 0;
     }
 
-    /// Signal that the main loop should fire an API search.
-    fn trigger_api_search(&mut self) {
+    fn refresh_search_state(&mut self) {
         let query = self.search_query.trim().to_string();
-        if query.len() >= 2 && query != self.last_api_query {
-            self.pending_api_search = Some(query.clone());
-            self.last_api_query = query;
-            self.searching_api = true;
+
+        if query.chars().count() < SEARCH_MIN_CHARS {
+            self.search_results.clear();
+            self.selected = 0;
+            self.searching_api = false;
+            self.pending_api_search = None;
+            self.search_status = SearchStatus::WaitingForInput;
+            return;
         }
+
+        let is_already_current = matches!(
+            &self.search_status,
+            SearchStatus::Debouncing { query: q }
+                | SearchStatus::Searching { query: q }
+                | SearchStatus::Ready { query: q }
+                | SearchStatus::Empty { query: q }
+                | SearchStatus::Error { query: q, .. } if q == &query
+        );
+
+        if is_already_current {
+            return;
+        }
+
+        self.search_results.clear();
+        self.selected = 0;
+        self.searching_api = false;
+        self.pending_api_search = None;
+        self.search_status = SearchStatus::Debouncing { query };
     }
 
     /// Try to select the currently playing station in the library.
@@ -583,7 +702,10 @@ impl App {
     /// Get the currently playing station, if any.
     pub fn now_playing(&self) -> Option<&Station> {
         self.playing_url.as_ref().and_then(|url| {
-            self.library.stations.iter().find(|s| s.url == *url)
+            self.library
+                .stations
+                .iter()
+                .find(|s| s.url == *url)
                 .or_else(|| self.search_results.iter().find(|s| s.url == *url))
         })
     }
@@ -596,8 +718,13 @@ impl App {
                     if genre == "All" {
                         self.library.stations.len()
                     } else {
-                        self.library.stations.iter()
-                            .filter(|s| crate::favorites::resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
+                        self.library
+                            .stations
+                            .iter()
+                            .filter(|s| {
+                                crate::favorites::resolve_parent_genre(&s.genre)
+                                    .eq_ignore_ascii_case(genre)
+                            })
                             .count()
                     }
                 } else {
@@ -654,7 +781,7 @@ impl App {
         // 3. Map bins logarithmically to equal-width frequency bands
         let num_bands = 40;
         let bins_count = n / 2;
-        
+
         if self.visualizer_peaks.len() != num_bands {
             self.visualizer_peaks = vec![0.0; num_bands];
         }
@@ -665,7 +792,7 @@ impl App {
             let max_bin = bins_count as f32;
             let bin_start_f = min_bin * (max_bin / min_bin).powf(t);
             let bin_end_f = min_bin * (max_bin / min_bin).powf((x + 1) as f32 / num_bands as f32);
-            
+
             let start = (bin_start_f.floor() as usize).clamp(0, bins_count - 1);
             let end = (bin_end_f.ceil() as usize).clamp(start + 1, bins_count);
 
@@ -676,7 +803,7 @@ impl App {
                 count += 1;
             }
             let avg = if count > 0 { sum / count as f32 } else { 0.0 };
-            
+
             // Equalize: boost higher frequency ranges dynamically since human hearing perceives them differently
             let boost = 1.0 + (x as f32 / num_bands as f32) * 4.0;
             let compressed = avg.sqrt();
@@ -694,7 +821,7 @@ impl App {
     }
 }
 
-// ── Visualizer FFT Complex Engine ─────────────────────────────────────
+// -- Visualizer FFT Complex Engine --------------------------------------
 
 #[derive(Debug, Clone, Copy)]
 struct Complex {
@@ -771,7 +898,184 @@ fn fft_rec(input: &[Complex], output: &mut [Complex]) {
     }
 }
 
-// ── Windows User Idle Detection Helper ─────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn station(name: &str, url: &str) -> Station {
+        Station {
+            name: name.to_string(),
+            url: url.to_string(),
+            genre: "Synthwave".to_string(),
+            country: "US".to_string(),
+            bitrate: 128,
+        }
+    }
+
+    fn test_app() -> App {
+        App::new(Library::in_memory(vec![]))
+    }
+
+    #[test]
+    fn short_search_query_clears_results_and_waits_for_input() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search_results = vec![station("Old", "http://old")];
+
+        app.update(Action::SearchInput('l'));
+
+        assert!(app.search_results.is_empty());
+        assert_eq!(app.search_status, SearchStatus::WaitingForInput);
+        assert!(app.current_debounce_query().is_none());
+        assert!(!app.searching_api);
+    }
+
+    #[test]
+    fn valid_search_query_enters_debounce_state() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Debouncing {
+                query: "lo".to_string()
+            }
+        );
+        assert_eq!(app.current_debounce_query(), Some("lo"));
+        assert!(!app.searching_api);
+    }
+
+    #[test]
+    fn mark_search_started_moves_debounced_query_to_searching() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+
+        assert!(app.mark_search_started("lo"));
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Searching {
+                query: "lo".to_string()
+            }
+        );
+        assert!(app.searching_api);
+    }
+
+    #[test]
+    fn current_query_success_response_is_accepted() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+        app.mark_search_started("lo");
+
+        let accepted = app.apply_search_response(
+            "lo".to_string(),
+            Ok(vec![station("Lo-Fi Radio", "http://lofi")]),
+        );
+
+        assert!(accepted);
+        assert_eq!(app.search_results.len(), 1);
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Ready {
+                query: "lo".to_string()
+            }
+        );
+        assert!(!app.searching_api);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn current_query_empty_response_sets_empty_status() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('z'));
+        app.update(Action::SearchInput('z'));
+        app.mark_search_started("zz");
+
+        let accepted = app.apply_search_response("zz".to_string(), Ok(vec![]));
+
+        assert!(accepted);
+        assert!(app.search_results.is_empty());
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Empty {
+                query: "zz".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn current_query_error_response_sets_error_status() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+        app.mark_search_started("lo");
+
+        let accepted = app.apply_search_response(
+            "lo".to_string(),
+            Err("network down".to_string()),
+        );
+
+        assert!(accepted);
+        assert!(app.search_results.is_empty());
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Error {
+                query: "lo".to_string(),
+                message: "network down".to_string()
+            }
+        );
+        assert!(!app.searching_api);
+    }
+
+    #[test]
+    fn stale_search_response_is_ignored() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+        app.update(Action::SearchInput('f'));
+        app.update(Action::SearchInput('i'));
+        app.mark_search_started("lofi");
+
+        let accepted = app.apply_search_response(
+            "lo".to_string(),
+            Ok(vec![station("Old Result", "http://old")]),
+        );
+
+        assert!(!accepted);
+        assert!(app.search_results.is_empty());
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Searching {
+                query: "lofi".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn normal_mode_search_response_is_ignored() {
+        let mut app = test_app();
+
+        let accepted = app.apply_search_response(
+            "lo".to_string(),
+            Ok(vec![station("Ignored", "http://ignored")]),
+        );
+
+        assert!(!accepted);
+        assert!(app.search_results.is_empty());
+        assert_eq!(app.search_status, SearchStatus::WaitingForInput);
+    }
+}
+
+// -- Windows User Idle Detection Helper ---------------------------------
 
 #[cfg(target_os = "windows")]
 fn get_user_idle_ms() -> Option<u64> {
