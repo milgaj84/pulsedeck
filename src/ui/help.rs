@@ -87,8 +87,12 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
             Cell::from(Span::styled("In search: add highlighted station and play", theme::text())),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("  Ctrl+A  ", Style::default().fg(theme::highlight()))),
+            Cell::from(Span::styled("  F2      ", Style::default().fg(theme::highlight()))),
             Cell::from(Span::styled("In search: add highlighted station without playing", theme::text())),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("  Ctrl+A / Ins", Style::default().fg(theme::highlight()))),
+            Cell::from(Span::styled("Fallback search add shortcuts", theme::text())),
         ]),
         Row::new(vec![
             Cell::from(Span::styled("  f       ", Style::default().fg(theme::highlight()))),
