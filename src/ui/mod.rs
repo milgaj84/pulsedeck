@@ -1,11 +1,11 @@
-pub mod theme;
-pub mod header;
-pub mod stations;
 pub mod controls;
-pub mod search;
 pub mod deck;
+pub mod header;
 pub mod help;
+pub mod search;
 pub mod settings;
+pub mod stations;
+pub mod theme;
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph};
@@ -27,11 +27,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(1),  // header
-            Constraint::Length(1),  // separator
-            Constraint::Min(5),     // main content split
-            Constraint::Length(1),  // separator
-            Constraint::Length(2),  // controls (status + keybinds)
+            Constraint::Length(1), // header
+            Constraint::Length(1), // separator
+            Constraint::Min(5),    // main content split
+            Constraint::Length(1), // separator
+            Constraint::Length(2), // controls (status + keybinds)
         ])
         .split(size);
 

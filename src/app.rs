@@ -51,6 +51,12 @@ pub enum LayoutMode {
     RightOnly, // Mode 2: Only Bento, Tape Deck full width (100%)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppNotice {
+    Info(String),
+    Error(String),
+}
+
 /// Core application state.
 ///
 /// Two completely separate data sources:
@@ -71,6 +77,8 @@ pub struct App {
     pub volume: u8, // 0-100
     pub muted: bool,
     pub should_quit: bool,
+    pub notice: Option<AppNotice>,
+    notice_ticks_remaining: u16,
 
     // Input mode
     pub input_mode: InputMode,
@@ -121,6 +129,8 @@ impl App {
             volume: 80,
             muted: false,
             should_quit: false,
+            notice: None,
+            notice_ticks_remaining: 0,
             input_mode: InputMode::Normal,
             search_query: String::new(),
             search_status: SearchStatus::WaitingForInput,
@@ -161,6 +171,30 @@ impl App {
         app
     }
 
+    fn set_info_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some(AppNotice::Info(message.into()));
+        self.notice_ticks_remaining = 90;
+    }
+
+    fn set_error_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some(AppNotice::Error(message.into()));
+        self.notice_ticks_remaining = 150;
+    }
+
+    fn tick_notice(&mut self) {
+        if self.notice_ticks_remaining > 0 {
+            self.notice_ticks_remaining -= 1;
+        } else {
+            self.notice = None;
+        }
+    }
+
+    fn save_library_or_notice(&mut self, context: &str) {
+        if let Err(err) = self.library.save() {
+            self.set_error_notice(format!("Could not save {context}: {err}"));
+        }
+    }
+
     /// Poll for audio status updates (non-blocking).
     pub fn poll_audio_status(&mut self) {
         while let Ok(status) = self.audio.status_rx.try_recv() {
@@ -168,7 +202,8 @@ impl App {
                 AudioStatus::TrackChanged { url, title } => {
                     // Safety check: discard track updates that do not match the current playing URL!
                     if Some(&url) == self.playing_url.as_ref() {
-                        let is_new = !title.is_empty() && self.current_track.as_ref() != Some(&title);
+                        let is_new =
+                            !title.is_empty() && self.current_track.as_ref() != Some(&title);
                         self.current_track = Some(title.clone());
 
                         if !title.is_empty() && self.song_history.back() != Some(&title) {
@@ -295,7 +330,8 @@ impl App {
                                 !self.library.settings.notifications_enabled;
                         }
                         1 => {
-                            self.library.settings.autoplay_last = !self.library.settings.autoplay_last;
+                            self.library.settings.autoplay_last =
+                                !self.library.settings.autoplay_last;
                         }
                         2 => {
                             self.library.settings.recording_dir =
@@ -306,7 +342,8 @@ impl App {
                                 };
                         }
                         3 => {
-                            self.library.settings.keep_snippets = !self.library.settings.keep_snippets;
+                            self.library.settings.keep_snippets =
+                                !self.library.settings.keep_snippets;
                         }
                         4 => {
                             // Cycle min duration: 30 -> 60 -> 90 -> 120 -> 180
@@ -328,7 +365,7 @@ impl App {
                         }
                         _ => {}
                     }
-                    self.library.save();
+                    self.save_library_or_notice("settings");
                     return;
                 }
                 Action::ToggleSettings => {
@@ -341,6 +378,7 @@ impl App {
                 }
                 Action::Tick => {
                     self.tick_count += 1;
+                    self.tick_notice();
                     self.poll_audio_status();
                     self.update_visualizer();
                     return;
@@ -375,7 +413,7 @@ impl App {
 
                     // Persist last played station URL
                     self.library.settings.last_played_url = Some(station.url.clone());
-                    self.library.save();
+                    self.save_library_or_notice("last played station");
 
                     self.audio.send(AudioCommand::Play(station.url));
                     self.sync_volume();
@@ -447,12 +485,18 @@ impl App {
             Action::SearchConfirm => {
                 // Add the selected search result to library + play it
                 if let Some(station) = self.search_results.get(self.selected).cloned() {
-                    self.library.add(station.clone());
+                    match self.library.add(station.clone()) {
+                        Ok(true) => self.set_info_notice("Station saved to library"),
+                        Ok(false) => {}
+                        Err(err) => self.set_error_notice(format!(
+                            "Station added in memory, but could not save library: {err}"
+                        )),
+                    }
                     self.playing_url = Some(station.url.clone());
 
                     // Persist last played station URL
                     self.library.settings.last_played_url = Some(station.url.clone());
-                    self.library.save();
+                    self.save_library_or_notice("last played station");
 
                     self.audio.send(AudioCommand::Play(station.url));
                     self.sync_volume();
@@ -474,7 +518,13 @@ impl App {
                 if self.input_mode == InputMode::Normal {
                     if let Some(station) = self.visible_stations().get(self.selected) {
                         let url = station.url.clone();
-                        self.library.remove(&url);
+                        match self.library.remove(&url) {
+                            Ok(true) => self.set_info_notice("Station removed"),
+                            Ok(false) => {}
+                            Err(err) => self.set_error_notice(format!(
+                                "Station removed in memory, but could not save library: {err}"
+                            )),
+                        }
                         // Clamp selection
                         let count = self.visible_count();
                         if self.selected >= count && self.selected > 0 {
@@ -808,7 +858,8 @@ impl App {
             if target > current {
                 self.visualizer_peaks[x] = target; // Fast rise
             } else {
-                self.visualizer_peaks[x] = (current - 0.08).max(target).max(0.0); // Smooth fall
+                self.visualizer_peaks[x] = (current - 0.08).max(target).max(0.0);
+                // Smooth fall
             }
         }
     }
@@ -889,6 +940,52 @@ fn fft_rec(input: &[Complex], output: &mut [Complex]) {
         output[k] = even_fft[k].add(t);
         output[k + n / 2] = even_fft[k].sub(t);
     }
+}
+
+// -- Windows User Idle Detection Helper ---------------------------------
+
+#[cfg(target_os = "windows")]
+fn get_user_idle_ms() -> Option<u64> {
+    #[repr(C)]
+    #[allow(clippy::upper_case_acronyms)] // Mirrors the Win32 API struct name
+    struct LASTINPUTINFO {
+        cb_size: u32,
+        dw_time: u32,
+    }
+
+    extern "system" {
+        fn GetLastInputInfo(plii: *mut LASTINPUTINFO) -> i32;
+        fn GetTickCount64() -> u64;
+    }
+
+    let mut lii = LASTINPUTINFO {
+        cb_size: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dw_time: 0,
+    };
+
+    unsafe {
+        if GetLastInputInfo(&mut lii) != 0 {
+            let tick = GetTickCount64();
+            // LASTINPUTINFO.dwTime is still u32, but GetTickCount64 is u64.
+            // We compare only the lower 32 bits for the delta.
+            let last_input_64 = lii.dw_time as u64;
+            let tick_low = tick & 0xFFFF_FFFF;
+            let idle = if tick_low >= last_input_64 {
+                tick_low - last_input_64
+            } else {
+                // u32 rollover: last_input was near u32::MAX, tick_low wrapped
+                (0x1_0000_0000u64 - last_input_64) + tick_low
+            };
+            Some(idle)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_user_idle_ms() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -1011,8 +1108,7 @@ mod tests {
         app.update(Action::SearchInput('o'));
         app.mark_search_started("lo");
 
-        let accepted =
-            app.apply_search_response("lo".to_string(), Err("network down".to_string()));
+        let accepted = app.apply_search_response("lo".to_string(), Err("network down".to_string()));
 
         assert!(accepted);
         assert!(app.search_results.is_empty());
@@ -1064,50 +1160,4 @@ mod tests {
         assert!(app.search_results.is_empty());
         assert_eq!(app.search_status, SearchStatus::WaitingForInput);
     }
-}
-
-// -- Windows User Idle Detection Helper ---------------------------------
-
-#[cfg(target_os = "windows")]
-fn get_user_idle_ms() -> Option<u64> {
-    #[repr(C)]
-    #[allow(clippy::upper_case_acronyms)] // Mirrors the Win32 API struct name
-    struct LASTINPUTINFO {
-        cb_size: u32,
-        dw_time: u32,
-    }
-
-    extern "system" {
-        fn GetLastInputInfo(plii: *mut LASTINPUTINFO) -> i32;
-        fn GetTickCount64() -> u64;
-    }
-
-    let mut lii = LASTINPUTINFO {
-        cb_size: std::mem::size_of::<LASTINPUTINFO>() as u32,
-        dw_time: 0,
-    };
-
-    unsafe {
-        if GetLastInputInfo(&mut lii) != 0 {
-            let tick = GetTickCount64();
-            // LASTINPUTINFO.dwTime is still u32, but GetTickCount64 is u64.
-            // We compare only the lower 32 bits for the delta.
-            let last_input_64 = lii.dw_time as u64;
-            let tick_low = tick & 0xFFFF_FFFF;
-            let idle = if tick_low >= last_input_64 {
-                tick_low - last_input_64
-            } else {
-                // u32 rollover: last_input was near u32::MAX, tick_low wrapped
-                (0x1_0000_0000u64 - last_input_64) + tick_low
-            };
-            Some(idle)
-        } else {
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn get_user_idle_ms() -> Option<u64> {
-    None
 }

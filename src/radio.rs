@@ -111,7 +111,8 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
 
     let url = "https://de1.api.radio-browser.info/json/stations/search";
 
-    let resp = client.get(url)
+    let resp = client
+        .get(url)
         .query(&[
             ("name", query),
             ("hidebroken", "true"),
@@ -129,7 +130,8 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
         .map(|s| Station {
             name: s.name.trim().to_string(),
             url: s.url_resolved,
-            genre: s.tags
+            genre: s
+                .tags
                 .split(',')
                 .next()
                 .unwrap_or("Radio")

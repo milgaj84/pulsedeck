@@ -10,8 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
-[![Tests: 32 passing](https://img.shields.io/badge/tests-32%20passing-brightgreen.svg)](#)
-[![Zero warnings](https://img.shields.io/badge/cargo%20clippy-zero%20warnings-brightgreen.svg)](#)
+[![CI](https://github.com/milgaj84/driftFM/actions/workflows/ci.yml/badge.svg)](https://github.com/milgaj84/driftFM/actions/workflows/ci.yml)
 
 </div>
 
@@ -171,11 +170,15 @@ Settings are saved automatically to a JSON file in your config directory.
 
 ## Code Quality
 
-- **32 unit tests** covering genre resolution, library CRUD, theme cycling, ICY metadata parsing, filename sanitization, mode-specific key mappings, and search-state transitions
-- **Zero `cargo clippy` warnings** under `-W clippy::all`
-- **Zero hardcoded colors** outside `theme.rs` — full semantic palette purity across all 14 UI modules
-- Thread-safe audio pipeline with lock-free atomic generation IDs for connection abandonment
-- Fully idiomatic Rust — no `unsafe` outside the Windows idle detection FFI block
+DriftFM's CI checks:
+
+- Rust formatting with `cargo fmt --check`
+- Clippy across all targets and features with warnings treated as errors
+- Tests across all targets and features
+- Release build verification
+- RustSec dependency audit with `cargo audit`
+
+The codebase also keeps UI colors routed through the semantic palette in `theme.rs` and isolates blocking audio work from the TUI event loop.
 
 ---
 

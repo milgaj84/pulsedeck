@@ -35,10 +35,8 @@ async fn main() -> Result<()> {
     let mut terminal = ratatui::init();
     let _terminal_restore = TerminalRestoreGuard;
 
-    let (search_tx, mut search_rx) = tokio::sync::mpsc::unbounded_channel::<(
-        String,
-        Result<Vec<radio::Station>, String>,
-    )>();
+    let (search_tx, mut search_rx) =
+        tokio::sync::mpsc::unbounded_channel::<(String, Result<Vec<radio::Station>, String>)>();
 
     let tick_rate = Duration::from_millis(66);
     let mut search_debounce: Option<(String, Instant)> = None;

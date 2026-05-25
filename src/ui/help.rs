@@ -13,18 +13,35 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
     let block = Block::default()
         .title(Span::styled(" ✦ DriftFM Help ✦ ", theme::title()))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))
+        .border_style(
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::BOLD),
+        )
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(Style::default().bg(theme::bg()));
 
     let header_row = Row::new(vec![
-        Cell::from(Span::styled("Key", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("Action", Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))),
+        Cell::from(Span::styled(
+            "Key",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "Action",
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::BOLD),
+        )),
     ]);
 
     let rows = vec![
         section("Playback"),
-        shortcut("Enter", "Play selected station; in search: add to Library + play"),
+        shortcut(
+            "Enter",
+            "Play selected station; in search: add to Library + play",
+        ),
         shortcut("Space", "Pause / resume"),
         shortcut("s", "Stop playback"),
         shortcut("+ / -", "Volume up / down"),
