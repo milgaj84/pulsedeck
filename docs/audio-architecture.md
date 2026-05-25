@@ -14,8 +14,9 @@ Other audio modules are implementation details and should stay private or `pub(s
 
 ## Current module map
 
-- `src/audio.rs` owns the public API, audio thread loop, playback state, command handling, connection retry flow, and sink creation.
+- `src/audio.rs` owns the public API, audio thread loop, playback state, command handling, and lazy output-device initialization.
 - `src/audio/buffer.rs` owns the bounded producer-consumer byte queue used between the network downloader and decoder.
+- `src/audio/session.rs` owns stream connection, retry/backoff, downloader setup, decoder setup, and sink creation.
 - `src/audio/stream_reader.rs` owns ICY metadata boundary stripping, recording segment lifecycle, and the `Read`/`Seek` adapter consumed by `rodio::Decoder`.
 - `src/audio/metadata.rs` owns ICY metadata parsing helpers.
 - `src/audio/recording.rs` owns recording filename sanitization and ID3 tagging helpers.
@@ -30,6 +31,5 @@ Other audio modules are implementation details and should stay private or `pub(s
 
 ## Known follow-ups
 
-- Extract connection/retry/session logic after the `StreamReader` split is merged.
-- Consider lazy audio device initialization so the app can browse/search even when no output device is available.
+- Split the audio thread loop into a small playback state object if command handling grows further.
 - Improve recording filename collision handling and stream format detection in a behavior-change PR.

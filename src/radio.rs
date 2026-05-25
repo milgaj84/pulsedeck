@@ -98,9 +98,24 @@ pub fn fallback_stations() -> Vec<Station> {
     ]
 }
 
+const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
+    "https://de1.api.radio-browser.info",
+    "https://de2.api.radio-browser.info",
+    "https://nl1.api.radio-browser.info",
+    "https://at1.api.radio-browser.info",
+];
+
+const RADIO_BROWSER_HTTP_SERVERS: &[&str] = &[
+    "http://de1.api.radio-browser.info",
+    "http://de2.api.radio-browser.info",
+    "http://nl1.api.radio-browser.info",
+    "http://at1.api.radio-browser.info",
+];
+
 /// Search for stations by name via the Radio Browser API.
 pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
-    if query.len() < 2 {
+    let query = query.trim();
+    if query.chars().count() < 2 {
         return Ok(Vec::new());
     }
 
@@ -109,8 +124,44 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
 
-    let url = "https://de1.api.radio-browser.info/json/stations/search";
+    let https_result =
+        search_stations_with_servers(&client, RADIO_BROWSER_HTTPS_SERVERS, query).await;
+    match https_result {
+        Ok(stations) => Ok(stations),
+        Err(https_error) => {
+            match search_stations_with_servers(&client, RADIO_BROWSER_HTTP_SERVERS, query).await {
+                Ok(stations) => Ok(stations),
+                Err(http_error) => anyhow::bail!(
+                    "HTTPS search failed: {https_error}; HTTP fallback failed: {http_error}"
+                ),
+            }
+        }
+    }
+}
 
+async fn search_stations_with_servers(
+    client: &reqwest::Client,
+    servers: &[&str],
+    query: &str,
+) -> anyhow::Result<Vec<Station>> {
+    let mut errors = Vec::new();
+
+    for server in servers {
+        let url = format!("{server}/json/stations/search");
+        match search_stations_on_server(client, &url, query).await {
+            Ok(stations) => return Ok(stations),
+            Err(err) => errors.push(format!("{server}: {err}")),
+        }
+    }
+
+    anyhow::bail!("{}", errors.join(" | "))
+}
+
+async fn search_stations_on_server(
+    client: &reqwest::Client,
+    url: &str,
+    query: &str,
+) -> anyhow::Result<Vec<Station>> {
     let resp = client
         .get(url)
         .query(&[
@@ -121,10 +172,12 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
             ("limit", "20"),
         ])
         .send()
-        .await?;
+        .await?
+        .error_for_status()?;
+
     let api_stations = resp.json::<Vec<ApiBrowseStation>>().await?;
 
-    let stations = api_stations
+    Ok(api_stations
         .into_iter()
         .filter(|s| !s.url_resolved.is_empty())
         .map(|s| Station {
@@ -140,7 +193,5 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
             country: s.country,
             bitrate: s.bitrate,
         })
-        .collect();
-
-    Ok(stations)
+        .collect())
 }

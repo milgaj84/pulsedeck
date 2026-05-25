@@ -7,6 +7,8 @@ All notable changes to the DriftFM project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+*   **Radio Browser HTTP Fallback**: Station search now falls back to Radio Browser HTTP mirrors when all HTTPS mirrors fail because of upstream certificate or TLS problems.
+*   **Radio Browser Search Failover**: Station search now retries multiple Radio Browser mirrors and surfaces compact error details instead of only showing a generic connection failure.
 *   **Security: TLS Certificate Validation**: Removed the insecure stream HTTP client certificate bypass so HTTPS streams now use normal certificate validation.
 *   **Persistence Error Visibility**: Library save failures now return errors instead of being silently ignored, and user-triggered save failures are surfaced in the TUI status bar.
 *   **Search Text Input Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`.
@@ -16,6 +18,8 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Search Failure Feedback**: Failed station searches now surface a clear search error state instead of silently doing nothing.
 
 ### Improved
+*   **Audio Session Extraction**: Moved stream connection, retry/backoff, decoder setup, downloader setup, and sink creation into a dedicated audio session module while preserving playback behavior.
+*   **Lazy Audio Device Initialization**: DriftFM now opens the system output device on first playback instead of app startup, so browsing and search remain usable when no soundcard is immediately available.
 *   **Audio Module Architecture**: Split audio internals into focused modules for buffering, metadata parsing, recording helpers, stream reading, and visualizer sample wrapping while preserving the public `crate::audio` API.
 *   **Audio Architecture Documentation**: Added developer documentation describing the audio public boundary, module map, refactor rules, and follow-up work.
 *   **CI Quality Gates**: Added GitHub Actions checks for formatting, clippy with warnings denied, tests, release build, RustSec audit, and a static guard against reintroducing invalid-certificate acceptance.

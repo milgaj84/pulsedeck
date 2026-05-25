@@ -31,8 +31,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         SearchStatus::Empty { query } => {
             Span::styled(format!("  No results for {}", query), theme::dim())
         }
-        SearchStatus::Error { .. } => {
-            Span::styled("  Search failed. Check connection.", theme::error())
+        SearchStatus::Error { message, .. } => {
+            let message = message
+                .split('|')
+                .next()
+                .unwrap_or(message)
+                .chars()
+                .take(96)
+                .collect::<String>();
+            Span::styled(format!("  Search failed: {}", message), theme::error())
         }
     };
 
