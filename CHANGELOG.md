@@ -7,6 +7,8 @@ All notable changes to the DriftFM project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+*   **Security: TLS Certificate Validation**: Removed the insecure stream HTTP client certificate bypass so HTTPS streams now use normal certificate validation.
+*   **Persistence Error Visibility**: Library save failures now return errors instead of being silently ignored, and user-triggered save failures are surfaced in the TUI status bar.
 *   **Search Text Input Collision**: In search mode, bare `f` now remains normal text input so users can search for terms like `fm`, `funk`, and `lofi`.
 *   **Search Add Flow Simplified**: Removed the add-without-play shortcut path after terminal compatibility testing showed it was unreliable on Ubuntu. Search results are now added only through `Enter`, which also starts playback.
 *   **Stale Search Result Race**: Search API responses are now tied to the query that created them. Older responses are ignored if the user has already typed a newer query, preventing outdated results from replacing the current search.
@@ -14,6 +16,10 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Search Failure Feedback**: Failed station searches now surface a clear search error state instead of silently doing nothing.
 
 ### Improved
+*   **Audio Module Architecture**: Split audio internals into focused modules for buffering, metadata parsing, recording helpers, stream reading, and visualizer sample wrapping while preserving the public `crate::audio` API.
+*   **Audio Architecture Documentation**: Added developer documentation describing the audio public boundary, module map, refactor rules, and follow-up work.
+*   **CI Quality Gates**: Added GitHub Actions checks for formatting, clippy with warnings denied, tests, release build, RustSec audit, and a static guard against reintroducing invalid-certificate acceptance.
+*   **README Quality Claims**: Replaced static test/warning badges with CI-backed quality documentation.
 *   **Mode-Specific Shortcut Hints**: Updated the footer, Help HUD, and README to distinguish search actions from library actions: `Enter` adds and plays from search, while `f` removes from the library.
 *   **Saved Result Feedback**: The search bar now shows `Saved to library` when the highlighted search result is already in the user's library.
 *   **Debounced Search Requests**: Station search now waits briefly while the user types, reducing unnecessary API requests.
