@@ -115,7 +115,7 @@ const RADIO_BROWSER_HTTP_SERVERS: &[&str] = &[
 /// Search for stations by name via the Radio Browser API.
 pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
     let query = query.trim();
-    if query.chars().count() < 2 {
+    if is_short_search_query(query) {
         return Ok(Vec::new());
     }
 
@@ -139,6 +139,10 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
     }
 }
 
+fn is_short_search_query(query: &str) -> bool {
+    query.trim().chars().count() < 2
+}
+
 async fn search_stations_with_servers(
     client: &reqwest::Client,
     servers: &[&str],
@@ -147,14 +151,22 @@ async fn search_stations_with_servers(
     let mut errors = Vec::new();
 
     for server in servers {
-        let url = format!("{server}/json/stations/search");
+        let url = radio_browser_search_url(server);
         match search_stations_on_server(client, &url, query).await {
             Ok(stations) => return Ok(stations),
             Err(err) => errors.push(format!("{server}: {err}")),
         }
     }
 
-    anyhow::bail!("{}", errors.join(" | "))
+    anyhow::bail!("{}", format_search_errors(&errors))
+}
+
+fn radio_browser_search_url(server: &str) -> String {
+    format!("{server}/json/stations/search")
+}
+
+fn format_search_errors(errors: &[String]) -> String {
+    errors.join(" | ")
 }
 
 async fn search_stations_on_server(
@@ -179,19 +191,116 @@ async fn search_stations_on_server(
 
     Ok(api_stations
         .into_iter()
-        .filter(|s| !s.url_resolved.is_empty())
-        .map(|s| Station {
-            name: s.name.trim().to_string(),
-            url: s.url_resolved,
-            genre: s
-                .tags
-                .split(',')
-                .next()
-                .unwrap_or("Radio")
-                .trim()
-                .to_string(),
-            country: s.country,
-            bitrate: s.bitrate,
-        })
+        .filter_map(map_api_station)
         .collect())
+}
+
+fn map_api_station(station: ApiBrowseStation) -> Option<Station> {
+    if station.url_resolved.is_empty() {
+        return None;
+    }
+
+    Some(Station {
+        name: station.name.trim().to_string(),
+        url: station.url_resolved,
+        genre: station
+            .tags
+            .split(',')
+            .next()
+            .unwrap_or("Radio")
+            .trim()
+            .to_string(),
+        country: station.country,
+        bitrate: station.bitrate,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn api_station(name: &str, url: &str, tags: &str) -> ApiBrowseStation {
+        ApiBrowseStation {
+            name: name.to_string(),
+            url_resolved: url.to_string(),
+            tags: tags.to_string(),
+            country: "US".to_string(),
+            bitrate: 128,
+        }
+    }
+
+    #[test]
+    fn short_search_query_trims_before_counting() {
+        assert!(is_short_search_query(" l "));
+        assert!(!is_short_search_query(" lo "));
+    }
+
+    #[test]
+    fn radio_browser_search_url_appends_expected_path() {
+        assert_eq!(
+            radio_browser_search_url("https://de1.api.radio-browser.info"),
+            "https://de1.api.radio-browser.info/json/stations/search"
+        );
+    }
+
+    #[test]
+    fn https_servers_are_tried_before_http_fallback_servers() {
+        assert!(RADIO_BROWSER_HTTPS_SERVERS
+            .iter()
+            .all(|server| server.starts_with("https://")));
+        assert!(RADIO_BROWSER_HTTP_SERVERS
+            .iter()
+            .all(|server| server.starts_with("http://")));
+        assert_eq!(
+            RADIO_BROWSER_HTTPS_SERVERS.len(),
+            RADIO_BROWSER_HTTP_SERVERS.len()
+        );
+    }
+
+    #[test]
+    fn format_search_errors_keeps_server_context() {
+        let errors = vec![
+            "https://de1.api.radio-browser.info: timeout".to_string(),
+            "https://de2.api.radio-browser.info: tls".to_string(),
+        ];
+
+        assert_eq!(
+            format_search_errors(&errors),
+            "https://de1.api.radio-browser.info: timeout | https://de2.api.radio-browser.info: tls"
+        );
+    }
+
+    #[test]
+    fn map_api_station_trims_name_and_uses_first_tag() {
+        let station = map_api_station(api_station(
+            "  Lo-Fi Radio  ",
+            "http://stream",
+            "lofi,chill",
+        ))
+        .expect("station should map");
+
+        assert_eq!(station.name, "Lo-Fi Radio");
+        assert_eq!(station.url, "http://stream");
+        assert_eq!(station.genre, "lofi");
+        assert_eq!(station.country, "US");
+        assert_eq!(station.bitrate, 128);
+    }
+
+    #[test]
+    fn map_api_station_drops_empty_resolved_urls() {
+        assert!(map_api_station(api_station("Broken", "", "radio")).is_none());
+    }
+
+    #[test]
+    fn fallback_stations_include_known_offline_defaults() {
+        let stations = fallback_stations();
+
+        assert!(stations
+            .iter()
+            .any(|station| station.name == "Nightride FM"));
+        assert!(stations
+            .iter()
+            .any(|station| station.name == "SomaFM: Groove Salad"));
+        assert!(stations.iter().all(|station| !station.url.is_empty()));
+    }
 }

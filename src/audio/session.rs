@@ -10,6 +10,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+fn buffer_level_status(len: usize, capacity: usize, bytes_per_sec: usize) -> (u8, u32) {
+    let percent = len.saturating_mul(100).checked_div(capacity).unwrap_or(0) as u8;
+    let seconds = len.checked_div(bytes_per_sec).unwrap_or(0) as u32;
+
+    (percent, seconds)
+}
+
 #[derive(Clone)]
 pub(super) struct ConnectionContext {
     pub(super) status_tx: mpsc::Sender<AudioStatus>,
@@ -133,8 +140,7 @@ fn try_connect_and_decode_once(
 
                     let len = queue_clone.len();
                     let cap = queue_clone.capacity;
-                    let percent = ((len * 100) / cap) as u8;
-                    let seconds = (len / bytes_per_sec) as u32;
+                    let (percent, seconds) = buffer_level_status(len, cap, bytes_per_sec);
                     let _ = status_tx_clone.send(AudioStatus::BufferLevel { percent, seconds });
                 }
                 Err(_) => {
@@ -162,4 +168,25 @@ fn try_connect_and_decode_once(
     sink.append(wrapped_source);
 
     Ok(sink)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buffer_level_status_reports_percent_and_seconds() {
+        let (percent, seconds) = buffer_level_status(160_000, 1_000_000, 16_000);
+
+        assert_eq!(percent, 16);
+        assert_eq!(seconds, 10);
+    }
+
+    #[test]
+    fn buffer_level_status_handles_zero_capacity_and_rate() {
+        let (percent, seconds) = buffer_level_status(160_000, 0, 0);
+
+        assert_eq!(percent, 0);
+        assert_eq!(seconds, 0);
+    }
 }
