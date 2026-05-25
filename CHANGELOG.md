@@ -18,6 +18,8 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Search Failure Feedback**: Failed station searches now surface a clear search error state instead of silently doing nothing.
 
 ### Improved
+*   **App State Module Split**: Split the monolithic app reducer into focused modules for types, lifecycle, selectors, search, playback, settings, library, recording, overlays, visualizer, and platform idle helpers while preserving the public app API.
+*   **App Reducer Contract Tests**: Added state-level tests covering settings action blocking, search confirmation, playback state updates, overlay toggles, library removal, genre navigation, and recording toggles.
 *   **Audio Session Extraction**: Moved stream connection, retry/backoff, decoder setup, downloader setup, and sink creation into a dedicated audio session module while preserving playback behavior.
 *   **Lazy Audio Device Initialization**: DriftFM now opens the system output device on first playback instead of app startup, so browsing and search remain usable when no soundcard is immediately available.
 *   **Audio Module Architecture**: Split audio internals into focused modules for buffering, metadata parsing, recording helpers, stream reading, and visualizer sample wrapping while preserving the public `crate::audio` API.
