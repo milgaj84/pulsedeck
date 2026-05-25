@@ -1,17 +1,15 @@
 mod buffer;
 mod metadata;
 mod recording;
+mod session;
 mod stream_reader;
 mod visualizer;
 
-use buffer::BufferQueue;
-use stream_reader::StreamReader;
-use visualizer::VisualizerSource;
-
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{OutputStream, Sink};
 use std::collections::VecDeque;
-use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+
+use session::{connect_and_decode, ConnectionContext};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -92,14 +90,10 @@ fn audio_loop(
     status_tx: mpsc::Sender<AudioStatus>,
     sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
-    // Keep OutputStream alive for the lifetime of this thread.
-    let (_stream, handle) = match OutputStream::try_default() {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = status_tx.send(AudioStatus::Error(format!("Soundcard error: {}", e)));
-            return;
-        }
-    };
+    // Lazily opened on first playback. This keeps browsing/search usable on
+    // systems without an immediately available output device.
+    let mut output_stream: Option<OutputStream> = None;
+    let mut output_handle: Option<rodio::OutputStreamHandle> = None;
 
     let mut current_sink: Option<Sink> = None;
     let mut connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>> = None;
@@ -123,37 +117,6 @@ fn audio_loop(
     let mut pending_action: Option<AudioCommand> = None;
 
     loop {
-        // Helper closure to spawn a connection thread (used from 3 dispatch sites)
-        let spawn_connection =
-            |url: String,
-             conn_id_ref: &mut u64,
-             active_ref: &Arc<AtomicU64>,
-             connect_ref: &mut Option<std::thread::JoinHandle<Result<Sink, String>>>| {
-                *conn_id_ref += 1;
-                active_ref.store(*conn_id_ref, Ordering::SeqCst);
-                let _ = status_tx.send(AudioStatus::Connecting);
-
-                let handle_clone = handle.clone();
-                let status_tx_clone = status_tx.clone();
-                let conn_id = *conn_id_ref;
-                let active_conn_id_clone = active_ref.clone();
-                let record_state_clone = record_state.clone();
-                let sample_buffer_clone = sample_buffer.clone();
-
-                drop(connect_ref.take());
-                *connect_ref = Some(std::thread::spawn(move || {
-                    connect_and_decode(
-                        &url,
-                        &handle_clone,
-                        status_tx_clone,
-                        conn_id,
-                        active_conn_id_clone,
-                        record_state_clone,
-                        sample_buffer_clone,
-                    )
-                }));
-            };
-
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
             Ok(cmd) => {
@@ -164,9 +127,16 @@ fn audio_loop(
                         } else {
                             spawn_connection(
                                 url,
-                                &mut current_conn_id,
-                                &active_conn_id,
-                                &mut connect_thread,
+                                &mut SpawnConnectionState {
+                                    conn_id_ref: &mut current_conn_id,
+                                    active_ref: &active_conn_id,
+                                    connect_ref: &mut connect_thread,
+                                    output_stream: &mut output_stream,
+                                    output_handle: &mut output_handle,
+                                    status_tx: &status_tx,
+                                    record_state: &record_state,
+                                    sample_buffer: &sample_buffer,
+                                },
                             );
                         }
                     }
@@ -253,9 +223,16 @@ fn audio_loop(
                             }
                             spawn_connection(
                                 url,
-                                &mut current_conn_id,
-                                &active_conn_id,
-                                &mut connect_thread,
+                                &mut SpawnConnectionState {
+                                    conn_id_ref: &mut current_conn_id,
+                                    active_ref: &active_conn_id,
+                                    connect_ref: &mut connect_thread,
+                                    output_stream: &mut output_stream,
+                                    output_handle: &mut output_handle,
+                                    status_tx: &status_tx,
+                                    record_state: &record_state,
+                                    sample_buffer: &sample_buffer,
+                                },
                             );
                         }
                         AudioCommand::Stop => {
@@ -284,9 +261,16 @@ fn audio_loop(
                     AudioCommand::Play(url) => {
                         spawn_connection(
                             url,
-                            &mut current_conn_id,
-                            &active_conn_id,
-                            &mut connect_thread,
+                            &mut SpawnConnectionState {
+                                conn_id_ref: &mut current_conn_id,
+                                active_ref: &active_conn_id,
+                                connect_ref: &mut connect_thread,
+                                output_stream: &mut output_stream,
+                                output_handle: &mut output_handle,
+                                status_tx: &status_tx,
+                                record_state: &record_state,
+                                sample_buffer: &sample_buffer,
+                            },
                         );
                     }
                     AudioCommand::Stop => {
@@ -355,170 +339,60 @@ fn audio_loop(
     }
 }
 
-/// Connect to a stream URL and create a playable Sink, with automatic backoff retries.
-fn connect_and_decode(
-    url: &str,
-    handle: &rodio::OutputStreamHandle,
-    status_tx: mpsc::Sender<AudioStatus>,
-    conn_id: u64,
-    active_conn_id: Arc<AtomicU64>,
-    record_state: Arc<RecordStateShared>,
-    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-) -> Result<Sink, String> {
-    let mut retries = 0;
-    let max_retries = 5;
-    let mut backoff = Duration::from_secs(1);
-
-    loop {
-        // Double check cancellation
-        if active_conn_id.load(Ordering::SeqCst) != conn_id {
-            return Err("Abandoned".into());
-        }
-
-        match try_connect_and_decode_once(
-            url,
-            handle,
-            status_tx.clone(),
-            conn_id,
-            active_conn_id.clone(),
-            record_state.clone(),
-            sample_buffer.clone(),
-        ) {
-            Ok(sink) => return Ok(sink),
-            Err(e) => {
-                if e == "Abandoned" {
-                    return Err("Abandoned".into());
-                }
-
-                retries += 1;
-                if retries >= max_retries {
-                    return Err(format!("Failed after {} retries: {}", max_retries, e));
-                }
-
-                // Notify UI about tuning status retry
-                let _ = status_tx.send(AudioStatus::Connecting);
-
-                // Sleep with backoff, checking for abandonment every 100ms
-                let sleep_step = Duration::from_millis(100);
-                let steps = (backoff.as_millis() / sleep_step.as_millis()) as usize;
-                for _ in 0..steps {
-                    if active_conn_id.load(Ordering::SeqCst) != conn_id {
-                        return Err("Abandoned".into());
-                    }
-                    std::thread::sleep(sleep_step);
-                }
-
-                backoff = (backoff * 2).min(Duration::from_secs(8));
+fn ensure_output_handle(
+    output_stream: &mut Option<OutputStream>,
+    output_handle: &mut Option<rodio::OutputStreamHandle>,
+    status_tx: &mpsc::Sender<AudioStatus>,
+) -> Option<rodio::OutputStreamHandle> {
+    if output_handle.is_none() {
+        match OutputStream::try_default() {
+            Ok((stream, handle)) => {
+                *output_stream = Some(stream);
+                *output_handle = Some(handle);
+            }
+            Err(err) => {
+                let _ = status_tx.send(AudioStatus::Error(format!("Soundcard error: {err}")));
+                return None;
             }
         }
     }
+
+    output_handle.clone()
 }
 
-fn try_connect_and_decode_once(
-    url: &str,
-    handle: &rodio::OutputStreamHandle,
-    status_tx: mpsc::Sender<AudioStatus>,
-    conn_id: u64,
-    active_conn_id: Arc<AtomicU64>,
-    record_state: Arc<RecordStateShared>,
-    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-) -> Result<Sink, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
-        .connect_timeout(Duration::from_secs(5))
-        .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+struct SpawnConnectionState<'a> {
+    conn_id_ref: &'a mut u64,
+    active_ref: &'a Arc<AtomicU64>,
+    connect_ref: &'a mut Option<std::thread::JoinHandle<Result<Sink, String>>>,
+    output_stream: &'a mut Option<OutputStream>,
+    output_handle: &'a mut Option<rodio::OutputStreamHandle>,
+    status_tx: &'a mpsc::Sender<AudioStatus>,
+    record_state: &'a Arc<RecordStateShared>,
+    sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
+}
 
-    if active_conn_id.load(Ordering::SeqCst) != conn_id {
-        return Err("Abandoned".into());
-    }
+fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
+    let Some(handle) =
+        ensure_output_handle(state.output_stream, state.output_handle, state.status_tx)
+    else {
+        return;
+    };
 
-    let response = client
-        .get(url)
-        .header("Icy-MetaData", "1")
-        .send()
-        .map_err(|e| format!("Connection failed: {}", e))?;
+    *state.conn_id_ref += 1;
+    state.active_ref.store(*state.conn_id_ref, Ordering::SeqCst);
+    let _ = state.status_tx.send(AudioStatus::Connecting);
 
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
-    }
-
-    if active_conn_id.load(Ordering::SeqCst) != conn_id {
-        return Err("Abandoned".into());
-    }
-
-    let metaint = response
-        .headers()
-        .get("icy-metaint")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<usize>().ok());
-
-    let bitrate_kbps = response
-        .headers()
-        .get("icy-br")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(128);
-    let bytes_per_sec = (bitrate_kbps * 1000 / 8).max(1) as usize;
-
-    // Decouple download from decoding: Spawn Bounded Producer-Consumer resiliences
-    let buffer_capacity = 1024 * 1024; // 1 MB circular byte queue
-    let queue = Arc::new(BufferQueue::new(buffer_capacity));
-
-    let queue_clone = queue.clone();
-    let active_conn_id_clone = active_conn_id.clone();
-    let conn_id_clone = conn_id;
-    let status_tx_clone = status_tx.clone();
-    let mut response_reader = response;
-
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            if active_conn_id_clone.load(Ordering::SeqCst) != conn_id_clone {
-                queue_clone.set_disconnected(true);
-                break;
-            }
-            match response_reader.read(&mut buf) {
-                Ok(0) => {
-                    queue_clone.set_disconnected(true);
-                    break;
-                }
-                Ok(n) => {
-                    queue_clone.push(&buf[..n]);
-
-                    // Send circular buffer progress telemetries to UI
-                    let len = queue_clone.len();
-                    let cap = queue_clone.capacity;
-                    let percent = ((len * 100) / cap) as u8;
-                    let seconds = (len / bytes_per_sec) as u32;
-                    let _ = status_tx_clone.send(AudioStatus::BufferLevel { percent, seconds });
-                }
-                Err(_) => {
-                    queue_clone.set_disconnected(true);
-                    break;
-                }
-            }
-        }
-    });
-
-    let reader = StreamReader::new(
-        url.to_string(),
-        queue,
-        status_tx,
+    let conn_id = *state.conn_id_ref;
+    let context = ConnectionContext {
+        status_tx: state.status_tx.clone(),
         conn_id,
-        active_conn_id,
-        record_state,
-        metaint,
-    );
+        active_conn_id: state.active_ref.clone(),
+        record_state: state.record_state.clone(),
+        sample_buffer: state.sample_buffer.clone(),
+    };
 
-    let source = Decoder::new(reader).map_err(|e| format!("Decode error: {}", e))?;
-
-    let wrapped_source = VisualizerSource::new(source, sample_buffer);
-
-    let sink = Sink::try_new(handle).map_err(|e| format!("Sink error: {}", e))?;
-
-    sink.append(wrapped_source);
-
-    Ok(sink)
+    drop(state.connect_ref.take());
+    *state.connect_ref = Some(std::thread::spawn(move || {
+        connect_and_decode(url, handle, context)
+    }));
 }
