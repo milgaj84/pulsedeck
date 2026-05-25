@@ -32,6 +32,8 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Search Status Hints**: The search bar now distinguishes short queries, pending debounce, active searches, empty results, saved results, and failed searches.
 
 ### Added
+*   **Phase 4 Test Hardening**: Added deterministic unit tests for Radio Browser fallback helpers, API station mapping, fallback station defaults, and audio buffer-level status math.
+*   **Testing Strategy Documentation**: Added `docs/testing-strategy.md` describing local gates, test layers, network-test boundaries, and the manual runtime smoke checklist.
 *   **Search Shortcut Tests**: Added keymap tests covering plain text entry in search, disabled add-only keys, library-mode `f`, and search-mode `Enter`.
 *   **Search State Tests**: Added app-level tests for short-query reset, debounce state, accepted results, empty results, error responses, stale responses, and normal-mode response ignores.
 
