@@ -116,6 +116,24 @@ fn audio_loop(
     let mut current_fade_volume: Option<f32> = None;
     let mut pending_action: Option<AudioCommand> = None;
 
+    macro_rules! spawn_connection_for {
+        ($url:expr) => {
+            spawn_connection(
+                $url,
+                &mut SpawnConnectionState {
+                    conn_id_ref: &mut current_conn_id,
+                    active_ref: &active_conn_id,
+                    connect_ref: &mut connect_thread,
+                    output_stream: &mut output_stream,
+                    output_handle: &mut output_handle,
+                    status_tx: &status_tx,
+                    record_state: &record_state,
+                    sample_buffer: &sample_buffer,
+                },
+            );
+        };
+    }
+
     loop {
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
@@ -125,19 +143,7 @@ fn audio_loop(
                         if current_sink.is_some() {
                             pending_action = Some(AudioCommand::Play(url));
                         } else {
-                            spawn_connection(
-                                url,
-                                &mut SpawnConnectionState {
-                                    conn_id_ref: &mut current_conn_id,
-                                    active_ref: &active_conn_id,
-                                    connect_ref: &mut connect_thread,
-                                    output_stream: &mut output_stream,
-                                    output_handle: &mut output_handle,
-                                    status_tx: &status_tx,
-                                    record_state: &record_state,
-                                    sample_buffer: &sample_buffer,
-                                },
-                            );
+                            spawn_connection_for!(url);
                         }
                     }
                     AudioCommand::Pause => {
@@ -221,19 +227,7 @@ fn audio_loop(
                             if let Some(old_sink) = current_sink.take() {
                                 old_sink.stop();
                             }
-                            spawn_connection(
-                                url,
-                                &mut SpawnConnectionState {
-                                    conn_id_ref: &mut current_conn_id,
-                                    active_ref: &active_conn_id,
-                                    connect_ref: &mut connect_thread,
-                                    output_stream: &mut output_stream,
-                                    output_handle: &mut output_handle,
-                                    status_tx: &status_tx,
-                                    record_state: &record_state,
-                                    sample_buffer: &sample_buffer,
-                                },
-                            );
+                            spawn_connection_for!(url);
                         }
                         AudioCommand::Stop => {
                             active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
@@ -259,19 +253,7 @@ fn audio_loop(
                 let cmd = pending_action.take().unwrap();
                 match cmd {
                     AudioCommand::Play(url) => {
-                        spawn_connection(
-                            url,
-                            &mut SpawnConnectionState {
-                                conn_id_ref: &mut current_conn_id,
-                                active_ref: &active_conn_id,
-                                connect_ref: &mut connect_thread,
-                                output_stream: &mut output_stream,
-                                output_handle: &mut output_handle,
-                                status_tx: &status_tx,
-                                record_state: &record_state,
-                                sample_buffer: &sample_buffer,
-                            },
-                        );
+                        spawn_connection_for!(url);
                     }
                     AudioCommand::Stop => {
                         active_conn_id.store(0, Ordering::SeqCst);
