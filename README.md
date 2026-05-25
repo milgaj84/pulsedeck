@@ -34,7 +34,7 @@ Think of it as: *VLC for internet radio, but it fits in your terminal and record
 
 Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
 
-- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog — by name, tag, or country
+- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog — by name, tag, or country, with mirror failover for upstream outages
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
@@ -114,7 +114,7 @@ There is intentionally no separate “add without playing” shortcut in search 
 3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch DriftFM.
 4. Press `Esc` instead to leave search without adding anything.
 
-The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or `Search failed. Check connection.` Older search responses are ignored if you have already typed a newer query.
+The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
 
 **Managing your library:**
 
@@ -178,7 +178,7 @@ DriftFM's CI checks:
 - Release build verification
 - RustSec dependency audit with `cargo audit`
 
-The codebase also keeps UI colors routed through the semantic palette in `theme.rs` and isolates blocking audio work from the TUI event loop.
+The codebase also keeps UI colors routed through the semantic palette in `theme.rs`, isolates blocking audio work from the TUI event loop, and keeps app/audio architecture notes in `docs/`.
 
 ---
 

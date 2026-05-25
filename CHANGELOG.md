@@ -6,6 +6,12 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+---
+
+## [0.1.4] - 2026-05-25
+
 ### Fixed
 *   **Radio Browser HTTP Fallback**: Station search now falls back to Radio Browser HTTP mirrors when all HTTPS mirrors fail because of upstream certificate or TLS problems.
 *   **Radio Browser Search Failover**: Station search now retries multiple Radio Browser mirrors and surfaces compact error details instead of only showing a generic connection failure.
