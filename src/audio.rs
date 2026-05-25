@@ -1,12 +1,21 @@
-use rodio::cpal::Sample as CpalSample;
-use rodio::{Decoder, OutputStream, Sample as RodioSample, Sink, Source as RodioSource};
+mod buffer;
+mod metadata;
+mod recording;
+mod visualizer;
+
+use buffer::BufferQueue;
+use metadata::parse_stream_title;
+use recording::{inject_id3_tags, sanitize_filename};
+use visualizer::VisualizerSource;
+
+use rodio::{Decoder, OutputStream, Sink};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Commands sent from the UI thread to the audio thread.
@@ -46,70 +55,6 @@ pub struct RecordStateShared {
     pub category: Mutex<String>,
     pub keep_snippets: AtomicBool,
     pub min_song_duration_secs: std::sync::atomic::AtomicU32,
-}
-
-/// Bounded Producer-Consumer circular byte queue (Resiliency Buffer)
-struct BufferQueue {
-    queue: Mutex<VecDeque<u8>>,
-    cv_read: Condvar,
-    cv_write: Condvar,
-    capacity: usize,
-    disconnected: AtomicBool,
-}
-
-impl BufferQueue {
-    fn new(capacity: usize) -> Self {
-        Self {
-            queue: Mutex::new(VecDeque::with_capacity(capacity)),
-            cv_read: Condvar::new(),
-            cv_write: Condvar::new(),
-            capacity,
-            disconnected: AtomicBool::new(false),
-        }
-    }
-
-    fn push(&self, bytes: &[u8]) {
-        let mut queue = self.queue.lock().unwrap();
-        // Block downloader thread if buffer capacity limit is reached
-        while queue.len() + bytes.len() > self.capacity && !self.disconnected.load(Ordering::SeqCst)
-        {
-            queue = self.cv_write.wait(queue).unwrap();
-        }
-        if self.disconnected.load(Ordering::SeqCst) {
-            return;
-        }
-        queue.extend(bytes);
-        self.cv_read.notify_all();
-    }
-
-    fn pop(&self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut queue = self.queue.lock().unwrap();
-        while queue.is_empty() && !self.disconnected.load(Ordering::SeqCst) {
-            queue = self.cv_read.wait(queue).unwrap();
-        }
-        if queue.is_empty() && self.disconnected.load(Ordering::SeqCst) {
-            return Ok(0); // EOF or network disconnection
-        }
-
-        let count = std::cmp::min(buf.len(), queue.len());
-        for slot in buf.iter_mut().take(count) {
-            *slot = queue.pop_front().unwrap();
-        }
-        self.cv_write.notify_all();
-        Ok(count)
-    }
-
-    fn len(&self) -> usize {
-        self.queue.lock().unwrap().len()
-    }
-
-    fn set_disconnected(&self, disc: bool) {
-        self.disconnected.store(disc, Ordering::SeqCst);
-        let _queue = self.queue.lock().unwrap();
-        // Wake up both consumer and producer to terminate gracefully
-        self.cv_read.notify_all();
-        self.cv_write.notify_all();
-    }
 }
 
 /// Handle to communicate with the audio engine running on a background thread.
@@ -580,81 +525,6 @@ fn try_connect_and_decode_once(
     Ok(sink)
 }
 
-/// A custom source wrapper that intercepts audio sample frames, buffers them,
-/// and writes them to a thread-safe circular sample buffer for rendering.
-pub struct VisualizerSource<S>
-where
-    S: RodioSource,
-    S::Item: RodioSample + CpalSample<Float = f32>,
-{
-    inner: S,
-    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    local_buf: Vec<f32>,
-}
-
-impl<S> VisualizerSource<S>
-where
-    S: RodioSource,
-    S::Item: RodioSample + CpalSample<Float = f32>,
-{
-    pub fn new(inner: S, sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
-        Self {
-            inner,
-            sample_buffer,
-            local_buf: Vec::with_capacity(128),
-        }
-    }
-}
-
-impl<S> Iterator for VisualizerSource<S>
-where
-    S: RodioSource,
-    S::Item: RodioSample + CpalSample<Float = f32>,
-{
-    type Item = S::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let sample = self.inner.next();
-        if let Some(s) = sample {
-            let float_sample = s.to_float_sample();
-            self.local_buf.push(float_sample);
-            if self.local_buf.len() >= 128 {
-                if let Ok(mut buffer) = self.sample_buffer.lock() {
-                    buffer.extend(self.local_buf.drain(..));
-                    while buffer.len() > 4096 {
-                        buffer.pop_front();
-                    }
-                } else {
-                    self.local_buf.clear();
-                }
-            }
-        }
-        sample
-    }
-}
-
-impl<S> RodioSource for VisualizerSource<S>
-where
-    S: RodioSource,
-    S::Item: RodioSample + CpalSample<Float = f32>,
-{
-    fn current_frame_len(&self) -> Option<usize> {
-        self.inner.current_frame_len()
-    }
-
-    fn channels(&self) -> u16 {
-        self.inner.channels()
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.inner.sample_rate()
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        self.inner.total_duration()
-    }
-}
-
 /// StreamReader consuming from thread-safe ring-buffer and stripping metadata boundaries
 struct StreamReader {
     url: String,
@@ -942,86 +812,5 @@ impl std::io::Seek for StreamReader {
             }
             _ => Ok(self.pos),
         }
-    }
-}
-
-/// Inject ID3 metadata frames into completed local recordings
-fn inject_id3_tags(filepath: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use id3::{Tag, TagLike, Version};
-
-    let mut artist = "Unknown Artist".to_string();
-    let mut track_title = title.to_string();
-
-    if let Some(pos) = title.find(" - ") {
-        artist = title[..pos].trim().to_string();
-        track_title = title[pos + 3..].trim().to_string();
-    }
-
-    let mut tag = Tag::new();
-    tag.set_artist(artist);
-    tag.set_title(track_title);
-    tag.set_album("DriftFM live capturing");
-
-    tag.write_to_path(filepath, Version::Id3v24)?;
-    Ok(())
-}
-
-/// Replace invalid filesystem characters to protect host OS filesystems
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
-            other => other,
-        })
-        .collect()
-}
-
-/// Parse the `StreamTitle` field from an ICY metadata string.
-fn parse_stream_title(meta: &str) -> Option<String> {
-    let key = "StreamTitle='";
-    if let Some(start_idx) = meta.find(key) {
-        let value_start = start_idx + key.len();
-        if let Some(end_idx) = meta[value_start..].find("';") {
-            let title = &meta[value_start..value_start + end_idx];
-            return Some(title.trim().to_string());
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sanitize_filename() {
-        assert_eq!(sanitize_filename("normal_file.mp3"), "normal_file.mp3");
-        assert_eq!(sanitize_filename("artist/song?.mp3"), "artist-song-.mp3");
-        assert_eq!(
-            sanitize_filename("windows\\invalid:name*char\".mp3"),
-            "windows-invalid-name-char-.mp3"
-        );
-        assert_eq!(sanitize_filename("<tag> | pipe.mp3"), "-tag- - pipe.mp3");
-    }
-
-    #[test]
-    fn test_parse_stream_title() {
-        // Valid metadata
-        assert_eq!(
-            parse_stream_title("StreamTitle='Lazerhawk - King of The Streets';StreamUrl='';"),
-            Some("Lazerhawk - King of The Streets".to_string())
-        );
-
-        // Whitespace trim
-        assert_eq!(
-            parse_stream_title("StreamTitle='  Kavinsky - Nightcall  ';StreamUrl='';"),
-            Some("Kavinsky - Nightcall".to_string())
-        );
-
-        // Missing StreamTitle
-        assert_eq!(parse_stream_title("StreamUrl='';"), None);
-
-        // Malformed or empty title
-        assert_eq!(parse_stream_title("StreamTitle='';"), Some("".to_string()));
     }
 }
