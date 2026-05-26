@@ -40,8 +40,9 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
-- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars — routes through the 13-role semantic palette. Switch live in settings.
+- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars, footer chips, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
 - 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck. Full-deck mode keeps the stable cassette design and adds a framed signal screen with a themed status strip.
+- 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes while keeping bars readable.
 - 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
@@ -96,10 +97,10 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `s` | Playback | Stop playback |
 | `+` / `-` | Playback | Volume up / down |
 | `m` | Playback | Mute / unmute |
-| `r` | Playback | Start / stop recording; PulseDeck shows a footer notice when recording is armed, stopped, or unavailable |
-| `b` | View | Cycle layout |
-| `p` | View | Cycle deck page |
-| `v` | View | Cycle visualizer |
+| `r` | Playback | Start / stop recording; PulseDeck shows footer status when recording is armed, active, stopped, or unavailable |
+| `b` | View | Cycle Split / Library / Deck layout |
+| `p` | View | Switch Tape Deck / Tape History |
+| `v` | View | Cycle RTA Spectrum / Real Osc / Sim Osc |
 | `,` | App | Open settings |
 | `h` / `?` | App | Show / hide help |
 | `q` | App | Quit |
@@ -129,8 +130,9 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 **Using the cassette deck:**
 
 - Press `b` to cycle between split view, library-only view, and full-deck Bento mode.
-- Press `v` to cycle the deck signal display between Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
+- Press `v` to cycle the deck signal display between RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
 - Press `p` to switch between the live Tape Deck and Tape History page.
+- Watch the footer chips for playback state, volume, layout, scope mode, and recording state.
 
 **Coming back tomorrow:**
 
