@@ -9,7 +9,7 @@ homepage = "https://github.com/milgaj84/pulsedeck"
 readme = "README.md"
 keywords = ["radio", "tui", "music", "streaming", "catppuccin"]
 categories = ["command-line-utilities", "multimedia::audio"]
-exclude = ["recordings/", "library.json", ".gitignore"]
+exclude = ["recordings/", "library.json", ".gitignore", "*.orig"]
 
 [[bin]]
 name = "pulsedeck"
