@@ -6,12 +6,12 @@ use super::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
     // Keep the help compact so it still fits when terminal fonts are large.
-    let popup_area = super::centered_rect(68, 58, area);
+    let popup_area = super::centered_rect(70, 60, area);
 
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(Span::styled(" ✦ PulseDeck Help ✦ ", theme::title()))
+        .title(Span::styled(" ✦ PulseDeck Controls ✦ ", theme::title()))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
@@ -40,13 +40,13 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         section("Playback"),
         shortcut(
             "Enter",
-            "Play selected station; in search: add to Library + play",
+            "Play selected station; in search: save to Library + play",
         ),
         shortcut("Space", "Pause / resume"),
         shortcut("s", "Stop playback"),
         shortcut("+ / -", "Volume up / down"),
         shortcut("m", "Mute / unmute"),
-        shortcut("r", "Start / stop recording; footer shows capture status"),
+        shortcut("r", "Arm / stop tape recording"),
         section("Library"),
         shortcut("↑↓ / j k", "Move selection"),
         shortcut("Tab / Shift+Tab", "Change genre category"),
@@ -54,16 +54,16 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         shortcut("u", "Undo the most recent station removal"),
         section("Search"),
         shortcut("/", "Open worldwide station search"),
-        shortcut("Type", "Filter/search by station, tag, city, or country"),
-        shortcut("↑↓", "Move through search results"),
+        shortcut("Type", "Search by station, tag, city, or country"),
         shortcut("Enter", "Save highlighted result to Library and play it"),
         shortcut("Esc", "Leave search without adding"),
-        section("Views & App"),
-        shortcut("b", "Cycle layout"),
-        shortcut("p", "Cycle deck page"),
-        shortcut("v", "Cycle visualizer"),
+        section("Deck & Visuals"),
+        shortcut("b", "Cycle Split / Library / Deck layout"),
+        shortcut("p", "Switch Tape Deck / Tape History"),
+        shortcut("v", "Cycle RTA Spectrum / Real Osc / Sim Osc"),
+        section("App"),
         shortcut(",", "Open settings"),
-        shortcut("h / ?", "Show / hide help"),
+        shortcut("h / ?", "Show / hide this help"),
         shortcut("q / Esc", "Quit, or close overlay first"),
     ];
 
