@@ -156,7 +156,7 @@ Press `,` to open the settings panel. Current options:
 - **Auto-resume last station on startup** — picks up where you left off
 - **Tape capture folder** — cycle between preset recording directories
 - **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted
-- **Min song duration** — threshold for auto-discarding short recordings (30s–180s). Only active when snippets filtering is ON.
+- **Min song duration** — threshold for auto-discarding short recordings (30s–180s). Only active when **Keep partial snippets & ads** is OFF.
 - **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte
 
 Settings are saved automatically to a JSON file in your config directory.
