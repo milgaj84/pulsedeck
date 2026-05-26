@@ -57,6 +57,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Library management
         (_, KeyCode::Char('f')) => Some(Action::RemoveLibrarySelection),
+        (_, KeyCode::Char('u')) => Some(Action::UndoRemoveLibrarySelection),
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
@@ -135,6 +136,14 @@ mod tests {
     }
 
     #[test]
+    fn search_mode_treats_plain_u_as_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('u')), &InputMode::Search),
+            Some(Action::SearchInput('u')),
+        );
+    }
+
+    #[test]
     fn search_mode_f2_does_not_add_selected_result() {
         assert_eq!(map_key(key(KeyCode::F(2)), &InputMode::Search), None,);
     }
@@ -149,6 +158,14 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('f')), &InputMode::Normal),
             Some(Action::RemoveLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn normal_mode_u_undoes_library_removal() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('u')), &InputMode::Normal),
+            Some(Action::UndoRemoveLibrarySelection),
         );
     }
 
