@@ -71,7 +71,7 @@ pub struct App {
     pub buffer_percent: u8,
     pub buffer_seconds: u32,
 
-    pub undo_removed_station: Option<(Station, usize)>,
+    pub undo_removed_station: Option<(Station, usize, String)>,
 
     audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
