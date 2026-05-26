@@ -4,11 +4,22 @@ impl App {
     pub(super) fn remove_library_selection(&mut self) {
         if self.input_mode == InputMode::Normal {
             if let Some(station) = self.visible_stations().get(self.selected).cloned() {
-                let removed_index = self.selected;
+                let removed_index = self
+                    .library
+                    .stations
+                    .iter()
+                    .position(|saved| saved.url == station.url)
+                    .unwrap_or(self.selected);
+                let removed_genre = self
+                    .library
+                    .available_genres
+                    .get(self.selected_genre_idx)
+                    .cloned()
+                    .unwrap_or_else(|| "All".to_string());
                 let url = station.url.clone();
                 match self.library.remove(&url) {
                     Ok(true) => {
-                        self.undo_removed_station = Some((station, removed_index));
+                        self.undo_removed_station = Some((station, removed_index, removed_genre));
                         self.set_info_notice("Station removed. Press u to undo");
                     }
                     Ok(false) => {}
@@ -16,7 +27,6 @@ impl App {
                         "Station removed in memory, but could not save library: {err}"
                     )),
                 }
-                // Clamp selection.
                 let count = self.visible_count();
                 if self.selected >= count && self.selected > 0 {
                     self.selected = count - 1;
@@ -30,7 +40,7 @@ impl App {
             return;
         }
 
-        let Some((station, previous_index)) = self.undo_removed_station.take() else {
+        let Some((station, previous_index, previous_genre)) = self.undo_removed_station.take() else {
             self.set_info_notice("Nothing to undo");
             return;
         };
@@ -43,7 +53,19 @@ impl App {
         let insert_at = previous_index.min(self.library.stations.len());
         self.library.stations.insert(insert_at, station.clone());
         self.library.rebuild_genres();
-        self.selected = insert_at;
+        if let Some(genre_index) = self
+            .library
+            .available_genres
+            .iter()
+            .position(|genre| genre == &previous_genre)
+        {
+            self.selected_genre_idx = genre_index;
+        }
+        self.selected = self
+            .visible_stations()
+            .iter()
+            .position(|visible| visible.url == station.url)
+            .unwrap_or(0);
         match self.library.save() {
             Ok(()) => self.set_info_notice("Station restored"),
             Err(err) => self.set_error_notice(format!(
@@ -138,6 +160,28 @@ mod tests {
         assert_eq!(app.library.stations[1].name, "B");
         assert_eq!(app.selected, 0);
         assert_eq!(notice_text(&app), Some("Station restored"));
+    }
+
+    #[test]
+    fn undo_remove_restores_selection_inside_genre_filter() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Synth A", "http://synth-a", "Synthwave"),
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Synth B", "http://synth-b", "Synthwave"),
+        ]));
+        app.selected_genre_idx = app
+            .library
+            .available_genres
+            .iter()
+            .position(|genre| genre == "Synthwave")
+            .unwrap();
+        app.selected = 1;
+
+        app.update(Action::RemoveLibrarySelection);
+        app.update(Action::UndoRemoveLibrarySelection);
+
+        assert_eq!(app.library.stations[2].name, "Synth B");
+        assert_eq!(app.visible_stations()[app.selected].name, "Synth B");
     }
 
     #[test]
