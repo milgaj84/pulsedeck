@@ -78,7 +78,7 @@ fn try_connect_and_decode_once(
     let client = reqwest::blocking::Client::builder()
         .timeout(None)
         .connect_timeout(Duration::from_secs(5))
-        .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("PulseDeck/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|err| format!("HTTP client error: {err}"))?;
 
