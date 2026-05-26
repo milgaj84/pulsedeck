@@ -43,7 +43,8 @@ impl App {
             return;
         }
 
-        let Some((station, previous_index, previous_genre)) = self.undo_removed_station.take() else {
+        let Some((station, previous_index, previous_genre)) = self.undo_removed_station.take()
+        else {
             self.set_info_notice("Nothing to undo");
             return;
         };
@@ -198,7 +199,10 @@ mod tests {
 
         app.update(Action::RemoveLibrarySelection);
 
-        assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
+        assert_eq!(
+            app.now_playing().map(|station| station.name.as_str()),
+            Some("A")
+        );
     }
 
     #[test]
