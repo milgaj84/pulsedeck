@@ -1,6 +1,6 @@
 # Audio architecture
 
-DriftFM keeps audio playback on a dedicated blocking thread so the terminal UI can stay responsive.
+PulseDeck keeps audio playback on a dedicated blocking thread so the terminal UI can stay responsive.
 
 ## Public boundary
 
