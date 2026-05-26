@@ -33,8 +33,9 @@ For the 0.1.6 visual-enchantments release, manually check:
 
 ```text
 Split layout: cassette stays stable while reels animate
-Right-only Bento layout: hero cassette renders instead of compact cassette
+Right-only Bento layout: stable cassette, status strip, and framed signal screen compose cleanly
 Visualizer modes: Spectrum, Real Oscilloscope, and Simulated Oscilloscope show framed mode titles
+Spectrum analyzer: high-frequency bars do not show an artificial final-bin spike or deep treble valley
 Tape History page: title uses cassette/tape language
 Theme cycling: Retrowave and all Catppuccin themes keep deck colors consistent
 ```
