@@ -44,6 +44,45 @@ pub enum LayoutMode {
     RightOnly, // Mode 2: Only Bento, Tape Deck full width (100%)
 }
 
+/// Rows shown in the settings overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingRow {
+    Notifications,
+    AutoplayLast,
+    RecordingDir,
+    KeepSnippets,
+    MinSongDuration,
+    Theme,
+}
+
+impl SettingRow {
+    pub const ALL: [Self; 6] = [
+        Self::Notifications,
+        Self::AutoplayLast,
+        Self::RecordingDir,
+        Self::KeepSnippets,
+        Self::MinSongDuration,
+        Self::Theme,
+    ];
+
+    pub const COUNT: usize = Self::ALL.len();
+
+    pub fn from_index(index: usize) -> Option<Self> {
+        Self::ALL.get(index).copied()
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Notifications => 0,
+            Self::AutoplayLast => 1,
+            Self::RecordingDir => 2,
+            Self::KeepSnippets => 3,
+            Self::MinSongDuration => 4,
+            Self::Theme => 5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppNotice {
     Info(String),
