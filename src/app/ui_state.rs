@@ -1,6 +1,9 @@
 use super::LayoutMode;
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(test))]
 use std::fs;
+#[cfg(not(test))]
 use std::path::PathBuf;
 
 const DEFAULT_VOLUME: u8 = 80;
@@ -90,7 +93,7 @@ impl UiState {
             fs::create_dir_all(parent)?;
         }
 
-        let json = serde_json::to_string_pretty(&self.sanitized())?;
+        let json = serde_json::to_string_pretty(&self.clone().sanitized())?;
         fs::write(path, json)?;
         Ok(())
     }
@@ -107,12 +110,8 @@ impl UiState {
 
 #[cfg(not(test))]
 pub(super) fn save_ui_state_or_notice(app: &mut super::App) {
-    let state = UiState::from_app_values(
-        app.volume,
-        app.muted,
-        app.layout_mode,
-        app.visualizer_mode,
-    );
+    let state =
+        UiState::from_app_values(app.volume, app.muted, app.layout_mode, app.visualizer_mode);
 
     if let Err(err) = state.save() {
         app.set_error_notice(format!("Could not save UI state: {err}"));
@@ -185,7 +184,11 @@ mod tests {
 
     #[test]
     fn layout_mode_keys_roundtrip() {
-        for mode in [LayoutMode::Split, LayoutMode::LeftOnly, LayoutMode::RightOnly] {
+        for mode in [
+            LayoutMode::Split,
+            LayoutMode::LeftOnly,
+            LayoutMode::RightOnly,
+        ] {
             assert_eq!(parse_layout_mode_key(layout_mode_key(mode)), Some(mode));
         }
     }
