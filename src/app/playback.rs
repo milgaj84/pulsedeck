@@ -6,6 +6,7 @@ impl App {
         let station = self.visible_stations().get(self.selected).copied().cloned();
         if let Some(station) = station {
             self.playing_url = Some(station.url.clone());
+            self.playback = PlaybackState::Connecting;
 
             // Persist last played station URL.
             self.library.settings.last_played_url = Some(station.url.clone());
@@ -36,6 +37,7 @@ impl App {
     pub(super) fn stop_playback(&mut self) {
         self.audio.send(AudioCommand::Stop);
         self.playing_url = None;
+        self.playback = PlaybackState::Stopped;
     }
 
     pub(super) fn stop_audio_before_quit(&mut self) {
@@ -90,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn play_selected_sets_playing_url_and_last_played_url() {
+    fn play_selected_sets_playing_url_last_played_url_and_connecting_state() {
         let mut app = test_app();
 
         app.play_selected();
@@ -100,16 +102,30 @@ mod tests {
             app.library.settings.last_played_url.as_deref(),
             Some("http://a")
         );
+        assert_eq!(app.playback, PlaybackState::Connecting);
     }
 
     #[test]
-    fn stop_clears_playing_url() {
+    fn stop_clears_playing_url_and_sets_stopped_state() {
         let mut app = test_app();
         app.playing_url = Some("http://a".to_string());
+        app.playback = PlaybackState::Playing;
 
         app.stop_playback();
 
         assert_eq!(app.playing_url, None);
+        assert_eq!(app.playback, PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn space_while_connecting_stops_instead_of_restarting_playback() {
+        let mut app = test_app();
+        app.play_selected();
+
+        app.toggle_pause();
+
+        assert_eq!(app.playing_url, None);
+        assert_eq!(app.playback, PlaybackState::Stopped);
     }
 
     #[test]
