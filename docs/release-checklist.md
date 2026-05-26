@@ -1,6 +1,6 @@
 # Release checklist
 
-This checklist is for publishing DriftFM to crates.io and creating the matching GitHub release.
+This checklist is for publishing PulseDeck to crates.io and creating the matching GitHub release.
 
 ## Preflight
 
@@ -13,8 +13,8 @@ git fetch --prune
 Confirm the version:
 
 ```bash
-grep -n 'version = "0.1.4"' Cargo.toml
-grep -A2 -n 'name = "driftfm"' Cargo.lock
+grep -n 'version = "0.1.5"' Cargo.toml
+grep -A2 -n 'name = "pulsedeck"' Cargo.lock
 ```
 
 Run the full local gate:
@@ -62,23 +62,23 @@ cargo publish
 After crates.io accepts the package, tag the exact commit that was published:
 
 ```bash
-git tag -a v0.1.4 -m "DriftFM 0.1.4"
-git push origin v0.1.4
+git tag -a v0.1.5 -m "PulseDeck 0.1.5"
+git push origin v0.1.5
 ```
 
 ## GitHub release
 
-Create a GitHub release from tag `v0.1.4` and paste the notes from:
+Create a GitHub release from tag `v0.1.5` and paste the notes from:
 
 ```text
-docs/releases/0.1.4.md
+docs/releases/0.1.5.md
 ```
 
 ## Post-release sanity check
 
 ```bash
-cargo install driftfm --version 0.1.4
-driftfm
+cargo install pulsedeck --version 0.1.5
+pulsedeck
 ```
 
 ## Important
