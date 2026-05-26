@@ -2,6 +2,7 @@ use super::*;
 
 const SPECTRUM_BANDS: usize = 40;
 const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
+const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
 
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
@@ -108,13 +109,13 @@ fn average_log_band_energy(
 fn spectrum_target(avg: f32, band: usize, total_bands: usize) -> f32 {
     let energy = (avg - SPECTRUM_NOISE_FLOOR).max(0.0);
     let compressed = compress_spectrum_energy(energy);
-    let scaled = compressed * spectrum_gain_curve(band, total_bands) * 2.25;
+    let scaled = compressed * spectrum_gain_curve(band, total_bands) * SPECTRUM_OUTPUT_GAIN;
 
-    scaled.clamp(0.0, 1.0)
+    scaled.clamp(0.0, 0.92)
 }
 
 fn compress_spectrum_energy(avg: f32) -> f32 {
-    avg.powf(0.42)
+    avg.powf(0.50)
 }
 
 fn spectrum_gain_curve(band: usize, total_bands: usize) -> f32 {
@@ -122,11 +123,11 @@ fn spectrum_gain_curve(band: usize, total_bands: usize) -> f32 {
     let t = band as f32 / denominator;
 
     // Gentle broad lift through mids/highs without the old final-bin rocket boost.
-    let broad_lift = 1.0 + 1.45 * t.powf(0.70);
+    let broad_lift = 1.0 + 1.20 * t.powf(0.72);
 
     // Tame the last treble shelf so weak high-frequency bins do not dominate visually.
     let high_tame = if t > 0.82 {
-        1.0 - ((t - 0.82) / 0.18).clamp(0.0, 1.0) * 0.28
+        1.0 - ((t - 0.82) / 0.18).clamp(0.0, 1.0) * 0.35
     } else {
         1.0
     };
@@ -152,7 +153,11 @@ fn spectrum_release_curve(band: usize, total_bands: usize) -> f32 {
     let denominator = total_bands.saturating_sub(1).max(1) as f32;
     let t = band as f32 / denominator;
 
-    if t > 0.82 { 0.11 } else { 0.075 }
+    if t > 0.82 {
+        0.12
+    } else {
+        0.075
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -191,7 +196,7 @@ impl Complex {
     fn mul(self, other: Self) -> Self {
         Self {
             re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im * other.re,
+            im: self.im * other.re + self.re * other.im,
         }
     }
 
@@ -235,17 +240,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spectrum_gain_curve_does_not_rocket_final_band() {
+    fn spectrum_gain_curve_tames_final_band() {
         let mid_gain = spectrum_gain_curve(20, SPECTRUM_BANDS);
         let final_gain = spectrum_gain_curve(SPECTRUM_BANDS - 1, SPECTRUM_BANDS);
 
-        assert!(final_gain > mid_gain);
-        assert!(final_gain < 2.0);
+        assert!(final_gain < mid_gain);
+        assert!(final_gain < 1.50);
     }
 
     #[test]
     fn spectrum_target_gates_tiny_noise_floor() {
-        assert_eq!(spectrum_target(SPECTRUM_NOISE_FLOOR * 0.5, 30, SPECTRUM_BANDS), 0.0);
+        assert_eq!(
+            spectrum_target(SPECTRUM_NOISE_FLOOR * 0.5, 30, SPECTRUM_BANDS),
+            0.0
+        );
     }
 
     #[test]
