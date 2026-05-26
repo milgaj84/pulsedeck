@@ -137,76 +137,76 @@ fn audio_loop(
     loop {
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
-            Ok(cmd) => {
-                match cmd {
-                    AudioCommand::Play(url) => {
-                        if current_sink.is_some() {
-                            pending_action = Some(AudioCommand::Play(url));
-                        } else {
-                            spawn_connection_for!(url);
-                        }
-                    }
-                    AudioCommand::Pause => {
-                        if current_sink.is_some() {
-                            pending_action = Some(AudioCommand::Pause);
-                        } else {
-                            let _ = status_tx.send(AudioStatus::Paused);
-                        }
-                    }
-                    AudioCommand::Resume => {
-                        if let Some(ref sink) = current_sink {
-                            sink.play();
-                            let _ = status_tx.send(AudioStatus::Playing);
-                            // Smooth fade-in
-                            current_fade_volume = Some(0.0);
-                        }
-                    }
-                    AudioCommand::Stop => {
-                        if current_sink.is_some() {
-                            pending_action = Some(AudioCommand::Stop);
-                        } else {
-                            active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
-                            connect_thread = None;
-                            let _ = status_tx.send(AudioStatus::Stopped);
-                        }
-                    }
-                    AudioCommand::SetVolume(vol) => {
-                        target_volume = vol;
-                        if current_fade_volume.is_none() && pending_action.is_none() {
-                            if let Some(ref sink) = current_sink {
-                                sink.set_volume(vol);
-                            }
-                        }
-                    }
-                    AudioCommand::StartRecording {
-                        recording_dir,
-                        category,
-                        keep_snippets,
-                        min_song_duration_secs,
-                    } => {
-                        *record_state.recording_dir.lock().unwrap() = recording_dir;
-                        *record_state.category.lock().unwrap() = category;
-                        record_state
-                            .keep_snippets
-                            .store(keep_snippets, Ordering::SeqCst);
-                        record_state
-                            .min_song_duration_secs
-                            .store(min_song_duration_secs, Ordering::SeqCst);
-                        record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                            state: 1,
-                            filepath: None,
-                        });
-                    }
-                    AudioCommand::StopRecording => {
-                        record_state.state.store(0, Ordering::SeqCst); // Transition to Off
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                            state: 0,
-                            filepath: None,
-                        });
+            Ok(cmd) => match cmd {
+                AudioCommand::Play(url) => {
+                    if current_sink.is_some() {
+                        pending_action = Some(AudioCommand::Play(url));
+                    } else {
+                        spawn_connection_for!(url);
                     }
                 }
-            }
+                AudioCommand::Pause => {
+                    if let Some(ref sink) = current_sink {
+                        pending_action = None;
+                        current_fade_volume = None;
+                        sink.pause();
+                        let _ = status_tx.send(AudioStatus::Paused);
+                    }
+                }
+                AudioCommand::Resume => {
+                    if let Some(ref sink) = current_sink {
+                        pending_action = None;
+                        sink.play();
+                        let _ = status_tx.send(AudioStatus::Playing);
+                        // Smooth fade-in
+                        current_fade_volume = Some(0.0);
+                    }
+                }
+                AudioCommand::Stop => {
+                    if current_sink.is_some() {
+                        pending_action = Some(AudioCommand::Stop);
+                    } else {
+                        active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
+                        connect_thread = None;
+                        let _ = status_tx.send(AudioStatus::Stopped);
+                    }
+                }
+                AudioCommand::SetVolume(vol) => {
+                    target_volume = vol;
+                    if current_fade_volume.is_none() && pending_action.is_none() {
+                        if let Some(ref sink) = current_sink {
+                            sink.set_volume(vol);
+                        }
+                    }
+                }
+                AudioCommand::StartRecording {
+                    recording_dir,
+                    category,
+                    keep_snippets,
+                    min_song_duration_secs,
+                } => {
+                    *record_state.recording_dir.lock().unwrap() = recording_dir;
+                    *record_state.category.lock().unwrap() = category;
+                    record_state
+                        .keep_snippets
+                        .store(keep_snippets, Ordering::SeqCst);
+                    record_state
+                        .min_song_duration_secs
+                        .store(min_song_duration_secs, Ordering::SeqCst);
+                    record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
+                    let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                        state: 1,
+                        filepath: None,
+                    });
+                }
+                AudioCommand::StopRecording => {
+                    record_state.state.store(0, Ordering::SeqCst); // Transition to Off
+                    let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                        state: 0,
+                        filepath: None,
+                    });
+                }
+            },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 break;
@@ -237,10 +237,6 @@ fn audio_loop(
                             }
                             let _ = status_tx.send(AudioStatus::Stopped);
                         }
-                        AudioCommand::Pause => {
-                            sink.pause();
-                            let _ = status_tx.send(AudioStatus::Paused);
-                        }
                         _ => {}
                     }
                 } else {
@@ -259,9 +255,6 @@ fn audio_loop(
                         active_conn_id.store(0, Ordering::SeqCst);
                         connect_thread = None;
                         let _ = status_tx.send(AudioStatus::Stopped);
-                    }
-                    AudioCommand::Pause => {
-                        let _ = status_tx.send(AudioStatus::Paused);
                     }
                     _ => {}
                 }
