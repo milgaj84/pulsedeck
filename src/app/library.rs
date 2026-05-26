@@ -23,9 +23,12 @@ impl App {
                         self.set_info_notice("Station removed. Press u to undo");
                     }
                     Ok(false) => {}
-                    Err(err) => self.set_error_notice(format!(
-                        "Station removed in memory, but could not save library: {err}"
-                    )),
+                    Err(err) => {
+                        self.undo_removed_station = Some((station, removed_index, removed_genre));
+                        self.set_error_notice(format!(
+                            "Station removed in memory, but could not save library: {err}"
+                        ));
+                    }
                 }
                 let count = self.visible_count();
                 if self.selected >= count && self.selected > 0 {
@@ -182,6 +185,20 @@ mod tests {
 
         assert_eq!(app.library.stations[2].name, "Synth B");
         assert_eq!(app.visible_stations()[app.selected].name, "Synth B");
+    }
+
+    #[test]
+    fn now_playing_uses_undo_snapshot_after_playing_station_removal() {
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+        app.playing_url = Some("http://a".to_string());
+
+        app.update(Action::RemoveLibrarySelection);
+
+        assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
     }
 
     #[test]
