@@ -12,12 +12,14 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Settings Row Model**: Replaced hardcoded settings row indices with a typed `SettingRow` list shared by the reducer and settings overlay, making future settings safer to add.
 *   **Settings Disabled-State Consistency**: The minimum song duration row now stays inert when partial snippets are kept, matching its dimmed disabled UI state.
 *   **WSL Notification Fallback**: Desktop notifications now fall back to a Windows PowerShell notification balloon when DriftFM is running under WSL and the normal Linux notification path is unavailable.
+*   **Playback Pause Responsiveness**: Starting playback now marks the app as connecting immediately, and pause now acts directly on the audio sink to avoid delayed Space handling and visualizer/audio desync.
 
 ### Added
 *   **Recording Feedback Tests**: Added app-level tests covering recording notices for stopped, pending, and stopped-again states.
 *   **Undo Removal Tests**: Added shortcut and app-state tests covering undo restore behavior, empty undo feedback, replacement of older undo slots, and filtered genre restores.
 *   **Settings Row Tests**: Added settings tests for row mapping, navigation wrapping, and disabled minimum-duration behavior.
 *   **WSL Notification Tests**: Added notifier tests for WSL kernel detection and PowerShell string escaping.
+*   **Playback State Tests**: Added app-level tests covering immediate connecting state, stop state sync, and Space while connecting.
 
 ---
 
