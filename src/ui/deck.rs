@@ -30,9 +30,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(11), // Cassette Art
-                    Constraint::Length(5),  // Meta Details
-                    Constraint::Min(0),     // Oscilloscope Simulated Visualizer
+                    Constraint::Length(9), // Cassette Art
+                    Constraint::Length(5), // Meta Details
+                    Constraint::Min(0),    // Oscilloscope Simulated Visualizer
                 ])
                 .split(inner_area);
 
@@ -76,7 +76,7 @@ fn build_cassette_lines(
         .bg(theme::bg())
         .add_modifier(Modifier::BOLD);
 
-    let mut lines = Vec::with_capacity(11);
+    let mut lines = Vec::with_capacity(9);
     lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
     lines.push(cassette_label_line(
         inner_width,
@@ -85,19 +85,13 @@ fn build_cassette_lines(
         shell_style,
     ));
     lines.push(shell_text_line(
-        "         ────────────                 ",
+        "        ────────────────────────────        ",
         inner_width,
         shell_style,
         shell_style,
     ));
     lines.push(shell_text_line(
-        "  ╭────────╮      ══════      ╭────────╮  ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "  │        │                  │        │  ",
+        "  ╭────────╮        ════        ╭────────╮  ",
         inner_width,
         shell_style,
         shell_style,
@@ -110,20 +104,14 @@ fn build_cassette_lines(
         vec![
             segment("  ", shell_style),
             segment(left_reel, reel_style),
-            segment(" ────────────── ", shell_style),
+            segment("  ────────────────  ", shell_style),
             segment(right_reel, reel_style),
             segment("  ", shell_style),
         ],
     ));
 
     lines.push(shell_text_line(
-        "  │        │                  │        │  ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "  ╰────────╯                  ╰────────╯  ",
+        "  ╰────────╯                    ╰────────╯  ",
         inner_width,
         shell_style,
         shell_style,
@@ -135,7 +123,7 @@ fn build_cassette_lines(
         shell_style,
     ));
     lines.push(shell_text_line(
-        "       ╲________________________╱       ",
+        "       ╲____________________________╱       ",
         inner_width,
         shell_style,
         shell_style,
@@ -728,7 +716,7 @@ mod tests {
                 recording_state,
             );
 
-            assert_eq!(lines.len(), 11);
+            assert_eq!(lines.len(), 9);
             for line in lines {
                 assert_eq!(line_width(&line), expected_width);
             }
