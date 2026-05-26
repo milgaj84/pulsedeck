@@ -40,10 +40,10 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
-- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars, footer chips, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
+- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars, footer chips, list metadata, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
 - 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck. Full-deck mode keeps the stable cassette design and adds a framed signal screen with a themed status strip.
 - 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes while keeping bars readable.
-- 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
+- 💾 **Favorites & history** — your stations are remembered between sessions, the station list shows compact country/bitrate metadata, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
 
@@ -118,11 +118,12 @@ There is intentionally no separate “add without playing” shortcut in search 
 3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
 4. Press `Esc` instead to leave search without adding anything.
 
-The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
+Search results show saved stations with a star and include compact genre/country/bitrate metadata. The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
 
 **Managing your library:**
 
 - Your Library is the saved station list shown on launch.
+- Rows show the selected station, currently playing station, country, and bitrate without overflowing long names.
 - To remove a saved station, highlight it in the Library and press `f`.
 - After removal, press `u` to restore the most recently removed station.
 - Switch between genre categories with `Tab` / `Shift+Tab`.
