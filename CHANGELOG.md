@@ -11,6 +11,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Visual Enchantments Phase 2 - Deck Composition**: Reused the stable cassette design across split and full Bento layouts, framed the visualizer as a hardware signal screen, added visualizer mode titles, and upgraded the deck metadata into a bordered signal/status strip.
 *   **Visual Enchantments Phase 3 - Spectrum Calibration**: Retuned the spectrum analyzer's visual response with a gentler gain curve, noise-floor gating, band smoothing, softer compression, and faster final-treble release so high-frequency bars look more natural without changing audio playback.
 *   **Visual Enchantments Phase 4 - Footer and Help Polish**: Refined the footer into clearer status chips with layout/scope/recording labels, made shortcut hints more deck-aware, and refreshed the help overlay wording around Tape Deck, Tape History, and scope controls.
+*   **Visual Enchantments Phase 5 - Library and Search Polish**: Refined station rows with clearer selected/playing markers, saved-result stars, compact country/bitrate metadata, safer name truncation, and calmer library/search titles.
 *   **Tape History Naming**: Renamed the deck history page title from the sediment metaphor to `Tape History` so the visual language stays cassette-first.
 
 ---
@@ -37,5 +38,3 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **WSL Notification Tests**: Added notifier tests for WSL kernel detection and PowerShell string escaping.
 *   **Playback State Tests**: Added app-level tests covering immediate connecting state, stop state sync, and Space while connecting.
 *   **UI State Tests**: Added tests for UI-state defaults, layout key round-tripping, visualizer clamping, and corrupted-value sanitizing.
-
----
