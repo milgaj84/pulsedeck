@@ -193,7 +193,7 @@ fn cassette_recording_status(
             )
         }
         RecordingState::Off => (
-            "IDLE",
+            "A-SIDE",
             Style::default()
                 .fg(theme::highlight())
                 .bg(theme::bg())
@@ -205,9 +205,6 @@ fn cassette_recording_status(
 fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, String) {
     match playback {
         PlaybackState::Playing => {
-            const HUB_FRAMES: [&str; 8] = ["◜", "◠", "◝", "◞", "◡", "◟", "◜", "◠"];
-
-            let phase = ((tick_count / 2) % HUB_FRAMES.len() as u64) as usize;
             let transfer_step = ((tick_count / 6) % 8) as usize;
             let transfer = if transfer_step < 4 {
                 transfer_step
@@ -219,16 +216,8 @@ fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, S
             let right_fill = (1 + transfer).min(CASSETTE_TAPE_WIDTH);
 
             (
-                reel_cell(
-                    HUB_FRAMES[phase],
-                    fixed_tape_mass(left_fill, CASSETTE_TAPE_WIDTH),
-                    HUB_FRAMES[(phase + 4) % HUB_FRAMES.len()],
-                ),
-                reel_cell(
-                    HUB_FRAMES[(phase + 2) % HUB_FRAMES.len()],
-                    fixed_tape_mass(right_fill, CASSETTE_TAPE_WIDTH),
-                    HUB_FRAMES[(phase + 6) % HUB_FRAMES.len()],
-                ),
+                reel_cell("○", fixed_tape_mass(left_fill, CASSETTE_TAPE_WIDTH), "○"),
+                reel_cell("○", fixed_tape_mass(right_fill, CASSETTE_TAPE_WIDTH), "○"),
             )
         }
         PlaybackState::Connecting => {
