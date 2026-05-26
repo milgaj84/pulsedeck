@@ -88,6 +88,7 @@ DriftFM is keyboard-driven. Press **`h`** at any time to see the full control re
 | `/` | Anywhere in normal mode | Open worldwide station search |
 | `Esc` | Search or overlay | Leave search / close overlay |
 | `f` | Library only | Remove the highlighted station from your **Library** |
+| `u` | Library only | Undo the most recent station removal |
 | `Tab` / `Shift+Tab` | Library | Switch genre categories |
 | `Space` | Playback | Pause / resume |
 | `s` | Playback | Stop playback |
@@ -120,6 +121,7 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 
 - Your Library is the saved station list shown on launch.
 - To remove a saved station, highlight it in the Library and press `f`.
+- After removal, press `u` to restore the most recently removed station.
 - Switch between genre categories with `Tab` / `Shift+Tab`.
 
 **Coming back tomorrow:**
