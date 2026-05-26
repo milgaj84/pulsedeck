@@ -6,6 +6,10 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.1.5] - 2026-05-26
+
 ### Changed
 *   **Project Rebrand**: Renamed DriftFM to PulseDeck to avoid name confusion with existing and historical radio-related uses of the old name. The crate, binary, app UI, notifications, README, and config paths now use PulseDeck naming.
 *   **Config Migration**: Existing DriftFM config files are copied into the new PulseDeck config directory on first launch, preserving libraries and UI preferences while leaving the old files as a backup.
