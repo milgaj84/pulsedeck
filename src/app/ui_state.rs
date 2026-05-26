@@ -98,6 +98,7 @@ impl UiState {
     }
 }
 
+#[cfg(not(test))]
 pub(super) fn save_ui_state_or_notice(app: &mut super::App) {
     let state = UiState::from_app_values(
         app.volume,
@@ -110,6 +111,9 @@ pub(super) fn save_ui_state_or_notice(app: &mut super::App) {
         app.set_error_notice(format!("Could not save UI state: {err}"));
     }
 }
+
+#[cfg(test)]
+pub(super) fn save_ui_state_or_notice(_app: &mut super::App) {}
 
 fn default_volume() -> u8 {
     DEFAULT_VOLUME
