@@ -28,6 +28,7 @@ impl App {
             Action::SearchConfirm => self.confirm_search(),
 
             Action::RemoveLibrarySelection => self.remove_library_selection(),
+            Action::UndoRemoveLibrarySelection => self.undo_remove_library_selection(),
             Action::NextGenre => self.next_genre(),
             Action::PrevGenre => self.prev_genre(),
 
