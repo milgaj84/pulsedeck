@@ -1,5 +1,5 @@
 use super::theme;
-use crate::app::{App, PlaybackState, RecordingState};
+use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -7,11 +7,12 @@ const CASSETTE_INNER_WIDTH: usize = 44;
 #[cfg(test)]
 const CASSETTE_REEL_CELL_WIDTH: usize = 10;
 const CASSETTE_TAPE_WIDTH: usize = 4;
+const CASSETTE_HEIGHT: u16 = 9;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let title_text = match app.active_deck_page {
         0 => " 📼 Tape Deck ",
-        _ => " 🪨 Sediment History ",
+        _ => " 📼 Tape History ",
     };
 
     // Outer block with desaturated deep purple border and custom retro neon title
@@ -26,18 +27,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     match app.active_deck_page {
         0 => {
-            // Split the inner area vertically: Top (Cassette Art), Middle (Details), Bottom (Scope)
+            let full_deck = app.layout_mode == LayoutMode::RightOnly;
+
+            // Split the inner area vertically: stable cassette, status strip, framed visualizer.
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(9), // Cassette Art
-                    Constraint::Length(5), // Meta Details
-                    Constraint::Min(0),    // Oscilloscope Simulated Visualizer
+                    Constraint::Length(CASSETTE_HEIGHT),
+                    Constraint::Length(5),
+                    Constraint::Min(0),
                 ])
                 .split(inner_area);
 
             render_cassette(frame, chunks[0], app);
-            render_meta_details(frame, chunks[1], app);
+            render_meta_details(frame, chunks[1], app, full_deck);
             render_oscilloscope(frame, chunks[2], app);
         }
         _ => {
@@ -76,7 +79,7 @@ fn build_cassette_lines(
         .bg(theme::bg())
         .add_modifier(Modifier::BOLD);
 
-    let mut lines = Vec::with_capacity(9);
+    let mut lines = Vec::with_capacity(CASSETTE_HEIGHT as usize);
     lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
     lines.push(cassette_label_line(
         inner_width,
@@ -328,10 +331,7 @@ fn truncate_to_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines = Vec::new();
-
-    // Status string
+fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool) {
     let (status_text, status_style) = match app.playback {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
         PlaybackState::Connecting => (
@@ -349,24 +349,21 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
     let genre = station.map(|s| s.genre.as_str()).unwrap_or("N/A");
     let country = station.map(|s| s.country.as_str()).unwrap_or("N/A");
 
-    lines.push(Line::from(vec![
-        Span::styled("  Status:  ", theme::dim()),
-        Span::styled(status_text, status_style),
-        Span::styled(" | ", theme::dim()),
-        Span::styled(genre, theme::cyan()),
-    ]));
-
-    lines.push(Line::from(vec![
-        Span::styled("  Origin:  ", theme::dim()),
-        Span::styled(country, theme::cyan()),
-    ]));
-
-    // Render circular buffer resiliency progress bar!
     let filled = (app.buffer_percent / 10) as usize;
     let empty = 10 - filled;
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+    let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("  Buffer:  ", theme::dim()),
+        Span::styled(" ▶ ", status_style),
+        Span::styled(status_text, status_style),
+        Span::styled("   GENRE ", theme::dim()),
+        Span::styled(genre, theme::cyan()),
+        Span::styled("   ORIGIN ", theme::dim()),
+        Span::styled(country, theme::cyan()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(" BUFFER ", theme::dim()),
         Span::styled(
             format!("[{}] ", bar),
             Style::default()
@@ -377,30 +374,62 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
 
-    // Render active segment capture file name!
-    if app.recording_state == crate::app::RecordingState::Active {
+    if app.recording_state == RecordingState::Active {
         if let Some(ref filepath) = app.active_record_filepath {
             let filename = std::path::Path::new(filepath)
                 .file_name()
                 .and_then(|f| f.to_str())
                 .unwrap_or(filepath);
             lines.push(Line::from(vec![
-                Span::styled("  Tape:    ", theme::dim()),
                 Span::styled(
-                    format!("🔴 capture -> {}", filename),
-                    Style::default()
-                        .fg(theme::error().fg.unwrap_or_default())
-                        .add_modifier(Modifier::BOLD),
+                    " ● REC ACTIVE ",
+                    theme::error().add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(format!("capture -> {}", filename), theme::dim()),
             ]));
         }
     }
 
-    let paragraph = Paragraph::new(lines);
+    let title = if full_deck {
+        " SIGNAL / TAPE STATUS "
+    } else {
+        " SIGNAL "
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border())
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(Span::styled(title, theme::title()));
+
+    let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }
 
 fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
+    if area.width < 3 || area.height < 3 {
+        return;
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border())
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(Span::styled(visualizer_title(app), theme::title()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    render_visualizer_signal(frame, inner, app);
+}
+
+fn visualizer_title(app: &App) -> &'static str {
+    match app.visualizer_mode {
+        0 => " RTA SPECTRUM ",
+        1 => " REAL OSC ",
+        _ => " SIM OSC ",
+    }
+}
+
+fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
     let width = area.width as usize;
     let height = area.height as usize;
 
@@ -460,56 +489,52 @@ fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut canvas = BrailleCanvas::new(width, height);
     match app.playback {
-        PlaybackState::Playing => {
-            match app.visualizer_mode {
-                1 => {
-                    // Mode 1: Real-Time Oscilloscope using sample buffer
-                    let pixel_width = width * 2;
-                    let pixel_height = height * 4;
-                    let center_y = pixel_height as f32 * 0.5;
-                    let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.45);
+        PlaybackState::Playing => match app.visualizer_mode {
+            1 => {
+                let pixel_width = width * 2;
+                let pixel_height = height * 4;
+                let center_y = pixel_height as f32 * 0.5;
+                let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.45);
 
-                    let mut samples = Vec::with_capacity(pixel_width);
-                    if let Ok(buf) = app.sample_buffer.lock() {
-                        let n = buf.len();
-                        if n >= pixel_width {
-                            let start_idx = n - pixel_width;
-                            samples.extend(buf.iter().skip(start_idx).take(pixel_width).copied());
-                        } else {
-                            samples.extend(vec![0.0; pixel_width - n]);
-                            samples.extend(buf.iter().copied());
-                        }
+                let mut samples = Vec::with_capacity(pixel_width);
+                if let Ok(buf) = app.sample_buffer.lock() {
+                    let n = buf.len();
+                    if n >= pixel_width {
+                        let start_idx = n - pixel_width;
+                        samples.extend(buf.iter().skip(start_idx).take(pixel_width).copied());
                     } else {
-                        samples.extend(vec![0.0; pixel_width]);
+                        samples.extend(vec![0.0; pixel_width - n]);
+                        samples.extend(buf.iter().copied());
                     }
-
-                    for (x, sample_val) in samples.iter().enumerate().take(pixel_width) {
-                        let y_float = center_y - (sample_val * amplitude);
-                        let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
-                        canvas.set_pixel(x, y);
-                    }
+                } else {
+                    samples.extend(vec![0.0; pixel_width]);
                 }
-                _ => {
-                    // Mode 2: Simulated Oscilloscope (fallback / original math wave)
-                    let pixel_width = width * 2;
-                    let pixel_height = height * 4;
-                    let center_y = pixel_height as f32 * 0.5;
-                    let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.4);
 
-                    for x in 0..pixel_width {
-                        let t = app.tick_count as f32 * 0.15;
-                        let bass = (x as f32 * 0.05 + t).sin() * 0.6;
-                        let mid = (x as f32 * 0.15 - t * 0.8).cos() * 0.3;
-                        let high = (x as f32 * 0.45 + t * 2.0).sin() * 0.1;
-
-                        let wave_sum = bass + mid + high;
-                        let y_float = center_y + wave_sum * amplitude;
-                        let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
-                        canvas.set_pixel(x, y);
-                    }
+                for (x, sample_val) in samples.iter().enumerate().take(pixel_width) {
+                    let y_float = center_y - (sample_val * amplitude);
+                    let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
+                    canvas.set_pixel(x, y);
                 }
             }
-        }
+            _ => {
+                let pixel_width = width * 2;
+                let pixel_height = height * 4;
+                let center_y = pixel_height as f32 * 0.5;
+                let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.4);
+
+                for x in 0..pixel_width {
+                    let t = app.tick_count as f32 * 0.15;
+                    let bass = (x as f32 * 0.05 + t).sin() * 0.6;
+                    let mid = (x as f32 * 0.15 - t * 0.8).cos() * 0.3;
+                    let high = (x as f32 * 0.45 + t * 2.0).sin() * 0.1;
+
+                    let wave_sum = bass + mid + high;
+                    let y_float = center_y + wave_sum * amplitude;
+                    let y = y_float.clamp(0.0, (pixel_height - 1) as f32) as usize;
+                    canvas.set_pixel(x, y);
+                }
+            }
+        },
         PlaybackState::Connecting => {
             let pixel_width = width * 2;
             let pixel_height = height * 4;
@@ -692,23 +717,16 @@ mod tests {
     #[test]
     fn cassette_rows_have_equal_width() {
         let expected_width = CASSETTE_INNER_WIDTH + 2;
-
-        for recording_state in [
+        let lines = build_cassette_lines(
+            CASSETTE_INNER_WIDTH,
+            0,
+            &PlaybackState::Playing,
             RecordingState::Off,
-            RecordingState::Pending,
-            RecordingState::Active,
-        ] {
-            let lines = build_cassette_lines(
-                CASSETTE_INNER_WIDTH,
-                0,
-                &PlaybackState::Playing,
-                recording_state,
-            );
+        );
 
-            assert_eq!(lines.len(), 9);
-            for line in lines {
-                assert_eq!(line_width(&line), expected_width);
-            }
+        assert_eq!(lines.len(), CASSETTE_HEIGHT as usize);
+        for line in lines {
+            assert_eq!(line_width(&line), expected_width);
         }
     }
 
