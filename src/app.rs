@@ -9,6 +9,7 @@ mod search;
 mod selectors;
 mod settings;
 mod types;
+mod ui_state;
 mod update;
 mod visualizer;
 
