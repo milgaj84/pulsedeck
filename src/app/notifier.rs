@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub(super) fn notify_now_playing(title: &str, station_name: &str) {
     let body = format!("♫ {title}\nStation: {station_name}");
@@ -29,11 +29,15 @@ fn spawn_windows_balloon(summary: &str, body: &str) -> std::io::Result<()> {
     let script = windows_balloon_script(summary, body);
     Command::new("powershell.exe")
         .arg("-NoProfile")
+        .arg("-NonInteractive")
         .arg("-STA")
         .arg("-WindowStyle")
         .arg("Hidden")
         .arg("-Command")
         .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
 }
