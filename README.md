@@ -1,38 +1,40 @@
 <div align="center">
 
-# ✦ DriftFM ✦
+# ✦ PulseDeck ✦
 
 **A cyber-synthwave internet radio player for your terminal.**
 
 *Stream any radio station on Earth. Record tracks automatically. Never leave the command line.*
 
-[![Crates.io](https://img.shields.io/crates/v/driftfm.svg)](https://crates.io/crates/driftfm)
+[![Crates.io](https://img.shields.io/crates/v/pulsedeck.svg)](https://crates.io/crates/pulsedeck)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
-[![CI](https://github.com/milgaj84/driftFM/actions/workflows/ci.yml/badge.svg)](https://github.com/milgaj84/driftFM/actions/workflows/ci.yml)
+[![CI](https://github.com/milgaj84/pulsedeck/actions/workflows/ci.yml/badge.svg)](https://github.com/milgaj84/pulsedeck/actions/workflows/ci.yml)
 
 </div>
 
 ---
 
-![DriftFM — Cyber-Deck TUI Interface](assets/screenshot.png)
+![PulseDeck — Cyber-Deck TUI Interface](assets/screenshot.png)
 
 ---
 
-## What is DriftFM?
+## What is PulseDeck?
 
-DriftFM is a **terminal internet radio player** with a retrowave soul, built in Rust. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal, starts instantly, and uses a few megabytes of RAM.
+PulseDeck is a **terminal internet radio player** with a retrowave soul, built in Rust. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal, starts instantly, and uses a few megabytes of RAM.
 
 It ships pre-loaded with handpicked synthwave, chiptune, and cyberpunk stations so it sounds great from the first keypress. But you can search, save, and play **any public internet radio station in the world**.
 
 Think of it as: *VLC for internet radio, but it fits in your terminal and records tracks into named folders automatically.*
 
+> PulseDeck was formerly named DriftFM. The project was renamed to avoid confusion with existing and historical radio-related uses of the old name. Existing DriftFM config is copied into the new PulseDeck config directory on first launch.
+
 ---
 
 ## What makes it different?
 
-Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
+Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
 
 - 📡 **Search 30,000+ stations** from the global radio-browser.info catalog — by name, tag, or country, with mirror failover for upstream outages
 - 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
@@ -59,14 +61,14 @@ Most TUI radio players just wrap ffplay. DriftFM is purpose-built from scratch i
 ### From crates.io (recommended)
 
 ```bash
-cargo install driftfm
+cargo install pulsedeck
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/milgaj84/driftFM.git
-cd driftFM
+git clone https://github.com/milgaj84/pulsedeck.git
+cd pulsedeck
 cargo run --release
 ```
 
@@ -76,7 +78,7 @@ That's it. No config files to write. No API keys. Stations are pre-loaded and th
 
 ## How to use it
 
-DriftFM is keyboard-driven. Press **`h`** at any time to see the full control reference.
+PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control reference.
 
 ### Core shortcuts
 
@@ -94,7 +96,7 @@ DriftFM is keyboard-driven. Press **`h`** at any time to see the full control re
 | `s` | Playback | Stop playback |
 | `+` / `-` | Playback | Volume up / down |
 | `m` | Playback | Mute / unmute |
-| `r` | Playback | Start / stop recording; DriftFM shows a footer notice when recording is armed, stopped, or unavailable |
+| `r` | Playback | Start / stop recording; PulseDeck shows a footer notice when recording is armed, stopped, or unavailable |
 | `b` | View | Cycle layout |
 | `p` | View | Cycle deck page |
 | `v` | View | Cycle visualizer |
@@ -112,7 +114,7 @@ There is intentionally no separate “add without playing” shortcut in search 
 
 1. Press `/` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
 2. Use `↑` / `↓` to highlight a result.
-3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch DriftFM.
+3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
 4. Press `Esc` instead to leave search without adding anything.
 
 The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
@@ -126,15 +128,15 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 
 **Coming back tomorrow:**
 
-- DriftFM remembers your library between sessions.
-- DriftFM also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
+- PulseDeck remembers your library between sessions.
+- PulseDeck also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
 
 ---
 
 ## Recording
 
-Press `r` while a station is playing. DriftFM will:
+Press `r` while a station is playing. PulseDeck will:
 
 1. Show `Recording will start at next track boundary` in the footer
 2. Wait for the next song boundary (so you never capture a partial intro)
@@ -143,7 +145,7 @@ Press `r` while a station is playing. DriftFM will:
 5. Discard anything under 90 seconds — DJ speech, ads, station IDs are swept automatically
 6. Stop cleanly when you press `r` again, with `Recording stopped` shown in the footer
 
-If you press `r` before playback starts, DriftFM shows `Start playback before recording` instead of failing silently.
+If you press `r` before playback starts, PulseDeck shows `Start playback before recording` instead of failing silently.
 
 The minimum song duration and whether to keep short clips are configurable in the settings (`,`).
 
@@ -153,7 +155,7 @@ The minimum song duration and whether to keep short clips are configurable in th
 
 Press `,` to open the settings panel. Current options:
 
-- **Desktop notifications** — show track info when a song changes. On WSL, DriftFM falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
+- **Desktop notifications** — show track info when a song changes. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup** — picks up where you left off
 - **Tape capture folder** — cycle between preset recording directories
 - **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted
@@ -161,6 +163,19 @@ Press `,` to open the settings panel. Current options:
 - **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte
 
 Settings are saved automatically to a JSON file in your config directory.
+
+---
+
+## Migration from DriftFM
+
+PulseDeck automatically copies existing DriftFM config files into the new config directory on first launch:
+
+| Old path | New path |
+| :--- | :--- |
+| `~/.config/driftfm/library.json` | `~/.config/pulsedeck/library.json` |
+| `~/.config/driftfm/ui-state.json` | `~/.config/pulsedeck/ui-state.json` |
+
+The old `~/.config/driftfm` directory is left untouched as a backup. Future saves go to `~/.config/pulsedeck`.
 
 ---
 
@@ -177,7 +192,7 @@ Settings are saved automatically to a JSON file in your config directory.
 
 ## Code Quality
 
-DriftFM's CI checks:
+PulseDeck's CI checks:
 
 - Rust formatting with `cargo fmt --check`
 - Clippy across all targets and features with warnings treated as errors
