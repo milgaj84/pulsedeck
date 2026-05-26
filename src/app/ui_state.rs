@@ -31,6 +31,7 @@ impl Default for UiState {
 }
 
 impl UiState {
+    #[cfg(not(test))]
     pub(super) fn load() -> Self {
         let Some(path) = ui_state_path() else {
             return Self::default();
@@ -41,6 +42,11 @@ impl UiState {
             .and_then(|contents| serde_json::from_str::<Self>(&contents).ok())
             .map(Self::sanitized)
             .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(super) fn load() -> Self {
+        Self::default()
     }
 
     pub(super) fn from_app_values(
@@ -74,6 +80,7 @@ impl UiState {
         self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1)
     }
 
+    #[cfg(not(test))]
     pub(super) fn save(&self) -> anyhow::Result<()> {
         let Some(path) = ui_state_path() else {
             return Ok(());
@@ -140,6 +147,7 @@ fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
     }
 }
 
+#[cfg(not(test))]
 fn ui_state_path() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("driftfm").join("ui-state.json"))
 }
@@ -147,6 +155,16 @@ fn ui_state_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_load_uses_defaults() {
+        let state = UiState::load();
+
+        assert_eq!(state.volume(), 80);
+        assert!(!state.muted());
+        assert_eq!(state.layout_mode(), LayoutMode::Split);
+        assert_eq!(state.visualizer_mode(), 0);
+    }
 
     #[test]
     fn sanitizes_loaded_values() {
