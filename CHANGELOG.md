@@ -6,6 +6,11 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Improved
+*   **Visual Enchantments Phase 1 - Cassette Geometry**: Stabilized the cassette deck illustration with fixed-width rows, fixed reel cells, cassette row-width tests, and theme-routed reel/status styling so animation no longer changes the cassette shape.
+*   **Visual Enchantments Phase 2 - Hero Deck Composition**: Added a full-deck hero cassette variant for right-only Bento mode, framed the visualizer as a hardware signal screen, added visualizer mode titles, and upgraded the deck metadata into a bordered signal/status strip.
+*   **Tape History Naming**: Renamed the deck history page title from the sediment metaphor to `Tape History` so the visual language stays cassette-first.
+
 ---
 
 ## [0.1.5] - 2026-05-26
@@ -117,37 +122,3 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Visualizer Saturated V-Shape**: Normalized FFT bin norms and implemented square root dynamic range compression on band averages.
 
 ---
-
-## [0.1.1] - 2026-05-22
-
-### Fixed
-*   **Dynamic ICY Metadata Sync**: Replaced hardcoded metadata intervals with dynamic header extraction.
-*   **Station Error Resiliency**: Added support for stations with self-signed or expired SSL certificates.
-*   **Playback Stuttering**: Resolved intermittent pauses caused by metadata boundary desynchronization.
-
-### Added
-*   **Bitrate-Aware Buffer**: Improved buffer accuracy in the UI via bitrate detection.
-
----
-
-## [0.1.0] - 2026-05-21
-
-Initial release of the PulseDeck cyber-synthwave internet radio player and smart tape recorder.
-
-### Added
-*   **Decoupled Bounded Circular Resiliency Buffer**: Decoupled connection downloader socket from raw byte Symphonia decoders using an asynchronous consumer thread and a 1 MB thread-safe buffer.
-*   **Volume Crossfade Transition Engine**: Smooth playback volume ramping on active playback transitions, pauses, resumes, and station switching.
-*   **Smart Tape Recording & Category Organizer**:
-    *   Boundary-perfect ICY metadata stream segmenter.
-    *   Dynamic parent-genre directory resolver.
-    *   Automatic metadata tagging into capture output.
-*   **Smart Discarder & Sweep Filter**: Dynamic file purge discarding short audio fragments and commercial sweep tracks unless toggled otherwise in config.
-*   **Catppuccin Theming System**: 5 built-in themes with semantic color architecture.
-*   **Retrowave Bento TUI Graphics**:
-    *   Spinning cassette reel animation deck.
-    *   Real-time Braille Canvas audio stream oscilloscope.
-    *   Interactive genre bento tabs and marquee ticker text displays.
-    *   Centred Neon Configuration popups.
-*   **System Notifications**: Desktop popups triggering alerts on fresh track changes with a silent notifier queue.
-*   **Persistent Configuration**: Settings stored persistently inside JSON databases.
-*   **Advanced Quality Suite**: Integrated modular unit testing systems for filename sanitizers and ICY metadata parsers.
