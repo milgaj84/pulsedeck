@@ -48,16 +48,19 @@ impl App {
         self.volume = (self.volume + 5).min(100);
         self.muted = false;
         self.sync_volume();
+        super::ui_state::save_ui_state_or_notice(self);
     }
 
     pub(super) fn volume_down(&mut self) {
         self.volume = self.volume.saturating_sub(5);
         self.sync_volume();
+        super::ui_state::save_ui_state_or_notice(self);
     }
 
     pub(super) fn toggle_mute(&mut self) {
         self.muted = !self.muted;
         self.sync_volume();
+        super::ui_state::save_ui_state_or_notice(self);
     }
 
     /// Sync volume to audio engine, respecting mute state.
