@@ -25,6 +25,7 @@ pub enum Action {
 
     /// Library management
     RemoveLibrarySelection,
+    UndoRemoveLibrarySelection,
     NextGenre,
     PrevGenre,
 

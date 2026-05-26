@@ -51,6 +51,7 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         shortcut("↑↓ / j k", "Move selection"),
         shortcut("Tab / Shift+Tab", "Change genre category"),
         shortcut("f", "Remove selected station from Library"),
+        shortcut("u", "Undo the most recent station removal"),
         section("Search"),
         shortcut("/", "Open worldwide station search"),
         shortcut("Type", "Filter/search by station, tag, city, or country"),

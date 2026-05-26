@@ -121,6 +121,8 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Pause  [", theme::dim()),
             Span::styled("f", theme::cyan()),
             Span::styled("] Remove  [", theme::dim()),
+            Span::styled("u", theme::cyan()),
+            Span::styled("] Undo  [", theme::dim()),
             Span::styled("/", theme::cyan()),
             Span::styled("] Search  [", theme::dim()),
             Span::styled("b", theme::cyan()),
