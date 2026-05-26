@@ -17,7 +17,9 @@ use crate::radio::Station;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus};
+pub use types::{
+    AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus, SettingRow,
+};
 
 /// Core application state.
 ///
