@@ -26,14 +26,14 @@ fn is_wsl_osrelease(release: &str) -> bool {
 }
 
 fn spawn_windows_balloon(summary: &str, body: &str) -> std::io::Result<()> {
+    let script = windows_balloon_script(summary, body);
     Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &windows_balloon_script(summary, body),
-        ])
+        .arg("-NoProfile")
+        .arg("-STA")
+        .arg("-WindowStyle")
+        .arg("Hidden")
+        .arg("-Command")
+        .arg(script)
         .spawn()
         .map(|_| ())
 }
