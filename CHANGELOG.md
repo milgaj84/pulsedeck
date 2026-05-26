@@ -9,6 +9,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Improved
 *   **Visual Enchantments Phase 1 - Cassette Geometry**: Stabilized the cassette deck illustration with fixed-width rows, fixed reel cells, cassette row-width tests, and theme-routed reel/status styling so animation no longer changes the cassette shape.
 *   **Visual Enchantments Phase 2 - Deck Composition**: Reused the stable cassette design across split and full Bento layouts, framed the visualizer as a hardware signal screen, added visualizer mode titles, and upgraded the deck metadata into a bordered signal/status strip.
+*   **Visual Enchantments Phase 3 - Spectrum Calibration**: Retuned the spectrum analyzer's visual response with a gentler gain curve, noise-floor gating, band smoothing, softer compression, and faster final-treble release so high-frequency bars look more natural without changing audio playback.
 *   **Tape History Naming**: Renamed the deck history page title from the sediment metaphor to `Tape History` so the visual language stays cassette-first.
 
 ---
