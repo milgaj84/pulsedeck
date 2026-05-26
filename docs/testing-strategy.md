@@ -1,6 +1,6 @@
 # Testing strategy
 
-DriftFM uses fast, deterministic checks as the default quality gate. CI and local validation should remain useful even when a developer is offline, a stream host is down, or the Radio Browser network has certificate trouble.
+PulseDeck uses fast, deterministic checks as the default quality gate. CI and local validation should remain useful even when a developer is offline, a stream host is down, or the Radio Browser network has certificate trouble.
 
 ## Required local gate
 
@@ -33,17 +33,3 @@ Use manual network smoke tests when touching:
 - `src/audio/stream_reader.rs`
 - stream retry/cancellation behavior
 - TLS or HTTP fallback behavior
-
-## Manual smoke checklist
-
-1. Start the app with `cargo run`.
-2. Search for `lofi`.
-3. Confirm search results appear or show a useful compact error.
-4. Press `Enter` on a search result and confirm it adds/plays.
-5. Pause and resume playback.
-6. Stop playback.
-7. Switch stations.
-8. Toggle recording while playing, then stop recording.
-9. Open settings and press playback/layout/search keys to confirm they do not leak through.
-10. Open help and settings to confirm overlays still mutually close.
-11. Quit and confirm the terminal restores cleanly.
