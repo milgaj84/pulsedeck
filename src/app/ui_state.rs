@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
 const VISUALIZER_MODE_COUNT: usize = 3;
+#[cfg(not(test))]
 const NEW_CONFIG_DIR: &str = "pulsedeck";
+#[cfg(not(test))]
 const OLD_CONFIG_DIR: &str = "driftfm";
+#[cfg(not(test))]
 const UI_STATE_FILE: &str = "ui-state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
