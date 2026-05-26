@@ -66,7 +66,7 @@ cargo install driftfm
 
 ```bash
 git clone https://github.com/milgaj84/driftFM.git
-cd DriftFM
+cd driftFM
 cargo run --release
 ```
 
