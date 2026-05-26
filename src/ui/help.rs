@@ -11,7 +11,7 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(Span::styled(" ✦ DriftFM Help ✦ ", theme::title()))
+        .title(Span::styled(" ✦ PulseDeck Help ✦ ", theme::title()))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
