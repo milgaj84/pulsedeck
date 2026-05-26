@@ -1,6 +1,7 @@
 mod idle;
 mod library;
 mod lifecycle;
+mod notifier;
 mod overlays;
 mod playback;
 mod recording;
