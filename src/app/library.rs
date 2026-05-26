@@ -3,7 +3,7 @@ use super::*;
 impl App {
     pub(super) fn remove_library_selection(&mut self) {
         if self.input_mode == InputMode::Normal {
-            if let Some(station) = self.visible_stations().get(self.selected).cloned() {
+            if let Some(station) = self.visible_stations().get(self.selected).copied().cloned() {
                 let removed_index = self
                     .library
                     .stations
