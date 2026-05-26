@@ -85,13 +85,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             };
 
             let meta = station_meta_label(
-                app.input_mode,
+                &app.input_mode,
                 station.genre.as_str(),
                 station.country.as_str(),
                 station.bitrate,
             );
             let meta_chip = format!(" {} ", meta);
-            let fixed_width = visible_len(cursor) + visible_len(save_marker) + visible_len(&meta_chip) + 2;
+            let fixed_width =
+                visible_len(cursor) + visible_len(save_marker) + visible_len(&meta_chip) + 2;
             let name_width = row_width.saturating_sub(fixed_width).max(8);
             let name = truncate_with_ellipsis(station.name.as_str(), name_width);
             let padding = row_width.saturating_sub(
@@ -154,7 +155,7 @@ fn station_name_style(is_playing: bool, is_selected: bool, idx: usize) -> Style 
     }
 }
 
-fn station_meta_label(input_mode: InputMode, genre: &str, country: &str, bitrate: u32) -> String {
+fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrate: u32) -> String {
     let genre = empty_fallback(genre, "Other");
     let country = empty_fallback(country, "??");
 
@@ -231,13 +232,16 @@ mod tests {
 
     #[test]
     fn truncation_adds_ellipsis_for_long_names() {
-        assert_eq!(truncate_with_ellipsis("SomaFM Deep Space One", 10), "SomaFM De…");
+        assert_eq!(
+            truncate_with_ellipsis("SomaFM Deep Space One", 10),
+            "SomaFM De…"
+        );
     }
 
     #[test]
     fn station_meta_search_includes_genre_country_and_bitrate() {
         assert_eq!(
-            station_meta_label(InputMode::Search, "Synthwave", "US", 128),
+            station_meta_label(&InputMode::Search, "Synthwave", "US", 128),
             "Synthwave · US · 128k"
         );
     }
@@ -245,7 +249,7 @@ mod tests {
     #[test]
     fn station_meta_normal_keeps_library_rows_compact() {
         assert_eq!(
-            station_meta_label(InputMode::Normal, "Synthwave", "US", 128),
+            station_meta_label(&InputMode::Normal, "Synthwave", "US", 128),
             "US · 128k"
         );
     }
