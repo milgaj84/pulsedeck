@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(test))]
 use std::fs;
 #[cfg(not(test))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
 const VISUALIZER_MODE_COUNT: usize = 3;
+const NEW_CONFIG_DIR: &str = "pulsedeck";
+const OLD_CONFIG_DIR: &str = "driftfm";
+const UI_STATE_FILE: &str = "ui-state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct UiState {
@@ -148,7 +151,32 @@ fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
 
 #[cfg(not(test))]
 fn ui_state_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("driftfm").join("ui-state.json"))
+    dirs::config_dir().map(|base| {
+        let new_path = ui_state_path_for(&base, NEW_CONFIG_DIR);
+        let old_path = ui_state_path_for(&base, OLD_CONFIG_DIR);
+        migrate_file_if_needed(&old_path, &new_path);
+        new_path
+    })
+}
+
+#[cfg(not(test))]
+fn ui_state_path_for(base: &Path, config_dir: &str) -> PathBuf {
+    base.join(config_dir).join(UI_STATE_FILE)
+}
+
+#[cfg(not(test))]
+fn migrate_file_if_needed(old_path: &Path, new_path: &Path) {
+    if new_path.exists() || !old_path.exists() {
+        return;
+    }
+
+    if let Some(parent) = new_path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+
+    let _ = fs::copy(old_path, new_path);
 }
 
 #[cfg(test)]
