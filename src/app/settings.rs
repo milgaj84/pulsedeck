@@ -15,11 +15,10 @@ impl App {
                     self.selected_setting_idx - 1
                 };
             }
-            Action::PlaySelected | Action::TogglePause => {
-                if self.apply_selected_setting() {
-                    self.save_library_or_notice("settings");
-                }
+            Action::PlaySelected | Action::TogglePause if self.apply_selected_setting() => {
+                self.save_library_or_notice("settings");
             }
+            Action::PlaySelected | Action::TogglePause => {}
             Action::ToggleSettings => {
                 self.show_settings = false;
             }
