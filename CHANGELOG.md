@@ -6,7 +6,11 @@ All notable changes to the DriftFM project will be documented in this file.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Improved
+*   **Recording Feedback Notices**: Pressing `r` now gives clear footer feedback when recording cannot start without playback, when tape capture is armed for the next track boundary, and when recording stops.
+
+### Added
+*   **Recording Feedback Tests**: Added app-level tests covering recording notices for stopped, pending, and stopped-again states.
 
 ---
 
