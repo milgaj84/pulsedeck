@@ -1,18 +1,18 @@
 [package]
-name = "driftfm"
+name = "pulsedeck"
 version = "0.1.4"
 edition = "2021"
-description = "A blazing-fast cyber-synthwave internet radio player & smart tape recorder TUI"
+description = "A cyber-synthwave internet radio player and smart tape recorder for your terminal"
 license = "MIT"
-repository = "https://github.com/milgaj84/driftFM"
-homepage = "https://github.com/milgaj84/driftFM"
+repository = "https://github.com/milgaj84/pulsedeck"
+homepage = "https://github.com/milgaj84/pulsedeck"
 readme = "README.md"
 keywords = ["radio", "tui", "music", "streaming", "catppuccin"]
 categories = ["command-line-utilities", "multimedia::audio"]
 exclude = ["recordings/", "library.json", ".gitignore"]
 
 [[bin]]
-name = "driftfm"
+name = "pulsedeck"
 path = "src/main.rs"
 
 [dependencies]
