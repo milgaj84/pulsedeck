@@ -1,6 +1,7 @@
 use super::*;
 
-const SPECTRUM_BANDS: usize = 40;
+const SPECTRUM_ANALYSIS_BANDS: usize = 40;
+const SPECTRUM_RENDER_SLOTS: usize = SPECTRUM_ANALYSIS_BANDS * 2;
 const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
 const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
 
@@ -51,26 +52,28 @@ impl App {
         // 3. Map bins logarithmically to equal-width frequency bands.
         let bins_count = n / 2;
 
-        if self.visualizer_peaks.len() != SPECTRUM_BANDS {
-            self.visualizer_peaks = vec![0.0; SPECTRUM_BANDS];
+        if self.visualizer_peaks.len() != SPECTRUM_RENDER_SLOTS {
+            self.visualizer_peaks = vec![0.0; SPECTRUM_RENDER_SLOTS];
         }
 
-        let mut targets = Vec::with_capacity(SPECTRUM_BANDS);
-        for band in 0..SPECTRUM_BANDS {
-            let avg = average_log_band_energy(&fft_output, band, SPECTRUM_BANDS, bins_count, n);
-            let target = spectrum_target(avg, band, SPECTRUM_BANDS);
+        let mut targets = Vec::with_capacity(SPECTRUM_ANALYSIS_BANDS);
+        for band in 0..SPECTRUM_ANALYSIS_BANDS {
+            let avg = average_log_band_energy(&fft_output, band, SPECTRUM_ANALYSIS_BANDS, bins_count, n);
+            let target = spectrum_target(avg, band, SPECTRUM_ANALYSIS_BANDS);
             targets.push(target);
         }
 
         let targets = smooth_spectrum_targets(&targets);
+        let render_targets = spectrum_render_slots(&targets);
 
-        for (band, target) in targets.iter().copied().enumerate() {
-            let current = self.visualizer_peaks[band];
+        for (slot, target) in render_targets.iter().copied().enumerate() {
+            let current = self.visualizer_peaks[slot];
             if target > current {
-                self.visualizer_peaks[band] = target; // Fast rise.
+                self.visualizer_peaks[slot] = target; // Fast rise.
             } else {
-                let release = spectrum_release_curve(band, SPECTRUM_BANDS);
-                self.visualizer_peaks[band] = (current - release).max(target).max(0.0);
+                let band = slot / 2;
+                let release = spectrum_release_curve(band, SPECTRUM_ANALYSIS_BANDS);
+                self.visualizer_peaks[slot] = (current - release).max(target).max(0.0);
             }
         }
     }
@@ -147,6 +150,17 @@ fn smooth_spectrum_targets(targets: &[f32]) -> Vec<f32> {
     }
 
     smoothed
+}
+
+fn spectrum_render_slots(targets: &[f32]) -> Vec<f32> {
+    let mut slots = Vec::with_capacity(targets.len() * 2);
+
+    for target in targets {
+        slots.push(*target);
+        slots.push(0.0);
+    }
+
+    slots
 }
 
 fn spectrum_release_curve(band: usize, total_bands: usize) -> f32 {
@@ -241,8 +255,8 @@ mod tests {
 
     #[test]
     fn spectrum_gain_curve_tames_final_band() {
-        let mid_gain = spectrum_gain_curve(20, SPECTRUM_BANDS);
-        let final_gain = spectrum_gain_curve(SPECTRUM_BANDS - 1, SPECTRUM_BANDS);
+        let mid_gain = spectrum_gain_curve(20, SPECTRUM_ANALYSIS_BANDS);
+        let final_gain = spectrum_gain_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
 
         assert!(final_gain < mid_gain);
         assert!(final_gain < 1.50);
@@ -251,23 +265,33 @@ mod tests {
     #[test]
     fn spectrum_target_gates_tiny_noise_floor() {
         assert_eq!(
-            spectrum_target(SPECTRUM_NOISE_FLOOR * 0.5, 30, SPECTRUM_BANDS),
+            spectrum_target(SPECTRUM_NOISE_FLOOR * 0.5, 30, SPECTRUM_ANALYSIS_BANDS),
             0.0
         );
     }
 
     #[test]
     fn smoothing_preserves_constant_flat_targets() {
-        let targets = vec![0.42; SPECTRUM_BANDS];
+        let targets = vec![0.42; SPECTRUM_ANALYSIS_BANDS];
         let smoothed = smooth_spectrum_targets(&targets);
 
         assert_eq!(smoothed, targets);
     }
 
     #[test]
+    fn render_slots_insert_valleys_between_bands() {
+        let targets = vec![0.5; SPECTRUM_ANALYSIS_BANDS];
+        let slots = spectrum_render_slots(&targets);
+
+        assert_eq!(slots.len(), SPECTRUM_RENDER_SLOTS);
+        assert_eq!(slots[0], 0.5);
+        assert_eq!(slots[1], 0.0);
+    }
+
+    #[test]
     fn high_treble_releases_faster_than_midrange() {
-        let mid_release = spectrum_release_curve(20, SPECTRUM_BANDS);
-        let high_release = spectrum_release_curve(SPECTRUM_BANDS - 1, SPECTRUM_BANDS);
+        let mid_release = spectrum_release_curve(20, SPECTRUM_ANALYSIS_BANDS);
+        let high_release = spectrum_release_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
 
         assert!(high_release > mid_release);
     }
