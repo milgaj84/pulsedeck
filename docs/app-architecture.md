@@ -1,6 +1,6 @@
 # App architecture
 
-DriftFM routes input through a small action pipeline:
+PulseDeck routes input through a small action pipeline:
 
 - `src/action.rs` defines user/application actions.
 - `src/event.rs` maps terminal events to actions.
