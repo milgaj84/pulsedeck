@@ -16,8 +16,9 @@ impl App {
                 };
             }
             Action::PlaySelected | Action::TogglePause => {
-                self.apply_selected_setting();
-                self.save_library_or_notice("settings");
+                if self.apply_selected_setting() {
+                    self.save_library_or_notice("settings");
+                }
             }
             Action::ToggleSettings => {
                 self.show_settings = false;
@@ -41,14 +42,16 @@ impl App {
         SettingRow::from_index(self.selected_setting_idx)
     }
 
-    pub(super) fn apply_selected_setting(&mut self) {
+    pub(super) fn apply_selected_setting(&mut self) -> bool {
         match self.selected_setting_row() {
             Some(SettingRow::Notifications) => {
                 self.library.settings.notifications_enabled =
                     !self.library.settings.notifications_enabled;
+                true
             }
             Some(SettingRow::AutoplayLast) => {
                 self.library.settings.autoplay_last = !self.library.settings.autoplay_last;
+                true
             }
             Some(SettingRow::RecordingDir) => {
                 self.library.settings.recording_dir =
@@ -57,11 +60,18 @@ impl App {
                         "./music" => "./driftfm-captures".to_string(),
                         _ => "./recordings".to_string(),
                     };
+                true
             }
             Some(SettingRow::KeepSnippets) => {
                 self.library.settings.keep_snippets = !self.library.settings.keep_snippets;
+                true
             }
             Some(SettingRow::MinSongDuration) => {
+                if self.library.settings.keep_snippets {
+                    self.set_info_notice("Min duration is disabled while keeping all snippets");
+                    return false;
+                }
+
                 // Cycle min duration: 30 -> 60 -> 90 -> 120 -> 180
                 self.library.settings.min_song_duration_secs =
                     match self.library.settings.min_song_duration_secs {
@@ -71,14 +81,16 @@ impl App {
                         120 => 180,
                         _ => 30,
                     };
+                true
             }
             Some(SettingRow::Theme) => {
                 let current = ThemeName::from_key(&self.library.settings.theme);
                 let next = current.next();
                 self.library.settings.theme = next.key().to_string();
                 crate::ui::theme::set_active(next);
+                true
             }
-            None => {}
+            None => false,
         }
     }
 }
@@ -101,6 +113,13 @@ mod tests {
 
     fn test_app() -> App {
         App::new(Library::in_memory(vec![station("A", "http://a")]))
+    }
+
+    fn notice_text(app: &App) -> Option<&str> {
+        match app.notice.as_ref() {
+            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message),
+            None => None,
+        }
     }
 
     #[test]
@@ -135,6 +154,23 @@ mod tests {
             assert_eq!(SettingRow::from_index(row.index()), Some(row));
         }
         assert_eq!(SettingRow::from_index(SettingRow::COUNT), None);
+    }
+
+    #[test]
+    fn disabled_min_duration_row_does_not_cycle() {
+        let mut app = test_app();
+        app.show_settings = true;
+        app.selected_setting_idx = SettingRow::MinSongDuration.index();
+        app.library.settings.keep_snippets = true;
+        app.library.settings.min_song_duration_secs = 90;
+
+        app.update(Action::TogglePause);
+
+        assert_eq!(app.library.settings.min_song_duration_secs, 90);
+        assert_eq!(
+            notice_text(&app),
+            Some("Min duration is disabled while keeping all snippets")
+        );
     }
 
     #[test]
