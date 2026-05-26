@@ -57,13 +57,8 @@ impl App {
 
         let mut targets = Vec::with_capacity(SPECTRUM_ANALYSIS_BANDS);
         for band in 0..SPECTRUM_ANALYSIS_BANDS {
-            let avg = average_log_band_energy(
-                &fft_output,
-                band,
-                SPECTRUM_ANALYSIS_BANDS,
-                bins_count,
-                n,
-            );
+            let avg =
+                average_log_band_energy(&fft_output, band, SPECTRUM_ANALYSIS_BANDS, bins_count, n);
             let target = spectrum_target(avg, band, SPECTRUM_ANALYSIS_BANDS);
             targets.push(target);
         }
@@ -273,7 +268,8 @@ mod tests {
     #[test]
     fn high_treble_releases_faster_than_midrange() {
         let mid_release = spectrum_release_curve(20, SPECTRUM_ANALYSIS_BANDS);
-        let high_release = spectrum_release_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
+        let high_release =
+            spectrum_release_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
 
         assert!(high_release > mid_release);
     }
