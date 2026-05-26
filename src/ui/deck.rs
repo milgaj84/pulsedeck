@@ -1,7 +1,11 @@
 use super::theme;
-use crate::app::{App, PlaybackState};
+use crate::app::{App, PlaybackState, RecordingState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
+
+const CASSETTE_INNER_WIDTH: usize = 44;
+const CASSETTE_REEL_CELL_WIDTH: usize = 10;
+const CASSETTE_TAPE_WIDTH: usize = 4;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let title_text = match app.active_deck_page {
@@ -25,7 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(6), // Cassette Art
+                    Constraint::Length(7), // Cassette Art
                     Constraint::Length(5), // Meta Details
                     Constraint::Min(0),    // Oscilloscope Simulated Visualizer
                 ])
@@ -41,133 +45,285 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-#[allow(clippy::manual_is_multiple_of)]
 fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines = Vec::new();
-
-    // 1. Spinning wheel character
-    let spin_char = match app.playback {
-        PlaybackState::Playing => {
-            let frame_idx = (app.tick_count / 2) % 4;
-            match frame_idx {
-                0 => "/",
-                1 => "-",
-                2 => "\\",
-                _ => "|",
-            }
-        }
-        PlaybackState::Connecting => {
-            if (app.tick_count / 4) % 2 == 0 {
-                "o"
-            } else {
-                " "
-            }
-        }
-        PlaybackState::Error(_) => "x",
-        _ => "o",
-    };
-
-    // 2. Dynamic Tape supply/take-up transfer brackets (always exactly 9 chars each)
-    let (l_bra, r_bra) = match app.playback {
-        PlaybackState::Playing => {
-            let step = (app.tick_count / 4) % 11;
-            let mut left_size = 9 - (step as usize / 2);
-            let mut right_size = 3 + (step as usize / 2);
-            left_size = left_size.clamp(2, 9);
-            right_size = right_size.clamp(2, 9);
-
-            (
-                format!(" (( {} )) ", "█".repeat(left_size)),
-                format!(" (( {} )) ", "█".repeat(right_size)),
-            )
-        }
-        _ => (
-            format!(" (( {} )) ", spin_char),
-            format!(" (( {} )) ", spin_char),
-        ),
-    };
-
-    let cassette_color = theme::dim();
-    let label_style = Style::default()
-        .fg(theme::accent_secondary())
-        .add_modifier(Modifier::BOLD);
-    let reel_style = Style::default()
-        .fg(theme::highlight())
-        .add_modifier(Modifier::BOLD);
-
-    lines.push(Line::from(vec![Span::styled(
-        "   ┌───────────────────────────────┐",
-        cassette_color,
-    )]));
-
-    // Compact smart cassette capture status flashes inside the tape label!
-    let label_spans = match app.recording_state {
-        crate::app::RecordingState::Active => {
-            let flash = (app.tick_count % 2) == 0;
-            vec![
-                Span::styled(
-                    if flash { " ● " } else { "   " },
-                    Style::default()
-                        .fg(theme::error().fg.unwrap_or_default())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "REC [ACTIVE]  ",
-                    Style::default()
-                        .fg(theme::error().fg.unwrap_or_default())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]
-        }
-        crate::app::RecordingState::Pending => {
-            let flash = (app.tick_count % 2) == 0;
-            vec![
-                Span::styled(
-                    if flash { " ● " } else { "   " },
-                    Style::default()
-                        .fg(theme::warm())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "PENDING...    ",
-                    Style::default()
-                        .fg(theme::warm())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]
-        }
-        crate::app::RecordingState::Off => {
-            vec![Span::styled("   P U L S E   D E C K ", label_style)]
-        }
-    };
-
-    let mut rec_line = vec![Span::styled("   │ ", cassette_color)];
-    rec_line.extend(label_spans);
-    rec_line.push(Span::styled("   │", cassette_color));
-    lines.push(Line::from(rec_line));
-
-    lines.push(Line::from(vec![Span::styled(
-        "   │  ___________________________  │",
-        cassette_color,
-    )]));
-    lines.push(Line::from(vec![
-        Span::styled("   │ /  ", cassette_color),
-        Span::styled(l_bra, reel_style),
-        Span::styled("             ", cassette_color),
-        Span::styled(r_bra, reel_style),
-        Span::styled("  \\ │", cassette_color),
-    ]));
-    lines.push(Line::from(vec![Span::styled(
-        "   │ \\___________________________/ │",
-        cassette_color,
-    )]));
-    lines.push(Line::from(vec![Span::styled(
-        "   └───────────────────────────────┘",
-        cassette_color,
-    )]));
+    let lines = build_cassette_lines(
+        CASSETTE_INNER_WIDTH,
+        app.tick_count,
+        &app.playback,
+        app.recording_state,
+    );
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
+}
+
+#[derive(Debug, Clone)]
+struct CassetteSegment {
+    text: String,
+    style: Style,
+}
+
+fn build_cassette_lines(
+    inner_width: usize,
+    tick_count: u64,
+    playback: &PlaybackState,
+    recording_state: RecordingState,
+) -> Vec<Line<'static>> {
+    let shell_style = theme::dim();
+    let reel_style = Style::default()
+        .fg(theme::highlight())
+        .bg(theme::bg())
+        .add_modifier(Modifier::BOLD);
+
+    let mut lines = Vec::with_capacity(7);
+    lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
+    lines.push(cassette_label_line(
+        inner_width,
+        tick_count,
+        recording_state,
+        shell_style,
+    ));
+    lines.push(shell_text_line(
+        "  ╭────────╮      ══════      ╭────────╮  ",
+        inner_width,
+        shell_style,
+        shell_style,
+    ));
+
+    let (left_reel, right_reel) = reel_cells_for_state(tick_count, playback);
+    lines.push(shell_line(
+        inner_width,
+        shell_style,
+        vec![
+            segment("  ", shell_style),
+            segment(left_reel, reel_style),
+            segment(" ────────────── ", shell_style),
+            segment(right_reel, reel_style),
+            segment("  ", shell_style),
+        ],
+    ));
+
+    lines.push(shell_text_line(
+        "  ╰────────╯                  ╰────────╯  ",
+        inner_width,
+        shell_style,
+        shell_style,
+    ));
+    lines.push(shell_text_line(
+        "       ╲________________________╱       ",
+        inner_width,
+        shell_style,
+        shell_style,
+    ));
+    lines.push(cassette_border_line("╰", "╯", inner_width, shell_style));
+
+    lines
+}
+
+fn cassette_label_line(
+    inner_width: usize,
+    tick_count: u64,
+    recording_state: RecordingState,
+    shell_style: Style,
+) -> Line<'static> {
+    let brand = "P U L S E  D E C K";
+    let label_style = Style::default()
+        .fg(theme::accent_secondary())
+        .bg(theme::bg())
+        .add_modifier(Modifier::BOLD);
+
+    let (status, status_style) = cassette_recording_status(tick_count, recording_state);
+    let fixed_padding = 4;
+    let spacer_width = inner_width
+        .saturating_sub(visible_len(brand))
+        .saturating_sub(visible_len(status))
+        .saturating_sub(fixed_padding);
+
+    shell_line(
+        inner_width,
+        shell_style,
+        vec![
+            segment("  ", shell_style),
+            segment(brand, label_style),
+            segment(" ".repeat(spacer_width), shell_style),
+            segment(status, status_style),
+            segment("  ", shell_style),
+        ],
+    )
+}
+
+fn cassette_recording_status(
+    tick_count: u64,
+    recording_state: RecordingState,
+) -> (&'static str, Style) {
+    match recording_state {
+        RecordingState::Active => {
+            let status = if tick_count % 2 == 0 {
+                "● REC ACTIVE"
+            } else {
+                "  REC ACTIVE"
+            };
+            (status, theme::error().add_modifier(Modifier::BOLD))
+        }
+        RecordingState::Pending => {
+            let status = if tick_count % 2 == 0 {
+                "● REC PENDING"
+            } else {
+                "  REC PENDING"
+            };
+            (
+                status,
+                Style::default()
+                    .fg(theme::warm())
+                    .bg(theme::bg())
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+        RecordingState::Off => (
+            "IDLE",
+            Style::default()
+                .fg(theme::highlight())
+                .bg(theme::bg())
+                .add_modifier(Modifier::BOLD),
+        ),
+    }
+}
+
+fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, String) {
+    match playback {
+        PlaybackState::Playing => {
+            const HUB_FRAMES: [&str; 8] = ["◜", "◠", "◝", "◞", "◡", "◟", "◜", "◠"];
+
+            let phase = ((tick_count / 2) % HUB_FRAMES.len() as u64) as usize;
+            let transfer_step = ((tick_count / 6) % 8) as usize;
+            let transfer = if transfer_step < 4 {
+                transfer_step
+            } else {
+                7 - transfer_step
+            };
+
+            let left_fill = CASSETTE_TAPE_WIDTH.saturating_sub(transfer).max(1);
+            let right_fill = (1 + transfer).min(CASSETTE_TAPE_WIDTH);
+
+            (
+                reel_cell(
+                    HUB_FRAMES[phase],
+                    fixed_tape_mass(left_fill, CASSETTE_TAPE_WIDTH),
+                    HUB_FRAMES[(phase + 4) % HUB_FRAMES.len()],
+                ),
+                reel_cell(
+                    HUB_FRAMES[(phase + 2) % HUB_FRAMES.len()],
+                    fixed_tape_mass(right_fill, CASSETTE_TAPE_WIDTH),
+                    HUB_FRAMES[(phase + 6) % HUB_FRAMES.len()],
+                ),
+            )
+        }
+        PlaybackState::Connecting => {
+            let hub = if (tick_count / 4) % 2 == 0 {
+                "◌"
+            } else {
+                "○"
+            };
+            let tape = fixed_tape_mass(1, CASSETTE_TAPE_WIDTH);
+            (reel_cell(hub, tape.clone(), hub), reel_cell(hub, tape, hub))
+        }
+        PlaybackState::Paused => {
+            let tape = fixed_tape_mass(2, CASSETTE_TAPE_WIDTH);
+            (reel_cell("○", tape.clone(), "○"), reel_cell("○", tape, "○"))
+        }
+        PlaybackState::Error(_) => {
+            let tape = fixed_tape_mass(0, CASSETTE_TAPE_WIDTH);
+            (reel_cell("×", tape.clone(), "×"), reel_cell("×", tape, "×"))
+        }
+        PlaybackState::Stopped => {
+            let tape = fixed_tape_mass(0, CASSETTE_TAPE_WIDTH);
+            (reel_cell("○", tape.clone(), "○"), reel_cell("○", tape, "○"))
+        }
+    }
+}
+
+fn fixed_tape_mass(fill: usize, width: usize) -> String {
+    let fill = fill.min(width);
+    format!("{}{}", "█".repeat(fill), "░".repeat(width - fill))
+}
+
+fn reel_cell(left_hub: &str, tape: String, right_hub: &str) -> String {
+    format!("│ {left_hub}{tape}{right_hub} │")
+}
+
+fn cassette_border_line(
+    left_corner: &str,
+    right_corner: &str,
+    inner_width: usize,
+    style: Style,
+) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!("{left_corner}{}{right_corner}", "─".repeat(inner_width)),
+        style,
+    )])
+}
+
+fn shell_text_line(
+    text: impl Into<String>,
+    inner_width: usize,
+    shell_style: Style,
+    content_style: Style,
+) -> Line<'static> {
+    shell_line(
+        inner_width,
+        shell_style,
+        vec![segment(text.into(), content_style)],
+    )
+}
+
+fn shell_line(
+    inner_width: usize,
+    shell_style: Style,
+    parts: Vec<CassetteSegment>,
+) -> Line<'static> {
+    let mut spans = Vec::with_capacity(parts.len() + 3);
+    let mut remaining = inner_width;
+
+    spans.push(Span::styled("│", shell_style));
+
+    for part in parts {
+        if remaining == 0 {
+            break;
+        }
+
+        let part_width = visible_len(&part.text);
+        let text = if part_width > remaining {
+            truncate_to_chars(&part.text, remaining)
+        } else {
+            part.text
+        };
+        let text_width = visible_len(&text);
+
+        remaining = remaining.saturating_sub(text_width);
+        spans.push(Span::styled(text, part.style));
+    }
+
+    if remaining > 0 {
+        spans.push(Span::styled(" ".repeat(remaining), shell_style));
+    }
+
+    spans.push(Span::styled("│", shell_style));
+    Line::from(spans)
+}
+
+fn segment(text: impl Into<String>, style: Style) -> CassetteSegment {
+    CassetteSegment {
+        text: text.into(),
+        style,
+    }
+}
+
+fn visible_len(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn truncate_to_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
 }
 
 fn render_meta_details(frame: &mut Frame, area: Rect, app: &App) {
@@ -518,4 +674,60 @@ fn render_history(frame: &mut Frame, area: Rect, app: &App) {
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum()
+    }
+
+    #[test]
+    fn cassette_rows_have_equal_width() {
+        let expected_width = CASSETTE_INNER_WIDTH + 2;
+
+        for recording_state in [
+            RecordingState::Off,
+            RecordingState::Pending,
+            RecordingState::Active,
+        ] {
+            let lines = build_cassette_lines(
+                CASSETTE_INNER_WIDTH,
+                0,
+                &PlaybackState::Playing,
+                recording_state,
+            );
+
+            assert_eq!(lines.len(), 7);
+            for line in lines {
+                assert_eq!(line_width(&line), expected_width);
+            }
+        }
+    }
+
+    #[test]
+    fn reel_animation_keeps_constant_cell_width() {
+        for tick_count in 0..96 {
+            let (left_reel, right_reel) =
+                reel_cells_for_state(tick_count, &PlaybackState::Playing);
+
+            assert_eq!(left_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
+            assert_eq!(right_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
+        }
+    }
+
+    #[test]
+    fn tape_mass_keeps_constant_width() {
+        for fill in 0..=CASSETTE_TAPE_WIDTH + 2 {
+            assert_eq!(
+                fixed_tape_mass(fill, CASSETTE_TAPE_WIDTH).chars().count(),
+                CASSETTE_TAPE_WIDTH
+            );
+        }
+    }
 }
