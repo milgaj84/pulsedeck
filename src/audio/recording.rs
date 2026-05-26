@@ -16,7 +16,7 @@ pub(super) fn inject_id3_tags(
     let mut tag = Tag::new();
     tag.set_artist(artist);
     tag.set_title(track_title);
-    tag.set_album("DriftFM live capturing");
+    tag.set_album("PulseDeck live capturing");
 
     tag.write_to_path(filepath, Version::Id3v24)?;
     Ok(())

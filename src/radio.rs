@@ -120,7 +120,7 @@ pub async fn search_stations(query: &str) -> anyhow::Result<Vec<Station>> {
     }
 
     let client = reqwest::Client::builder()
-        .user_agent(format!("DriftFM/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("PulseDeck/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
 

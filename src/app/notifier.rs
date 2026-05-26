@@ -1,16 +1,18 @@
 use std::process::{Command, Stdio};
 
+const APP_NOTIFICATION_TITLE: &str = "PulseDeck - Now Playing";
+
 pub(super) fn notify_now_playing(title: &str, station_name: &str) {
     let body = format!("♫ {title}\nStation: {station_name}");
     let native_result = notify_rust::Notification::new()
-        .summary("DriftFM - Now Playing")
+        .summary(APP_NOTIFICATION_TITLE)
         .body(&body)
         .icon("audio-card")
         .timeout(4000)
         .show();
 
     if native_result.is_err() && is_wsl() {
-        let _ = spawn_windows_balloon("DriftFM - Now Playing", &body);
+        let _ = spawn_windows_balloon(APP_NOTIFICATION_TITLE, &body);
     }
 }
 
@@ -74,16 +76,16 @@ mod tests {
 
     #[test]
     fn powershell_single_quote_escapes_embedded_quotes() {
-        assert_eq!(powershell_single_quote("DriftFM"), "'DriftFM'");
+        assert_eq!(powershell_single_quote("PulseDeck"), "'PulseDeck'");
         assert_eq!(powershell_single_quote("Bob's Station"), "'Bob''s Station'");
     }
 
     #[test]
     fn windows_balloon_script_contains_escaped_content() {
-        let script = windows_balloon_script("DriftFM", "Bob's Track");
+        let script = windows_balloon_script("PulseDeck", "Bob's Track");
 
         assert!(script.contains("System.Windows.Forms.NotifyIcon"));
-        assert!(script.contains("'DriftFM'"));
+        assert!(script.contains("'PulseDeck'"));
         assert!(script.contains("'Bob''s Track'"));
     }
 }

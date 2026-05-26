@@ -137,7 +137,7 @@ fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
             ]
         }
         crate::app::RecordingState::Off => {
-            vec![Span::styled("   D R I F T   F M   ", label_style)]
+            vec![Span::styled("   P U L S E   D E C K ", label_style)]
         }
     };
 

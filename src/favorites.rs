@@ -1,9 +1,13 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::radio::Station;
+
+const NEW_CONFIG_DIR: &str = "pulsedeck";
+const OLD_CONFIG_DIR: &str = "driftfm";
+const LIBRARY_FILE: &str = "library.json";
 
 /// Your personal station library, persisted to disk.
 ///
@@ -146,15 +150,13 @@ impl Library {
         let (stations, settings) = if let Some(ref p) = path {
             if p.exists() {
                 match fs::read_to_string(p) {
-                    Ok(contents) => {
-                        match serde_json::from_str::<LibraryFile>(&contents) {
-                            Ok(file) => (
-                                file.stations.into_iter().map(Station::from).collect(),
-                                file.settings,
-                            ),
-                            Err(_) => (seed_stations, Settings::default()), // corrupt file → use seeds
-                        }
-                    }
+                    Ok(contents) => match serde_json::from_str::<LibraryFile>(&contents) {
+                        Ok(file) => (
+                            file.stations.into_iter().map(Station::from).collect(),
+                            file.settings,
+                        ),
+                        Err(_) => (seed_stations, Settings::default()), // corrupt file → use seeds
+                    },
                     Err(_) => (seed_stations, Settings::default()),
                 }
             } else {
@@ -264,9 +266,35 @@ impl Library {
     }
 }
 
-/// Config file path: ~/.config/driftfm/library.json
+/// Config file path: ~/.config/pulsedeck/library.json
+///
+/// If an existing DriftFM config exists and no PulseDeck config has been written yet,
+/// copy the old file into the new config directory so users keep their library.
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("driftfm").join("library.json"))
+    dirs::config_dir().map(|base| {
+        let new_path = library_path(&base, NEW_CONFIG_DIR);
+        let old_path = library_path(&base, OLD_CONFIG_DIR);
+        migrate_file_if_needed(&old_path, &new_path);
+        new_path
+    })
+}
+
+fn library_path(base: &Path, config_dir: &str) -> PathBuf {
+    base.join(config_dir).join(LIBRARY_FILE)
+}
+
+fn migrate_file_if_needed(old_path: &Path, new_path: &Path) {
+    if new_path.exists() || !old_path.exists() {
+        return;
+    }
+
+    if let Some(parent) = new_path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+
+    let _ = fs::copy(old_path, new_path);
 }
 
 #[cfg(test)]
@@ -404,6 +432,20 @@ mod tests {
         assert_eq!(lib.available_genres[0], "All");
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
         assert!(lib.available_genres.contains(&"Ambient".to_string()));
+    }
+
+    #[test]
+    fn library_path_uses_requested_config_dir() {
+        let base = PathBuf::from("/tmp/config");
+
+        assert_eq!(
+            library_path(&base, NEW_CONFIG_DIR),
+            PathBuf::from("/tmp/config/pulsedeck/library.json")
+        );
+        assert_eq!(
+            library_path(&base, OLD_CONFIG_DIR),
+            PathBuf::from("/tmp/config/driftfm/library.json")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-/// All possible actions in DriftFM.
+/// All possible actions in PulseDeck.
 /// These flow from event handlers → app.update() to drive state changes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {

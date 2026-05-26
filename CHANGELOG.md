@@ -1,19 +1,23 @@
 # Changelog
 
-All notable changes to the DriftFM project will be documented in this file.
+All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
 ## [Unreleased]
+
+### Changed
+*   **Project Rebrand**: Renamed DriftFM to PulseDeck to avoid name confusion with existing and historical radio-related uses of the old name. The crate, binary, app UI, notifications, README, and config paths now use PulseDeck naming.
+*   **Config Migration**: Existing DriftFM config files are copied into the new PulseDeck config directory on first launch, preserving libraries and UI preferences while leaving the old files as a backup.
 
 ### Improved
 *   **Recording Feedback Notices**: Pressing `r` now gives clear footer feedback when recording cannot start without playback, when tape capture is armed for the next track boundary, and when recording stops.
 *   **Undoable Station Removal**: Removing a station with `f` now stores the most recent removal and shows a footer prompt so users can restore it with `u`.
 *   **Settings Row Model**: Replaced hardcoded settings row indices with a typed `SettingRow` list shared by the reducer and settings overlay, making future settings safer to add.
 *   **Settings Disabled-State Consistency**: The minimum song duration row now stays inert when partial snippets are kept, matching its dimmed disabled UI state.
-*   **WSL Notification Fallback**: Desktop notifications now fall back to a Windows PowerShell notification balloon when DriftFM is running under WSL and the normal Linux notification path is unavailable.
+*   **WSL Notification Fallback**: Desktop notifications now fall back to a Windows PowerShell notification balloon when PulseDeck is running under WSL and the normal Linux notification path is unavailable.
 *   **Playback Pause Responsiveness**: Starting playback now marks the app as connecting immediately, and pause now acts directly on the audio sink to avoid delayed Space handling and visualizer/audio desync.
-*   **Persisted UI State**: DriftFM now remembers volume, mute state, layout mode, and visualizer mode across launches using a dedicated `ui-state.json` file.
+*   **Persisted UI State**: PulseDeck now remembers volume, mute state, layout mode, and visualizer mode across launches using a dedicated `ui-state.json` file.
 
 ### Added
 *   **Recording Feedback Tests**: Added app-level tests covering recording notices for stopped, pending, and stopped-again states.
@@ -42,7 +46,7 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **App State Module Split**: Split the monolithic app reducer into focused modules for types, lifecycle, selectors, search, playback, settings, library, recording, overlays, visualizer, and platform idle helpers while preserving the public app API.
 *   **App Reducer Contract Tests**: Added state-level tests covering settings action blocking, search confirmation, playback state updates, overlay toggles, library removal, genre navigation, and recording toggles.
 *   **Audio Session Extraction**: Moved stream connection, retry/backoff, decoder setup, downloader setup, and sink creation into a dedicated audio session module while preserving playback behavior.
-*   **Lazy Audio Device Initialization**: DriftFM now opens the system output device on first playback instead of app startup, so browsing and search remain usable when no soundcard is immediately available.
+*   **Lazy Audio Device Initialization**: PulseDeck now opens the system output device on first playback instead of app startup, so browsing and search remain usable when no soundcard is immediately available.
 *   **Audio Module Architecture**: Split audio internals into focused modules for buffering, metadata parsing, recording helpers, stream reading, and visualizer sample wrapping while preserving the public `crate::audio` API.
 *   **Audio Architecture Documentation**: Added developer documentation describing the audio public boundary, module map, refactor rules, and follow-up work.
 *   **CI Quality Gates**: Added GitHub Actions checks for formatting, clippy with warnings denied, tests, release build, RustSec audit, and a static guard against reintroducing invalid-certificate acceptance.
@@ -118,13 +122,13 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Playback Stuttering**: Resolved intermittent pauses caused by metadata boundary desynchronization.
 
 ### Added
-*   **Bitrate-Aware Buffer**: Improved buffer time accuracy in the UI via bitrate detection.
+*   **Bitrate-Aware Buffer**: Improved buffer accuracy in the UI via bitrate detection.
 
 ---
 
 ## [0.1.0] - 2026-05-21
 
-Initial release of the DriftFM cyber-synthwave internet radio player and smart tape recorder.
+Initial release of the PulseDeck cyber-synthwave internet radio player and smart tape recorder.
 
 ### Added
 *   **Decoupled Bounded Circular Resiliency Buffer**: Decoupled connection downloader socket from raw byte Symphonia decoders using an asynchronous consumer thread and a 1 MB thread-safe buffer.

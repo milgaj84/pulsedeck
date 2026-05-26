@@ -13,7 +13,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Beautiful rounded block with glowing highlight border
     let block = Block::default()
-        .title(Span::styled(" ✦ DriftFM Config Console ✦ ", theme::title()))
+        .title(Span::styled(
+            " ✦ PulseDeck Config Console ✦ ",
+            theme::title(),
+        ))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
@@ -200,7 +203,7 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         ),
         Span::styled(" Toggle / Cycle  •  ", theme::dim()),
         Span::styled(
-            "Esc/,",
+            "Esc/ ,",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
