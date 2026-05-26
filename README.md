@@ -152,7 +152,7 @@ The minimum song duration and whether to keep short clips are configurable in th
 
 Press `,` to open the settings panel. Current options:
 
-- **Desktop notifications** — show track info when a song changes
+- **Desktop notifications** — show track info when a song changes. On WSL, DriftFM falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup** — picks up where you left off
 - **Tape capture folder** — cycle between preset recording directories
 - **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted
@@ -170,6 +170,7 @@ Settings are saved automatically to a JSON file in your config directory.
 | Windows | ✅ Full support (native WASAPI audio) |
 | Linux | ✅ Full support (ALSA) |
 | macOS | ✅ Full support (CoreAudio) |
+| WSL | ✅ Supported with Windows notification fallback |
 
 ---
 
