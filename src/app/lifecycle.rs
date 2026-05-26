@@ -110,12 +110,7 @@ impl App {
                                     .map(|s| s.name.clone())
                                     .unwrap_or_else(|| "Radio Stream".to_string());
 
-                                let _ = notify_rust::Notification::new()
-                                    .summary("DriftFM - Now Playing")
-                                    .body(&format!("♫ {}\nStation: {}", title, station_name))
-                                    .icon("audio-card")
-                                    .timeout(4000)
-                                    .show();
+                                super::notifier::notify_now_playing(&title, &station_name);
                             }
                         }
                     }
