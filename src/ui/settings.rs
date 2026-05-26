@@ -13,7 +13,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Beautiful rounded block with glowing highlight border
     let block = Block::default()
-        .title(Span::styled(" ✦ PulseDeck Config Console ✦ ", theme::title()))
+        .title(Span::styled(
+            " ✦ PulseDeck Config Console ✦ ",
+            theme::title(),
+        ))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
