@@ -93,7 +93,7 @@ DriftFM is keyboard-driven. Press **`h`** at any time to see the full control re
 | `s` | Playback | Stop playback |
 | `+` / `-` | Playback | Volume up / down |
 | `m` | Playback | Mute / unmute |
-| `r` | Playback | Start / stop recording |
+| `r` | Playback | Start / stop recording; DriftFM shows a footer notice when recording is armed, stopped, or unavailable |
 | `b` | View | Cycle layout |
 | `p` | View | Cycle deck page |
 | `v` | View | Cycle visualizer |
@@ -133,11 +133,14 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 
 Press `r` while a station is playing. DriftFM will:
 
-1. Wait for the next song boundary (so you never capture a partial intro)
-2. Record each track to its own file in the **native stream format** — `recordings/Synthwave/Perturbator - Venger.mp3` or `.aac` depending on what the station broadcasts. No transcoding, no quality loss.
-3. Embed the correct ID3 tags (artist, title, station name as album)
-4. Discard anything under 90 seconds — DJ speech, ads, station IDs are swept automatically
-5. Stop cleanly when you press `r` again
+1. Show `Recording will start at next track boundary` in the footer
+2. Wait for the next song boundary (so you never capture a partial intro)
+3. Record each track to its own file in the **native stream format** — `recordings/Synthwave/Perturbator - Venger.mp3` or `.aac` depending on what the station broadcasts. No transcoding, no quality loss.
+4. Embed the correct ID3 tags (artist, title, station name as album)
+5. Discard anything under 90 seconds — DJ speech, ads, station IDs are swept automatically
+6. Stop cleanly when you press `r` again, with `Recording stopped` shown in the footer
+
+If you press `r` before playback starts, DriftFM shows `Start playback before recording` instead of failing silently.
 
 The minimum song duration and whether to keep short clips are configurable in the settings (`,`).
 
