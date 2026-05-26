@@ -3,17 +3,11 @@ use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-const COMPACT_CASSETTE_INNER_WIDTH: usize = 44;
-const HERO_CASSETTE_INNER_WIDTH: usize = 58;
+const CASSETTE_INNER_WIDTH: usize = 44;
 #[cfg(test)]
 const CASSETTE_REEL_CELL_WIDTH: usize = 10;
 const CASSETTE_TAPE_WIDTH: usize = 4;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CassetteVariant {
-    Compact,
-    Hero,
-}
+const CASSETTE_HEIGHT: u16 = 9;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let title_text = match app.active_deck_page {
@@ -33,22 +27,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     match app.active_deck_page {
         0 => {
-            let variant = cassette_variant(inner_area, app);
-            let cassette_height = cassette_height(variant) as u16;
-            let meta_height = if variant == CassetteVariant::Hero { 6 } else { 5 };
+            let full_deck = app.layout_mode == LayoutMode::RightOnly;
 
-            // Split the inner area vertically: top cassette, status strip, framed visualizer.
+            // Split the inner area vertically: stable cassette, status strip, framed visualizer.
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(cassette_height),
-                    Constraint::Length(meta_height),
+                    Constraint::Length(CASSETTE_HEIGHT),
+                    Constraint::Length(5),
                     Constraint::Min(0),
                 ])
                 .split(inner_area);
 
-            render_cassette(frame, chunks[0], app, variant);
-            render_meta_details(frame, chunks[1], app, variant);
+            render_cassette(frame, chunks[0], app);
+            render_meta_details(frame, chunks[1], app, full_deck);
             render_oscilloscope(frame, chunks[2], app);
         }
         _ => {
@@ -57,32 +49,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn cassette_variant(area: Rect, app: &App) -> CassetteVariant {
-    if app.layout_mode == LayoutMode::RightOnly && area.width as usize >= HERO_CASSETTE_INNER_WIDTH + 4 {
-        CassetteVariant::Hero
-    } else {
-        CassetteVariant::Compact
-    }
-}
-
-fn cassette_height(variant: CassetteVariant) -> usize {
-    match variant {
-        CassetteVariant::Compact => 9,
-        CassetteVariant::Hero => 13,
-    }
-}
-
-fn cassette_width(variant: CassetteVariant) -> usize {
-    match variant {
-        CassetteVariant::Compact => COMPACT_CASSETTE_INNER_WIDTH,
-        CassetteVariant::Hero => HERO_CASSETTE_INNER_WIDTH,
-    }
-}
-
-fn render_cassette(frame: &mut Frame, area: Rect, app: &App, variant: CassetteVariant) {
+fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
     let lines = build_cassette_lines(
-        cassette_width(variant),
-        variant,
+        CASSETTE_INNER_WIDTH,
         app.tick_count,
         &app.playback,
         app.recording_state,
@@ -100,29 +69,6 @@ struct CassetteSegment {
 
 fn build_cassette_lines(
     inner_width: usize,
-    variant: CassetteVariant,
-    tick_count: u64,
-    playback: &PlaybackState,
-    recording_state: RecordingState,
-) -> Vec<Line<'static>> {
-    match variant {
-        CassetteVariant::Compact => build_compact_cassette_lines(
-            inner_width,
-            tick_count,
-            playback,
-            recording_state,
-        ),
-        CassetteVariant::Hero => build_hero_cassette_lines(
-            inner_width,
-            tick_count,
-            playback,
-            recording_state,
-        ),
-    }
-}
-
-fn build_compact_cassette_lines(
-    inner_width: usize,
     tick_count: u64,
     playback: &PlaybackState,
     recording_state: RecordingState,
@@ -133,7 +79,7 @@ fn build_compact_cassette_lines(
         .bg(theme::bg())
         .add_modifier(Modifier::BOLD);
 
-    let mut lines = Vec::with_capacity(cassette_height(CassetteVariant::Compact));
+    let mut lines = Vec::with_capacity(CASSETTE_HEIGHT as usize);
     lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
     lines.push(cassette_label_line(
         inner_width,
@@ -181,108 +127,6 @@ fn build_compact_cassette_lines(
     ));
     lines.push(shell_text_line(
         "       ╲____________________________╱       ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(cassette_border_line("╰", "╯", inner_width, shell_style));
-
-    lines
-}
-
-fn build_hero_cassette_lines(
-    inner_width: usize,
-    tick_count: u64,
-    playback: &PlaybackState,
-    recording_state: RecordingState,
-) -> Vec<Line<'static>> {
-    let shell_style = theme::dim();
-    let reel_style = Style::default()
-        .fg(theme::highlight())
-        .bg(theme::bg())
-        .add_modifier(Modifier::BOLD);
-    let title_style = Style::default()
-        .fg(theme::accent_secondary())
-        .bg(theme::bg())
-        .add_modifier(Modifier::BOLD);
-
-    let (status, status_style) = cassette_recording_status(tick_count, recording_state);
-    let (left_reel, right_reel) = reel_cells_for_state(tick_count, playback);
-
-    let mut lines = Vec::with_capacity(cassette_height(CassetteVariant::Hero));
-    lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
-    lines.push(shell_line(
-        inner_width,
-        shell_style,
-        vec![
-            segment("  ◌  ", shell_style),
-            segment("P U L S E   D E C K", title_style),
-            segment(" ".repeat(20), shell_style),
-            segment(status, status_style),
-            segment("  ◌  ", shell_style),
-        ],
-    ));
-    lines.push(shell_text_line(
-        "     ┌────────────────────────────────────────────┐     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "     │        ╭────────╮      ╭────────╮        │     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_line(
-        inner_width,
-        shell_style,
-        vec![
-            segment("     │        ", shell_style),
-            segment(left_reel, reel_style),
-            segment("   ══════════   ", shell_style),
-            segment(right_reel, reel_style),
-            segment("        │     ", shell_style),
-        ],
-    ));
-    lines.push(shell_text_line(
-        "     │        ╰────────╯      ╰────────╯        │     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "     │                                            │     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "     │          ╲________________________╱        │     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "     └────────────────────────────────────────────┘     ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "                                                        ",
-        inner_width,
-        shell_style,
-        shell_style,
-    ));
-    lines.push(shell_text_line(
-        "  A-SIDE INDEX                         SIGNAL READY     ",
-        inner_width,
-        shell_style,
-        Style::default().fg(theme::accent_secondary()).bg(theme::bg()),
-    ));
-    lines.push(shell_text_line(
-        "  ◌                                                ◌    ",
         inner_width,
         shell_style,
         shell_style,
@@ -487,7 +331,7 @@ fn truncate_to_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, variant: CassetteVariant) {
+fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool) {
     let (status_text, status_style) = match app.playback {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
         PlaybackState::Connecting => (
@@ -537,13 +381,16 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, variant: Casset
                 .and_then(|f| f.to_str())
                 .unwrap_or(filepath);
             lines.push(Line::from(vec![
-                Span::styled(" ● REC ACTIVE ", theme::error().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    " ● REC ACTIVE ",
+                    theme::error().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(format!("capture -> {}", filename), theme::dim()),
             ]));
         }
     }
 
-    let title = if variant == CassetteVariant::Hero {
+    let title = if full_deck {
         " SIGNAL / TAPE STATUS "
     } else {
         " SIGNAL "
@@ -869,20 +716,17 @@ mod tests {
 
     #[test]
     fn cassette_rows_have_equal_width() {
-        for variant in [CassetteVariant::Compact, CassetteVariant::Hero] {
-            let expected_width = cassette_width(variant) + 2;
-            let lines = build_cassette_lines(
-                cassette_width(variant),
-                variant,
-                0,
-                &PlaybackState::Playing,
-                RecordingState::Off,
-            );
+        let expected_width = CASSETTE_INNER_WIDTH + 2;
+        let lines = build_cassette_lines(
+            CASSETTE_INNER_WIDTH,
+            0,
+            &PlaybackState::Playing,
+            RecordingState::Off,
+        );
 
-            assert_eq!(lines.len(), cassette_height(variant));
-            for line in lines {
-                assert_eq!(line_width(&line), expected_width);
-            }
+        assert_eq!(lines.len(), CASSETTE_HEIGHT as usize);
+        for line in lines {
+            assert_eq!(line_width(&line), expected_width);
         }
     }
 
