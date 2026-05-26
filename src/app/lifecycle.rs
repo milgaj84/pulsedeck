@@ -3,6 +3,7 @@ use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 
 impl App {
     pub fn new(library: Library) -> Self {
+        let ui_state = super::ui_state::UiState::load();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
 
@@ -12,8 +13,8 @@ impl App {
             selected: 0,
             playback: PlaybackState::Stopped,
             playing_url: None,
-            volume: 80,
-            muted: false,
+            volume: ui_state.volume(),
+            muted: ui_state.muted(),
             should_quit: false,
             notice: None,
             notice_ticks_remaining: 0,
@@ -26,7 +27,7 @@ impl App {
             selected_genre_idx: 0,
             current_track: None,
             tick_count: 0,
-            layout_mode: LayoutMode::Split,
+            layout_mode: ui_state.layout_mode(),
             show_help: false,
             active_deck_page: 0,
             song_history: VecDeque::new(),
@@ -39,9 +40,11 @@ impl App {
             undo_removed_station: None,
             audio,
             sample_buffer,
-            visualizer_mode: 0,
+            visualizer_mode: ui_state.visualizer_mode(),
             visualizer_peaks: Vec::new(),
         };
+
+        app.sync_volume();
 
         // Autoplay last played station on boot if enabled.
         if app.library.settings.autoplay_last {
@@ -49,6 +52,7 @@ impl App {
                 if let Some(pos) = app.library.stations.iter().position(|s| s.url == *url) {
                     app.selected = pos;
                     app.playing_url = Some(url.clone());
+                    app.playback = PlaybackState::Connecting;
                     app.audio.send(AudioCommand::Play(url.clone()));
                     app.sync_volume();
                 }
