@@ -1,5 +1,9 @@
 use super::*;
 
+const SPECTRUM_ANALYSIS_BANDS: usize = 40;
+const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
+const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
+
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
     pub fn update_visualizer(&mut self) {
@@ -45,46 +49,115 @@ impl App {
         fft_rec(&fft_input, &mut fft_output);
 
         // 3. Map bins logarithmically to equal-width frequency bands.
-        let num_bands = 40;
         let bins_count = n / 2;
 
-        if self.visualizer_peaks.len() != num_bands {
-            self.visualizer_peaks = vec![0.0; num_bands];
+        if self.visualizer_peaks.len() != SPECTRUM_ANALYSIS_BANDS {
+            self.visualizer_peaks = vec![0.0; SPECTRUM_ANALYSIS_BANDS];
         }
 
-        for x in 0..num_bands {
-            let t = x as f32 / num_bands as f32;
-            let min_bin = 1.0_f32;
-            let max_bin = bins_count as f32;
-            let bin_start_f = min_bin * (max_bin / min_bin).powf(t);
-            let bin_end_f = min_bin * (max_bin / min_bin).powf((x + 1) as f32 / num_bands as f32);
+        let mut targets = Vec::with_capacity(SPECTRUM_ANALYSIS_BANDS);
+        for band in 0..SPECTRUM_ANALYSIS_BANDS {
+            let avg =
+                average_log_band_energy(&fft_output, band, SPECTRUM_ANALYSIS_BANDS, bins_count, n);
+            let target = spectrum_target(avg, band, SPECTRUM_ANALYSIS_BANDS);
+            targets.push(target);
+        }
 
-            let start = (bin_start_f.floor() as usize).clamp(0, bins_count - 1);
-            let end = (bin_end_f.ceil() as usize).clamp(start + 1, bins_count);
+        let targets = smooth_spectrum_targets(&targets);
 
-            let mut sum = 0.0;
-            let mut count = 0;
-            for bin in fft_output.iter().take(end).skip(start) {
-                sum += bin.norm() / n as f32;
-                count += 1;
-            }
-            let avg = if count > 0 { sum / count as f32 } else { 0.0 };
-
-            // Equalize: boost higher frequency ranges dynamically since human hearing perceives them differently.
-            let boost = 1.0 + (x as f32 / num_bands as f32) * 4.0;
-            let compressed = avg.sqrt();
-            let scaled = compressed * boost * 2.5; // Multiplier tuned for normalized & compressed avg.
-            let target = scaled.clamp(0.0, 1.0);
-
-            // 4. Gravity peak decay physics.
-            let current = self.visualizer_peaks[x];
+        for (band, target) in targets.iter().copied().enumerate() {
+            let current = self.visualizer_peaks[band];
             if target > current {
-                self.visualizer_peaks[x] = target; // Fast rise.
+                self.visualizer_peaks[band] = target; // Fast rise.
             } else {
-                self.visualizer_peaks[x] = (current - 0.08).max(target).max(0.0);
-                // Smooth fall.
+                let release = spectrum_release_curve(band, SPECTRUM_ANALYSIS_BANDS);
+                self.visualizer_peaks[band] = (current - release).max(target).max(0.0);
             }
         }
+    }
+}
+
+fn average_log_band_energy(
+    fft_output: &[Complex],
+    band: usize,
+    total_bands: usize,
+    bins_count: usize,
+    sample_count: usize,
+) -> f32 {
+    let t = band as f32 / total_bands as f32;
+    let min_bin = 1.0_f32;
+    let max_bin = bins_count as f32;
+    let bin_start_f = min_bin * (max_bin / min_bin).powf(t);
+    let bin_end_f = min_bin * (max_bin / min_bin).powf((band + 1) as f32 / total_bands as f32);
+
+    let start = (bin_start_f.floor() as usize).clamp(0, bins_count - 1);
+    let end = (bin_end_f.ceil() as usize).clamp(start + 1, bins_count);
+
+    let mut sum = 0.0;
+    let mut count = 0;
+    for bin in fft_output.iter().take(end).skip(start) {
+        sum += bin.norm() / sample_count as f32;
+        count += 1;
+    }
+
+    if count > 0 {
+        sum / count as f32
+    } else {
+        0.0
+    }
+}
+
+fn spectrum_target(avg: f32, band: usize, total_bands: usize) -> f32 {
+    let energy = (avg - SPECTRUM_NOISE_FLOOR).max(0.0);
+    let compressed = compress_spectrum_energy(energy);
+    let scaled = compressed * spectrum_gain_curve(band, total_bands) * SPECTRUM_OUTPUT_GAIN;
+
+    scaled.clamp(0.0, 0.92)
+}
+
+fn compress_spectrum_energy(avg: f32) -> f32 {
+    avg.powf(0.50)
+}
+
+fn spectrum_gain_curve(band: usize, total_bands: usize) -> f32 {
+    let denominator = total_bands.saturating_sub(1).max(1) as f32;
+    let t = band as f32 / denominator;
+
+    // Gentle broad lift through mids/highs without the old final-bin rocket boost.
+    let broad_lift = 1.0 + 1.20 * t.powf(0.72);
+
+    // Tame the last treble shelf so weak high-frequency bins do not dominate visually.
+    let high_tame = if t > 0.82 {
+        1.0 - ((t - 0.82) / 0.18).clamp(0.0, 1.0) * 0.35
+    } else {
+        1.0
+    };
+
+    broad_lift * high_tame
+}
+
+fn smooth_spectrum_targets(targets: &[f32]) -> Vec<f32> {
+    let mut smoothed = Vec::with_capacity(targets.len());
+
+    for i in 0..targets.len() {
+        let previous = if i > 0 { targets[i - 1] } else { targets[i] };
+        let current = targets[i];
+        let next = targets.get(i + 1).copied().unwrap_or(current);
+
+        smoothed.push(previous * 0.20 + current * 0.60 + next * 0.20);
+    }
+
+    smoothed
+}
+
+fn spectrum_release_curve(band: usize, total_bands: usize) -> f32 {
+    let denominator = total_bands.saturating_sub(1).max(1) as f32;
+    let t = band as f32 / denominator;
+
+    if t > 0.82 {
+        0.12
+    } else {
+        0.075
     }
 }
 
@@ -124,7 +197,7 @@ impl Complex {
     fn mul(self, other: Self) -> Self {
         Self {
             re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im * other.re,
+            im: self.im * other.re + self.re * other.im,
         }
     }
 
@@ -160,5 +233,44 @@ fn fft_rec(input: &[Complex], output: &mut [Complex]) {
         let t = twiddle.mul(odd_fft[k]);
         output[k] = even_fft[k].add(t);
         output[k + n / 2] = even_fft[k].sub(t);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spectrum_gain_curve_tames_final_band() {
+        let mid_gain = spectrum_gain_curve(20, SPECTRUM_ANALYSIS_BANDS);
+        let final_gain = spectrum_gain_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
+
+        assert!(final_gain < mid_gain);
+        assert!(final_gain < 1.50);
+    }
+
+    #[test]
+    fn spectrum_target_gates_tiny_noise_floor() {
+        assert_eq!(
+            spectrum_target(SPECTRUM_NOISE_FLOOR * 0.5, 30, SPECTRUM_ANALYSIS_BANDS),
+            0.0
+        );
+    }
+
+    #[test]
+    fn smoothing_preserves_constant_flat_targets() {
+        let targets = vec![0.42; SPECTRUM_ANALYSIS_BANDS];
+        let smoothed = smooth_spectrum_targets(&targets);
+
+        assert_eq!(smoothed, targets);
+    }
+
+    #[test]
+    fn high_treble_releases_faster_than_midrange() {
+        let mid_release = spectrum_release_curve(20, SPECTRUM_ANALYSIS_BANDS);
+        let high_release =
+            spectrum_release_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
+
+        assert!(high_release > mid_release);
     }
 }
