@@ -71,6 +71,8 @@ pub struct App {
     pub buffer_percent: u8,
     pub buffer_seconds: u32,
 
+    pub undo_removed_station: Option<(Station, usize)>,
+
     audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
     pub visualizer_mode: usize, // 0 = Spectrum, 1 = Oscilloscope, 2 = Simulated
