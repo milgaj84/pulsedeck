@@ -33,13 +33,15 @@ impl App {
                 .find(|s| s.url == *url)
                 .or_else(|| self.search_results.iter().find(|s| s.url == *url))
                 .or_else(|| {
-                    self.undo_removed_station.as_ref().and_then(|(station, _, _)| {
-                        if station.url == *url {
-                            Some(station)
-                        } else {
-                            None
-                        }
-                    })
+                    self.undo_removed_station
+                        .as_ref()
+                        .and_then(|(station, _, _)| {
+                            if station.url == *url {
+                                Some(station)
+                            } else {
+                                None
+                            }
+                        })
                 })
         })
     }
