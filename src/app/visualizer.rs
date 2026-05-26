@@ -1,7 +1,6 @@
 use super::*;
 
 const SPECTRUM_ANALYSIS_BANDS: usize = 40;
-const SPECTRUM_RENDER_SLOTS: usize = SPECTRUM_ANALYSIS_BANDS * 2;
 const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
 const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
 
@@ -52,28 +51,32 @@ impl App {
         // 3. Map bins logarithmically to equal-width frequency bands.
         let bins_count = n / 2;
 
-        if self.visualizer_peaks.len() != SPECTRUM_RENDER_SLOTS {
-            self.visualizer_peaks = vec![0.0; SPECTRUM_RENDER_SLOTS];
+        if self.visualizer_peaks.len() != SPECTRUM_ANALYSIS_BANDS {
+            self.visualizer_peaks = vec![0.0; SPECTRUM_ANALYSIS_BANDS];
         }
 
         let mut targets = Vec::with_capacity(SPECTRUM_ANALYSIS_BANDS);
         for band in 0..SPECTRUM_ANALYSIS_BANDS {
-            let avg = average_log_band_energy(&fft_output, band, SPECTRUM_ANALYSIS_BANDS, bins_count, n);
+            let avg = average_log_band_energy(
+                &fft_output,
+                band,
+                SPECTRUM_ANALYSIS_BANDS,
+                bins_count,
+                n,
+            );
             let target = spectrum_target(avg, band, SPECTRUM_ANALYSIS_BANDS);
             targets.push(target);
         }
 
         let targets = smooth_spectrum_targets(&targets);
-        let render_targets = spectrum_render_slots(&targets);
 
-        for (slot, target) in render_targets.iter().copied().enumerate() {
-            let current = self.visualizer_peaks[slot];
+        for (band, target) in targets.iter().copied().enumerate() {
+            let current = self.visualizer_peaks[band];
             if target > current {
-                self.visualizer_peaks[slot] = target; // Fast rise.
+                self.visualizer_peaks[band] = target; // Fast rise.
             } else {
-                let band = slot / 2;
                 let release = spectrum_release_curve(band, SPECTRUM_ANALYSIS_BANDS);
-                self.visualizer_peaks[slot] = (current - release).max(target).max(0.0);
+                self.visualizer_peaks[band] = (current - release).max(target).max(0.0);
             }
         }
     }
@@ -150,17 +153,6 @@ fn smooth_spectrum_targets(targets: &[f32]) -> Vec<f32> {
     }
 
     smoothed
-}
-
-fn spectrum_render_slots(targets: &[f32]) -> Vec<f32> {
-    let mut slots = Vec::with_capacity(targets.len() * 2);
-
-    for target in targets {
-        slots.push(*target);
-        slots.push(0.0);
-    }
-
-    slots
 }
 
 fn spectrum_release_curve(band: usize, total_bands: usize) -> f32 {
@@ -276,16 +268,6 @@ mod tests {
         let smoothed = smooth_spectrum_targets(&targets);
 
         assert_eq!(smoothed, targets);
-    }
-
-    #[test]
-    fn render_slots_insert_valleys_between_bands() {
-        let targets = vec![0.5; SPECTRUM_ANALYSIS_BANDS];
-        let slots = spectrum_render_slots(&targets);
-
-        assert_eq!(slots.len(), SPECTRUM_RENDER_SLOTS);
-        assert_eq!(slots[0], 0.5);
-        assert_eq!(slots[1], 0.0);
     }
 
     #[test]
