@@ -41,7 +41,7 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
 - 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars — routes through the 13-role semantic palette. Switch live in settings.
-- 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck.
+- 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck. Full-deck mode uses a larger hero cassette, framed signal screen, and themed status strip.
 - 💾 **Favorites & history** — your stations are remembered between sessions, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
@@ -125,6 +125,12 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 - To remove a saved station, highlight it in the Library and press `f`.
 - After removal, press `u` to restore the most recently removed station.
 - Switch between genre categories with `Tab` / `Shift+Tab`.
+
+**Using the cassette deck:**
+
+- Press `b` to cycle between split view, library-only view, and full-deck Bento mode.
+- Press `v` to cycle the deck signal display between Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
+- Press `p` to switch between the live Tape Deck and Tape History page.
 
 **Coming back tomorrow:**
 
