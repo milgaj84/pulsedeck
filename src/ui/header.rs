@@ -4,7 +4,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::theme;
 use crate::app::{App, PlaybackState};
 
-/// Render the header area: DriftFM logo + now-playing info.
+/// Render the header area: PulseDeck logo + now-playing info.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -15,12 +15,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     render_now_playing(frame, chunks[1], app);
 }
 
-/// ASCII-styled DriftFM logo.
+/// ASCII-styled PulseDeck logo.
 fn render_logo(frame: &mut Frame, area: Rect) {
     let logo = vec![Line::from(vec![
         Span::styled("  ░▒▓ ", theme::dim()),
-        Span::styled("D R I F T", theme::neon()),
-        Span::styled(" F M", theme::cyan()),
+        Span::styled("P U L S E", theme::neon()),
+        Span::styled(" D E C K", theme::cyan()),
         Span::styled(" ▓▒░", theme::dim()),
     ])];
 
