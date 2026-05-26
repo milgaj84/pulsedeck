@@ -126,8 +126,9 @@ The search bar shows clear states while you work: `Type 2+ chars to search`, `se
 
 **Coming back tomorrow:**
 
-- DriftFM remembers your library between sessions
-- Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically
+- DriftFM remembers your library between sessions.
+- DriftFM also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
+- Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
 
 ---
 

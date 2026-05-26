@@ -13,6 +13,7 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Settings Disabled-State Consistency**: The minimum song duration row now stays inert when partial snippets are kept, matching its dimmed disabled UI state.
 *   **WSL Notification Fallback**: Desktop notifications now fall back to a Windows PowerShell notification balloon when DriftFM is running under WSL and the normal Linux notification path is unavailable.
 *   **Playback Pause Responsiveness**: Starting playback now marks the app as connecting immediately, and pause now acts directly on the audio sink to avoid delayed Space handling and visualizer/audio desync.
+*   **Persisted UI State**: DriftFM now remembers volume, mute state, layout mode, and visualizer mode across launches using a dedicated `ui-state.json` file.
 
 ### Added
 *   **Recording Feedback Tests**: Added app-level tests covering recording notices for stopped, pending, and stopped-again states.
@@ -20,6 +21,7 @@ All notable changes to the DriftFM project will be documented in this file.
 *   **Settings Row Tests**: Added settings tests for row mapping, navigation wrapping, and disabled minimum-duration behavior.
 *   **WSL Notification Tests**: Added notifier tests for WSL kernel detection and PowerShell string escaping.
 *   **Playback State Tests**: Added app-level tests covering immediate connecting state, stop state sync, and Space while connecting.
+*   **UI State Tests**: Added tests for UI-state defaults, layout key round-tripping, visualizer clamping, and corrupted-value sanitizing.
 
 ---
 

@@ -21,6 +21,7 @@ impl App {
             LayoutMode::LeftOnly => LayoutMode::RightOnly,
             LayoutMode::RightOnly => LayoutMode::Split,
         };
+        super::ui_state::save_ui_state_or_notice(self);
     }
 
     pub(super) fn next_deck_page(&mut self) {
@@ -29,6 +30,7 @@ impl App {
 
     pub(super) fn toggle_visualizer_mode(&mut self) {
         self.visualizer_mode = (self.visualizer_mode + 1) % 3;
+        super::ui_state::save_ui_state_or_notice(self);
     }
 }
 
@@ -83,5 +85,17 @@ mod tests {
         assert_eq!(app.active_deck_page, 1);
         app.next_deck_page();
         assert_eq!(app.active_deck_page, 0);
+    }
+
+    #[test]
+    fn toggle_visualizer_mode_wraps() {
+        let mut app = test_app();
+
+        app.toggle_visualizer_mode();
+        assert_eq!(app.visualizer_mode, 1);
+        app.toggle_visualizer_mode();
+        assert_eq!(app.visualizer_mode, 2);
+        app.toggle_visualizer_mode();
+        assert_eq!(app.visualizer_mode, 0);
     }
 }
