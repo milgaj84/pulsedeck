@@ -4,6 +4,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 const CASSETTE_INNER_WIDTH: usize = 44;
+#[cfg(test)]
 const CASSETTE_REEL_CELL_WIDTH: usize = 10;
 const CASSETTE_TAPE_WIDTH: usize = 4;
 
@@ -158,7 +159,7 @@ fn cassette_recording_status(
 ) -> (&'static str, Style) {
     match recording_state {
         RecordingState::Active => {
-            let status = if tick_count % 2 == 0 {
+            let status = if tick_count.is_multiple_of(2) {
                 "● REC ACTIVE"
             } else {
                 "  REC ACTIVE"
@@ -166,7 +167,7 @@ fn cassette_recording_status(
             (status, theme::error().add_modifier(Modifier::BOLD))
         }
         RecordingState::Pending => {
-            let status = if tick_count % 2 == 0 {
+            let status = if tick_count.is_multiple_of(2) {
                 "● REC PENDING"
             } else {
                 "  REC PENDING"
@@ -219,7 +220,7 @@ fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, S
             )
         }
         PlaybackState::Connecting => {
-            let hub = if (tick_count / 4) % 2 == 0 {
+            let hub = if (tick_count / 4).is_multiple_of(2) {
                 "◌"
             } else {
                 "○"
@@ -713,8 +714,7 @@ mod tests {
     #[test]
     fn reel_animation_keeps_constant_cell_width() {
         for tick_count in 0..96 {
-            let (left_reel, right_reel) =
-                reel_cells_for_state(tick_count, &PlaybackState::Playing);
+            let (left_reel, right_reel) = reel_cells_for_state(tick_count, &PlaybackState::Playing);
 
             assert_eq!(left_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
             assert_eq!(right_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
