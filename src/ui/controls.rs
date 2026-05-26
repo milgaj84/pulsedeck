@@ -39,7 +39,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         }
         (PlaybackState::Connecting, _) => {
             status_chip(&mut spans, "◌", "TUNE", Style::default().fg(theme::warm()));
-            spans.push(Span::styled("Connecting...", Style::default().fg(theme::warm())));
+            spans.push(Span::styled(
+                "Connecting...",
+                Style::default().fg(theme::warm()),
+            ));
         }
         (PlaybackState::Error(e), _) => {
             status_chip(&mut spans, "✗", "ERROR", theme::error());
@@ -59,7 +62,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled("  │  ", theme::dim()));
     spans.push(Span::styled(layout_label(app.layout_mode), theme::dim()));
     spans.push(Span::styled("  ", theme::dim()));
-    spans.push(Span::styled(visualizer_label(app.visualizer_mode), theme::dim()));
+    spans.push(Span::styled(
+        visualizer_label(app.visualizer_mode),
+        theme::dim(),
+    ));
 
     if app.recording_state != RecordingState::Off {
         spans.push(Span::styled("  ", theme::dim()));
