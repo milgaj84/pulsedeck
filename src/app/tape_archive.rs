@@ -85,7 +85,9 @@ impl App {
         }
 
         match self.tape_archive.selected_row().cloned() {
-            Some(TapeArchiveRow::Track { .. }) => self.play_selected_tape(),
+            Some(TapeArchiveRow::Track { .. }) | Some(TapeArchiveRow::AllRecordingTrack { .. }) => {
+                self.play_selected_tape()
+            }
             Some(TapeArchiveRow::Folder { .. }) | Some(TapeArchiveRow::AllRecordings) => {
                 self.tape_archive.toggle_selected_folder();
             }
@@ -99,16 +101,20 @@ impl App {
                 self.pending_tape_delete = None;
                 self.tape_archive.toggle_selected_folder();
             }
-            Some(TapeArchiveRow::Track { .. }) => match self.playback {
-                PlaybackState::Playing
-                | PlaybackState::Paused
-                | PlaybackState::FadingOut { .. } => {
-                    self.toggle_pause();
+            Some(TapeArchiveRow::Track { .. }) | Some(TapeArchiveRow::AllRecordingTrack { .. }) => {
+                match self.playback {
+                    PlaybackState::Playing
+                    | PlaybackState::Paused
+                    | PlaybackState::FadingOut { .. } => {
+                        self.toggle_pause();
+                    }
+                    PlaybackState::Stopped
+                    | PlaybackState::Error(_)
+                    | PlaybackState::Connecting => {
+                        self.play_selected_tape();
+                    }
                 }
-                PlaybackState::Stopped | PlaybackState::Error(_) | PlaybackState::Connecting => {
-                    self.play_selected_tape();
-                }
-            },
+            }
             None => {}
         }
     }

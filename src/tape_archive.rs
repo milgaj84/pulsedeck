@@ -1,5 +1,8 @@
+use rodio::Source;
 use std::fs;
+use std::fs::File;
 use std::io;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -10,6 +13,8 @@ pub struct TapeArchive {
     pub root: PathBuf,
     pub folders: Vec<TapeFolder>,
     pub flattened: Vec<TapeArchiveRow>,
+    pub all_recordings_flattened: bool,
+    pub filter_query: String,
     pub selected: usize,
     pub status: TapeArchiveStatus,
 }
@@ -44,6 +49,10 @@ pub enum TapeArchiveRow {
         folder_index: usize,
         track_index: usize,
     },
+    AllRecordingTrack {
+        folder_index: usize,
+        track_index: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +71,8 @@ impl TapeArchive {
             root,
             folders: Vec::new(),
             flattened: Vec::new(),
+            all_recordings_flattened: false,
+            filter_query: String::new(),
             selected: 0,
             status: TapeArchiveStatus::NotLoaded,
         };
@@ -86,10 +97,26 @@ impl TapeArchive {
             TapeArchiveRow::Track {
                 folder_index,
                 track_index,
+            }
+            | TapeArchiveRow::AllRecordingTrack {
+                folder_index,
+                track_index,
             } => self
                 .folders
                 .get(*folder_index)
                 .and_then(|folder| folder.tracks.get(*track_index)),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn selected_track_folder_name(&self) -> Option<&str> {
+        match self.selected_row()? {
+            TapeArchiveRow::Track { folder_index, .. }
+            | TapeArchiveRow::AllRecordingTrack { folder_index, .. } => self
+                .folders
+                .get(*folder_index)
+                .map(|folder| folder.name.as_str()),
             _ => None,
         }
     }
@@ -112,9 +139,41 @@ impl TapeArchive {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn set_filter_query(&mut self, query: impl Into<String>) {
+        self.filter_query = query.into();
+        self.selected = 0;
+        self.rebuild_flattened();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_filter_char(&mut self, ch: char) {
+        self.filter_query.push(ch);
+        self.selected = 0;
+        self.rebuild_flattened();
+    }
+
+    #[allow(dead_code)]
+    pub fn pop_filter_char(&mut self) {
+        self.filter_query.pop();
+        self.selected = 0;
+        self.rebuild_flattened();
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_filter_query(&mut self) {
+        self.filter_query.clear();
+        self.selected = 0;
+        self.rebuild_flattened();
+    }
+
+    pub fn is_filtering(&self) -> bool {
+        !self.filter_query.trim().is_empty()
+    }
+
     pub fn toggle_selected_folder(&mut self) {
         match self.selected_row().cloned() {
-            Some(TapeArchiveRow::AllRecordings) => self.toggle_all_folders(),
+            Some(TapeArchiveRow::AllRecordings) => self.toggle_all_recordings_mode(),
             Some(TapeArchiveRow::Folder { folder_index }) => {
                 if let Some(folder) = self.folders.get_mut(folder_index) {
                     folder.expanded = !folder.expanded;
@@ -125,20 +184,61 @@ impl TapeArchive {
         }
     }
 
+    pub fn toggle_all_recordings_mode(&mut self) {
+        self.all_recordings_flattened = !self.all_recordings_flattened;
+        self.selected = 0;
+        self.rebuild_flattened();
+    }
+
+    #[allow(dead_code)]
+    pub fn exit_all_recordings_mode(&mut self) {
+        if self.all_recordings_flattened {
+            self.all_recordings_flattened = false;
+            self.selected = 0;
+            self.rebuild_flattened();
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn next_track_after(&self, path: &Path) -> Option<TapeTrack> {
+        for folder in &self.folders {
+            let Some(position) = folder.tracks.iter().position(|track| track.path == path) else {
+                continue;
+            };
+
+            return folder.tracks.get(position + 1).cloned();
+        }
+
+        None
+    }
+
     pub fn rebuild_flattened(&mut self) {
         let selected_before = self.selected;
+        let filter = normalized_query(self.filter_query.as_str());
+
         self.flattened.clear();
         self.flattened.push(TapeArchiveRow::AllRecordings);
 
-        for (folder_index, folder) in self.folders.iter().enumerate() {
-            self.flattened.push(TapeArchiveRow::Folder { folder_index });
-
-            if folder.expanded {
-                for (track_index, _track) in folder.tracks.iter().enumerate() {
-                    self.flattened.push(TapeArchiveRow::Track {
+        if self.all_recordings_flattened || filter.is_some() {
+            for (folder_index, track_index) in self.all_track_refs_newest_first() {
+                if self.track_matches_filter(folder_index, track_index, filter.as_deref()) {
+                    self.flattened.push(TapeArchiveRow::AllRecordingTrack {
                         folder_index,
                         track_index,
                     });
+                }
+            }
+        } else {
+            for (folder_index, folder) in self.folders.iter().enumerate() {
+                self.flattened.push(TapeArchiveRow::Folder { folder_index });
+
+                if folder.expanded {
+                    for (track_index, _track) in folder.tracks.iter().enumerate() {
+                        self.flattened.push(TapeArchiveRow::Track {
+                            folder_index,
+                            track_index,
+                        });
+                    }
                 }
             }
         }
@@ -146,12 +246,52 @@ impl TapeArchive {
         self.selected = clamp_index(selected_before, self.flattened.len());
     }
 
-    fn toggle_all_folders(&mut self) {
-        let should_expand = self.folders.iter().any(|folder| !folder.expanded);
-        for folder in &mut self.folders {
-            folder.expanded = should_expand;
+    pub fn all_track_refs_newest_first(&self) -> Vec<(usize, usize)> {
+        let mut refs = Vec::new();
+
+        for (folder_index, folder) in self.folders.iter().enumerate() {
+            for (track_index, _track) in folder.tracks.iter().enumerate() {
+                refs.push((folder_index, track_index));
+            }
         }
-        self.rebuild_flattened();
+
+        refs.sort_by(|left, right| {
+            let left_track = &self.folders[left.0].tracks[left.1];
+            let right_track = &self.folders[right.0].tracks[right.1];
+            compare_tracks_newest_first(left_track, right_track)
+        });
+        refs
+    }
+
+    fn track_matches_filter(
+        &self,
+        folder_index: usize,
+        track_index: usize,
+        filter: Option<&str>,
+    ) -> bool {
+        let Some(filter) = filter else {
+            return true;
+        };
+
+        let Some(folder) = self.folders.get(folder_index) else {
+            return false;
+        };
+
+        let Some(track) = folder.tracks.get(track_index) else {
+            return false;
+        };
+
+        let haystack = format!(
+            "{} {} {} {} {}",
+            folder.name,
+            track.title,
+            track.artist.as_deref().unwrap_or(""),
+            track.filename,
+            track.extension
+        )
+        .to_lowercase();
+
+        haystack.contains(filter)
     }
 }
 
@@ -244,6 +384,34 @@ pub fn format_file_size(size_bytes: u64) -> String {
     }
 }
 
+pub fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+pub fn track_duration_label(track: &TapeTrack) -> Option<String> {
+    track.duration_hint.map(format_duration)
+}
+
+pub fn track_metadata_label(track: &TapeTrack) -> String {
+    let mut parts = vec![track.extension.to_uppercase()];
+
+    if let Some(duration) = track_duration_label(track) {
+        parts.push(duration);
+    }
+
+    parts.push(format_file_size(track.size_bytes));
+    parts.join(" · ")
+}
+
 pub fn display_track_title(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -255,6 +423,12 @@ pub fn display_track_title(path: &Path) -> String {
                 .map(|name| name.to_string())
         })
         .unwrap_or_else(|| "Local tape".to_string())
+}
+
+pub fn probe_audio_duration(path: &Path) -> Option<Duration> {
+    let file = File::open(path).ok()?;
+    let decoder = rodio::Decoder::new(BufReader::new(file)).ok()?;
+    decoder.total_duration()
 }
 
 fn scan_folder(path: PathBuf) -> Result<TapeFolder, io::Error> {
@@ -301,6 +475,7 @@ fn track_from_path(path: PathBuf, metadata: fs::Metadata) -> Option<TapeTrack> {
         .split_once(" - ")
         .map(|(artist, _title)| artist.trim().to_string())
         .filter(|artist| !artist.is_empty());
+    let duration_hint = probe_audio_duration(&path);
 
     Some(TapeTrack {
         title,
@@ -310,7 +485,7 @@ fn track_from_path(path: PathBuf, metadata: fs::Metadata) -> Option<TapeTrack> {
         extension,
         size_bytes: metadata.len(),
         modified: metadata.modified().ok(),
-        duration_hint: None,
+        duration_hint,
     })
 }
 
@@ -330,6 +505,15 @@ fn modified_sort_key(track: &TapeTrack) -> u64 {
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn normalized_query(query: &str) -> Option<String> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        None
+    } else {
+        Some(query)
+    }
 }
 
 fn clamp_index(index: usize, len: usize) -> usize {
@@ -468,6 +652,158 @@ mod tests {
         assert_eq!(
             display_track_title(Path::new("/tmp/Lazerhawk - King.mp3")),
             "Lazerhawk - King"
+        );
+    }
+
+    #[test]
+    fn format_duration_under_one_hour() {
+        assert_eq!(format_duration(Duration::from_secs(228)), "03:48");
+    }
+
+    #[test]
+    fn format_duration_over_one_hour() {
+        assert_eq!(format_duration(Duration::from_secs(3862)), "1:04:22");
+    }
+
+    #[test]
+    fn track_metadata_includes_duration_when_available() {
+        let track = TapeTrack {
+            title: "Track".to_string(),
+            artist: None,
+            filename: "Track.mp3".to_string(),
+            path: PathBuf::from("Track.mp3"),
+            extension: "mp3".to_string(),
+            size_bytes: 2048,
+            modified: None,
+            duration_hint: Some(Duration::from_secs(228)),
+        };
+
+        assert_eq!(track_metadata_label(&track), "MP3 · 03:48 · 2.0 KB");
+    }
+
+    #[test]
+    fn all_recordings_mode_flattens_tracks_newest_first() {
+        let temp = TempDir::new("all-recordings");
+        let old = temp.path.join("Ambient").join("old.mp3");
+        let new = temp.path.join("Synthwave").join("new.mp3");
+
+        touch(&old);
+        thread::sleep(StdDuration::from_millis(5));
+        touch(&new);
+
+        let mut archive = scan_tape_archive(temp.path.clone()).unwrap();
+        archive.toggle_all_recordings_mode();
+
+        assert!(archive.all_recordings_flattened);
+        assert!(matches!(
+            archive.flattened.get(1),
+            Some(TapeArchiveRow::AllRecordingTrack { .. })
+        ));
+        assert_eq!(
+            archive
+                .selected_track()
+                .map(|track| track.filename.as_str()),
+            None
+        );
+
+        archive.selected = 1;
+        assert_eq!(
+            archive
+                .selected_track()
+                .map(|track| track.filename.as_str()),
+            Some("new.mp3")
+        );
+    }
+
+    #[test]
+    fn filter_matches_track_title() {
+        let temp = TempDir::new("filter-title");
+        touch(&temp.path.join("Synthwave").join("Lazerhawk - King.mp3"));
+        touch(&temp.path.join("Ambient").join("Stars.mp3"));
+
+        let mut archive = scan_tape_archive(temp.path.clone()).unwrap();
+        archive.set_filter_query("king");
+
+        assert_eq!(archive.flattened.len(), 2);
+        archive.selected = 1;
+        assert_eq!(
+            archive
+                .selected_track()
+                .map(|track| track.filename.as_str()),
+            Some("Lazerhawk - King.mp3")
+        );
+    }
+
+    #[test]
+    fn filter_matches_folder_name() {
+        let temp = TempDir::new("filter-folder");
+        touch(&temp.path.join("Synthwave").join("A.mp3"));
+        touch(&temp.path.join("Ambient").join("B.mp3"));
+
+        let mut archive = scan_tape_archive(temp.path.clone()).unwrap();
+        archive.set_filter_query("ambient");
+
+        assert_eq!(archive.flattened.len(), 2);
+        archive.selected = 1;
+        assert_eq!(
+            archive
+                .selected_track()
+                .map(|track| track.filename.as_str()),
+            Some("B.mp3")
+        );
+    }
+
+    #[test]
+    fn clearing_filter_restores_tree_rows() {
+        let temp = TempDir::new("filter-clear");
+        touch(&temp.path.join("Synthwave").join("A.mp3"));
+
+        let mut archive = scan_tape_archive(temp.path.clone()).unwrap();
+        archive.set_filter_query("nothing");
+        assert_eq!(archive.flattened.len(), 1);
+
+        archive.clear_filter_query();
+        assert_eq!(archive.flattened.len(), 3);
+    }
+
+    #[test]
+    fn next_track_after_returns_next_in_same_folder() {
+        let mut archive = TapeArchive::new("recordings");
+        archive.folders = vec![TapeFolder {
+            name: "Synthwave".to_string(),
+            path: PathBuf::from("recordings/Synthwave"),
+            expanded: true,
+            tracks: vec![
+                TapeTrack {
+                    title: "First".to_string(),
+                    artist: None,
+                    filename: "First.mp3".to_string(),
+                    path: PathBuf::from("recordings/Synthwave/First.mp3"),
+                    extension: "mp3".to_string(),
+                    size_bytes: 42,
+                    modified: Some(UNIX_EPOCH + Duration::from_secs(2)),
+                    duration_hint: None,
+                },
+                TapeTrack {
+                    title: "Second".to_string(),
+                    artist: None,
+                    filename: "Second.mp3".to_string(),
+                    path: PathBuf::from("recordings/Synthwave/Second.mp3"),
+                    extension: "mp3".to_string(),
+                    size_bytes: 42,
+                    modified: Some(UNIX_EPOCH + Duration::from_secs(1)),
+                    duration_hint: None,
+                },
+            ],
+        }];
+        archive.status = TapeArchiveStatus::Ready;
+        archive.rebuild_flattened();
+
+        assert_eq!(
+            archive
+                .next_track_after(Path::new("recordings/Synthwave/First.mp3"))
+                .map(|track| track.filename),
+            Some("Second.mp3".to_string())
         );
     }
 }
