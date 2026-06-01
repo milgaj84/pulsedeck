@@ -13,7 +13,7 @@ git fetch --prune
 Confirm the version:
 
 ```bash
-grep -n 'version = "0.1.6"' Cargo.toml
+grep -n 'version = "0.1.7"' Cargo.toml
 grep -A2 -n 'name = "pulsedeck"' Cargo.lock
 ```
 
@@ -29,7 +29,7 @@ cargo run
 
 ## Visual release smoke check
 
-For the 0.1.6 visual-enchantments release, manually check:
+For the 0.1.7 visual-enchantments release, manually check:
 
 ```text
 Split layout: cassette stays stable while reels animate
@@ -92,18 +92,18 @@ cargo publish
 After crates.io accepts the package, tag the exact commit that was published:
 
 ```bash
-git tag -a v0.1.6 -m "PulseDeck 0.1.6"
-git push origin v0.1.6
+git tag -a v0.1.7 -m "PulseDeck 0.1.7"
+git push origin v0.1.7
 ```
 
 ## GitHub release
 
-Create a GitHub release from tag `v0.1.6` and paste the notes from the `0.1.6` section of `CHANGELOG.md`.
+Create a GitHub release from tag `v0.1.7` and paste the notes from the `0.1.7` section of `CHANGELOG.md`.
 
 ## Post-release sanity check
 
 ```bash
-cargo install pulsedeck --version 0.1.6
+cargo install pulsedeck --version 0.1.7
 pulsedeck
 ```
 
