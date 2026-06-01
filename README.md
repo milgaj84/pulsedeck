@@ -99,6 +99,9 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `s` | Playback | Stop playback |
 | `+` / `-` | Playback | Volume up / down with fine low-volume and faster high-volume steps |
 | `m` | Playback | Mute / unmute |
+| `Ctrl+-` / `Alt+-` | Search | Volume down without leaving search |
+| `Ctrl+=` / `Ctrl++` / `Alt+=` / `Alt++` | Search | Volume up without leaving search |
+| `Ctrl+m` / `Alt+m` | Search | Mute / unmute without leaving search |
 | `r` | Playback | Start / stop recording; PulseDeck shows footer status when recording is armed, active, stopped, or unavailable |
 | `b` | View | Cycle Split / Library / Deck layout |
 | `p` | View | Switch Tape Deck / Tape History |
@@ -108,6 +111,8 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `q` | App | Quit |
 
 `Enter` is the search commit action: it adds the highlighted search result to your saved Library and starts playback. `Space` auditions the highlighted result without saving it, so you can sample stations before committing them to `library.json`.
+
+While in search, plain printable characters continue to edit the query. Use the Ctrl/Alt audio shortcuts for volume and mute if the current stream needs adjustment without abandoning the active search.
 
 ---
 
@@ -145,9 +150,8 @@ Search results show saved stations with a star and include compact genre/country
 
 - PulseDeck remembers your library between sessions.
 - PulseDeck also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
+- Settings such as auto-resume, audio output, recording folder, recording filters, and theme are saved automatically.
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
-- In settings, `Space` jumps Min Song Duration through common presets, while Left/Right or h/l/a/d nudge it by 5 seconds between 15s and 600s.
-- Use the *Audio Output* row in settings to choose `Default` or a detected output device such as Bluetooth headphones exposed by PipeWire/PulseAudio. Native ALSA/JACK probe diagnostics are suppressed during device discovery so backend chatter does not overwrite the TUI.
 
 ---
 
@@ -173,13 +177,14 @@ The minimum song duration and whether to keep short clips are configurable in th
 Press `,` to open the settings panel. Current options:
 
 - **Desktop notifications** — show track info when a song changes. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
-- **Auto-resume last station on startup** — picks up where you left off
-- **Tape capture folder** — cycle between preset recording directories
-- **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted
-- **Min song duration** — threshold for auto-discarding short recordings (30s–180s). Only active when **Keep partial snippets & ads** is OFF.
-- **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte
+- **Auto-resume last station on startup** — picks up where you left off.
+- **Audio Output** — choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
+- **Tape capture folder** — cycle between preset recording directories.
+- **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted.
+- **Min song duration** — threshold for auto-discarding short recordings. `Space` cycles common presets including 45s and 300s; Left/Right or h/l/a/d nudge by 5 seconds within the 15s–600s range. Only active when **Keep partial snippets & ads** is OFF.
+- **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte.
 
-Use `↑` / `↓` or `j` / `k` to move between settings. Use `Space`, `Right`, `l`, or `d` to step values forward; use `Left`, `h`, or `a` to step values backward. Settings are saved automatically to a JSON file in your config directory.
+Use `↑` / `↓` or `j` / `k` to move between settings. Use `Space`, `Right`, `l`, or `d` to step values forward; use `Left`, `h`, or `a` to step values backward. Native ALSA/JACK probe diagnostics are suppressed during audio device discovery so backend chatter does not overwrite the TUI. Settings are saved automatically to a JSON file in your config directory.
 
 ---
 
@@ -201,7 +206,7 @@ The old `~/.config/driftfm` directory is left untouched as a backup. Future save
 | Platform | Status |
 | :--- | :--- |
 | Windows | ✅ Full support (native WASAPI audio) |
-| Linux | ✅ Full support (ALSA) |
+| Linux | ✅ Full support (ALSA/PulseAudio/PipeWire via CPAL/Rodio, with selectable outputs) |
 | macOS | ✅ Full support (CoreAudio) |
 | WSL | ✅ Supported with Windows notification fallback |
 
@@ -226,7 +231,7 @@ The codebase also keeps UI colors routed through the semantic palette in `theme.
 *All native Rust — no ffmpeg, no Python, no Electron. A single self-contained binary.*
 
 - [Ratatui](https://ratatui.rs/) — Terminal UI framework
-- [Rodio](https://github.com/RustAudio/rodio) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio decoding & playback (native, no ffmpeg dependency)
+- [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio output selection, decoding, and playback (native, no ffmpeg dependency)
 - [Tokio](https://tokio.rs/) — Async runtime for API search
 - [reqwest](https://docs.rs/reqwest) — HTTP streaming with ICY metadata support
 - [id3](https://docs.rs/id3) — ID3 tag injection into recorded files
