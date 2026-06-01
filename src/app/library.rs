@@ -83,7 +83,7 @@ impl App {
             let count = self.library.available_genres.len();
             if count > 0 {
                 self.selected_genre_idx = (self.selected_genre_idx + 1) % count;
-                self.selected = 0;
+                self.select_playing_station_or_first_visible();
             }
         }
     }
@@ -97,9 +97,23 @@ impl App {
                 } else {
                     self.selected_genre_idx - 1
                 };
-                self.selected = 0;
+                self.select_playing_station_or_first_visible();
             }
         }
+    }
+
+    fn select_playing_station_or_first_visible(&mut self) {
+        let next_selected = self
+            .playing_url
+            .as_deref()
+            .and_then(|playing_url| {
+                self.visible_stations()
+                    .iter()
+                    .position(|station| station.url == playing_url)
+            })
+            .unwrap_or(0);
+
+        self.selected = next_selected;
     }
 
     pub(super) fn save_library_or_notice(&mut self, context: &str) {
@@ -131,6 +145,14 @@ mod tests {
             Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message),
             None => None,
         }
+    }
+
+    fn genre_index(app: &App, genre: &str) -> usize {
+        app.library
+            .available_genres
+            .iter()
+            .position(|candidate| candidate == genre)
+            .unwrap()
     }
 
     #[test]
@@ -239,15 +261,63 @@ mod tests {
     }
 
     #[test]
-    fn next_genre_resets_selection() {
+    fn next_genre_selects_playing_station_when_visible() {
         let mut app = App::new(Library::in_memory(vec![
-            station("A", "http://a", "Synthwave"),
-            station("B", "http://b", "Ambient"),
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Synth A", "http://synth-a", "Synthwave"),
+            station("Ambient B", "http://ambient-b", "Ambient"),
         ]));
+        app.selected_genre_idx = genre_index(&app, "All");
         app.selected = 1;
+        app.playing_url = Some("http://ambient-b".to_string());
 
-        app.next_genre();
+        app.update(Action::NextGenre);
 
+        assert_eq!(
+            app.library.available_genres[app.selected_genre_idx],
+            "Ambient"
+        );
+        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+    }
+
+    #[test]
+    fn prev_genre_selects_playing_station_when_visible() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Synth A", "http://synth-a", "Synthwave"),
+            station("Ambient B", "http://ambient-b", "Ambient"),
+        ]));
+        app.selected_genre_idx = genre_index(&app, "Synthwave");
+        app.selected = 0;
+        app.playing_url = Some("http://ambient-b".to_string());
+
+        app.update(Action::PrevGenre);
+
+        assert_eq!(
+            app.library.available_genres[app.selected_genre_idx],
+            "Ambient"
+        );
+        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+    }
+
+    #[test]
+    fn genre_switch_falls_back_to_first_station_when_playing_is_absent() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Synth A", "http://synth-a", "Synthwave"),
+            station("Ambient B", "http://ambient-b", "Ambient"),
+        ]));
+        app.selected_genre_idx = genre_index(&app, "All");
+        app.selected = 2;
+        app.playing_url = Some("http://synth-a".to_string());
+
+        app.update(Action::NextGenre);
+
+        assert_eq!(
+            app.library.available_genres[app.selected_genre_idx],
+            "Ambient"
+        );
         assert_eq!(app.selected, 0);
+        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-a");
     }
 }
