@@ -95,6 +95,7 @@ impl App {
             Action::NextDeckPage => self.next_deck_page(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::RefreshTapeArchive => self.refresh_tape_archive(),
+            Action::OpenSelectedTapeFolder => self.open_selected_tape_folder(),
             Action::ConfirmDeleteTape => self.confirm_tape_delete(),
             Action::CancelDeleteTape => self.cancel_tape_delete(),
 

@@ -53,6 +53,7 @@ pub enum AudioCommand {
 pub enum AudioStatus {
     Playing,
     LocalFilePlaying { path: PathBuf, title: String },
+    LocalFileFinished { path: PathBuf },
     Paused,
     Stopped,
     Error(String),
@@ -123,6 +124,7 @@ fn audio_loop(
     let active_conn_id = Arc::new(AtomicU64::new(0));
     let mut current_conn_id: u64 = 0;
     let mut current_url: Option<String> = None;
+    let mut current_local_path: Option<PathBuf> = None;
     let mut hardware_recovery_retries: u8 = 0;
 
     // Shared thread-safe recording control state
@@ -189,6 +191,7 @@ fn audio_loop(
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
             Ok(cmd) => match cmd {
                 AudioCommand::Play(url) => {
+                    current_local_path = None;
                     if current_sink.is_some() {
                         pending_action = Some(AudioCommand::Play(url));
                     } else {
@@ -197,6 +200,7 @@ fn audio_loop(
                 }
                 AudioCommand::PlayLocalFile(path) => {
                     pending_action = None;
+                    current_local_path = None;
                     current_fade_volume = None;
                     active_conn_id.store(0, Ordering::SeqCst);
                     connect_thread = None;
@@ -217,6 +221,7 @@ fn audio_loop(
                         Ok(sink) => {
                             let title = crate::tape_archive::display_track_title(&path);
                             current_sink = Some(sink);
+                            current_local_path = Some(path.clone());
                             let _ = status_tx.send(AudioStatus::LocalFilePlaying { path, title });
                         }
                         Err(err) => {
@@ -242,6 +247,7 @@ fn audio_loop(
                     }
                 }
                 AudioCommand::Stop => {
+                    current_local_path = None;
                     if current_sink.is_some() {
                         pending_action = Some(AudioCommand::Stop);
                     } else {
@@ -314,6 +320,7 @@ fn audio_loop(
                     let cmd = pending_action.take().unwrap();
                     match cmd {
                         AudioCommand::Play(url) => {
+                            current_local_path = None;
                             // Stop current sink before spawning new connection
                             if let Some(old_sink) = current_sink.take() {
                                 old_sink.stop();
@@ -321,6 +328,7 @@ fn audio_loop(
                             spawn_connection_for!(url);
                         }
                         AudioCommand::Stop => {
+                            current_local_path = None;
                             active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
                             connect_thread = None;
                             if let Some(old_sink) = current_sink.take() {
@@ -343,9 +351,11 @@ fn audio_loop(
                 let cmd = pending_action.take().unwrap();
                 match cmd {
                     AudioCommand::Play(url) => {
+                        current_local_path = None;
                         spawn_connection_for!(url);
                     }
                     AudioCommand::Stop => {
+                        current_local_path = None;
                         active_conn_id.store(0, Ordering::SeqCst);
                         connect_thread = None;
                         let _ = status_tx.send(AudioStatus::Stopped);
@@ -416,7 +426,11 @@ fn audio_loop(
         if let Some(ref sink) = current_sink {
             if sink.empty() {
                 current_sink = None;
-                let _ = status_tx.send(AudioStatus::Stopped);
+                if let Some(path) = current_local_path.take() {
+                    let _ = status_tx.send(AudioStatus::LocalFileFinished { path });
+                } else {
+                    let _ = status_tx.send(AudioStatus::Stopped);
+                }
             }
         }
     }

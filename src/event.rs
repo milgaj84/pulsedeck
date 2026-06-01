@@ -87,6 +87,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
             Some(Action::RefreshTapeArchive)
         }
         (_, KeyCode::Delete) => Some(Action::DeleteSelectedTape),
+        (_, KeyCode::Char('o')) => Some(Action::OpenSelectedTapeFolder),
         (_, KeyCode::Char('y')) => Some(Action::ConfirmDeleteTape),
         (_, KeyCode::Char('n')) => Some(Action::CancelDeleteTape),
 
@@ -381,6 +382,14 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Delete), &InputMode::Normal),
             Some(Action::DeleteSelectedTape),
+        );
+    }
+
+    #[test]
+    fn normal_mode_o_opens_selected_tape_folder() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('o')), &InputMode::Normal),
+            Some(Action::OpenSelectedTapeFolder),
         );
     }
 

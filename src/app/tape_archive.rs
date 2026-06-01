@@ -1,7 +1,9 @@
 use super::*;
 use crate::action::Action;
 use crate::audio::AudioCommand;
-use crate::tape_archive::{TapeArchive, TapeArchiveRow, TapeArchiveStatus};
+use crate::system_open;
+use crate::system_trash;
+use crate::tape_archive::{TapeArchive, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
 use std::path::PathBuf;
 
 const TAPE_ARCHIVE_PAGE: usize = 1;
@@ -168,6 +170,22 @@ impl App {
         }
     }
 
+    pub(super) fn open_selected_tape_folder(&mut self) {
+        if !self.is_tape_archive_page() {
+            return;
+        }
+
+        let Some(track) = self.tape_archive.selected_track() else {
+            self.set_info_notice("Select a tape file to open its folder");
+            return;
+        };
+
+        match system_open::open_containing_folder(&track.path) {
+            Ok(()) => self.set_info_notice("Opened tape folder"),
+            Err(err) => self.set_error_notice(format!("Could not open tape folder: {err}")),
+        }
+    }
+
     pub(super) fn request_delete_selected_tape(&mut self) {
         if !self.is_tape_archive_focused() {
             return;
@@ -197,13 +215,13 @@ impl App {
             self.playback = PlaybackState::Stopped;
         }
 
-        match std::fs::remove_file(&path) {
+        match system_trash::move_to_trash(&path) {
             Ok(()) => {
-                self.set_info_notice("Tape deleted");
+                self.set_info_notice("Tape moved to trash");
                 self.tape_archive_scan_requested = true;
             }
             Err(err) => {
-                self.set_error_notice(format!("Could not delete tape: {err}"));
+                self.set_error_notice(format!("Could not move tape to trash: {err}"));
             }
         }
     }
@@ -226,6 +244,10 @@ impl App {
             return;
         };
 
+        self.play_tape_track(track);
+    }
+
+    pub(super) fn play_tape_track(&mut self, track: TapeTrack) {
         self.playing_url = None;
         self.local_playback_path = Some(track.path.clone());
         self.current_track = Some(track.title.clone());

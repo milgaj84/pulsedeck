@@ -57,6 +57,14 @@ Duration labels are best-effort metadata hints gathered during the blocking arch
 
 The tape filter uses `InputMode::TapeFilter`, separate from global radio search. `/` opens local tape filtering when the tape archive is focused, while global station search remains available outside the tape page.
 
+## Local tape file management
+
+Local tape file management is intentionally conservative. Opening a containing folder goes through `src/system_open.rs`, which builds platform-specific command specs and launches the host file manager without mutating the archive.
+
+Trash deletion goes through `src/system_trash.rs`. PulseDeck attempts platform trash commands and does not fall back to permanent deletion if trash is unavailable. This keeps the guarded `y` confirmation flow recoverable by the user's OS.
+
+Local playback completion is surfaced as `AudioStatus::LocalFileFinished`. The app reducer uses the tape archive model to find the next recording in the same folder and starts it automatically. At the end of a folder, playback stops and the footer reports the end of the tape folder.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

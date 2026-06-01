@@ -730,7 +730,10 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
             .unwrap_or("selected tape");
 
         lines.push(Line::from(vec![
-            Span::styled("   DELETE? ", theme::error().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "   MOVE TO TRASH? ",
+                theme::error().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(filename.to_string(), theme::text()),
             Span::styled("   y confirm / n cancel", theme::dim()),
         ]));
