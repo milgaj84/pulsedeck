@@ -88,6 +88,8 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `↑` / `↓` or `j` / `k` | Library or search | Move through the visible list |
 | `Enter` | Library | Play the highlighted saved station |
 | `Enter` | Search | Save the highlighted result to your **Library**, then play it |
+| `Space` | Search | Audition the highlighted result without saving it |
+| `Ctrl+Enter` | Search | Audition too, when your terminal reports the key combo |
 | `/` | Anywhere in normal mode | Open worldwide station search |
 | `Esc` | Search or overlay | Leave search / close overlay |
 | `f` | Library only | Remove the highlighted station from your **Library** |
@@ -105,7 +107,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `h` / `?` | App | Show / hide help |
 | `q` | App | Quit |
 
-There is intentionally no separate “add without playing” shortcut in search mode. `Enter` is the one search commit action: it adds the highlighted search result to your saved Library and starts playback.
+`Enter` is the search commit action: it adds the highlighted search result to your saved Library and starts playback. `Space` auditions the highlighted result without saving it, so you can sample stations before committing them to `library.json`.
 
 ---
 
@@ -115,8 +117,9 @@ There is intentionally no separate “add without playing” shortcut in search 
 
 1. Press `/` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
 2. Use `↑` / `↓` to highlight a result.
-3. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
-4. Press `Esc` instead to leave search without adding anything.
+3. Press `Space` to audition the highlighted station without saving it. You stay in search mode and can keep browsing.
+4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
+5. Press `Esc` instead to leave search without adding anything.
 
 Search results show saved stations with a star and include compact genre/country/bitrate metadata. The search bar shows clear states while you work: `Type 2+ chars to search`, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
 

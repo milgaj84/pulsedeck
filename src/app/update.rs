@@ -26,6 +26,7 @@ impl App {
             Action::SearchInput(c) => self.search_input(c),
             Action::SearchBackspace => self.search_backspace(),
             Action::SearchConfirm => self.confirm_search(),
+            Action::SearchAudition => self.audition_search_result(),
 
             Action::RemoveLibrarySelection => self.remove_library_selection(),
             Action::UndoRemoveLibrarySelection => self.undo_remove_library_selection(),

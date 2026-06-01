@@ -55,6 +55,8 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         section("Search"),
         shortcut("/", "Open worldwide station search"),
         shortcut("Type", "Search by station, tag, city, or country"),
+        shortcut("Space", "Audition highlighted result without saving"),
+        shortcut("Ctrl+Enter", "Audition too, when your terminal supports it"),
         shortcut("Enter", "Save highlighted result to Library and play it"),
         shortcut("Esc", "Leave search without adding"),
         section("Deck & Visuals"),
