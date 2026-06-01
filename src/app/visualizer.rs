@@ -400,8 +400,12 @@ mod tests {
         let flat_targets = vec![0.20; SPECTRUM_ANALYSIS_BANDS];
         let mut structured_targets = flat_targets.clone();
 
-        for band in treble_start_band(SPECTRUM_ANALYSIS_BANDS)..SPECTRUM_ANALYSIS_BANDS {
-            structured_targets[band] = if band.is_multiple_of(2) { 0.45 } else { 0.05 };
+        for (band, target) in structured_targets
+            .iter_mut()
+            .enumerate()
+            .skip(treble_start_band(SPECTRUM_ANALYSIS_BANDS))
+        {
+            *target = if band.is_multiple_of(2) { 0.45 } else { 0.05 };
         }
 
         let flat_variance =

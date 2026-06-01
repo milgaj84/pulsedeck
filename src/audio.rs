@@ -331,31 +331,6 @@ fn clamp_status_volume(current_volume: f32) -> f32 {
     current_volume.clamp(0.0, 1.0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fade_out_next_volume_uses_exponential_step() {
-        let next = fade_out_next_volume(1.0);
-
-        assert!((next - 0.85).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn fade_out_complete_triggers_at_low_volume() {
-        assert!(!fade_out_complete(0.051));
-        assert!(fade_out_complete(0.05));
-    }
-
-    #[test]
-    fn clamp_status_volume_keeps_ui_payload_normalized() {
-        assert_eq!(clamp_status_volume(-0.2), 0.0);
-        assert_eq!(clamp_status_volume(0.42), 0.42);
-        assert_eq!(clamp_status_volume(1.4), 1.0);
-    }
-}
-
 fn ensure_output_handle(
     output_stream: &mut Option<OutputStream>,
     output_handle: &mut Option<rodio::OutputStreamHandle>,
@@ -412,4 +387,29 @@ fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
     *state.connect_ref = Some(std::thread::spawn(move || {
         connect_and_decode(url, handle, context)
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fade_out_next_volume_uses_exponential_step() {
+        let next = fade_out_next_volume(1.0);
+
+        assert!((next - 0.85).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn fade_out_complete_triggers_at_low_volume() {
+        assert!(!fade_out_complete(0.051));
+        assert!(fade_out_complete(0.05));
+    }
+
+    #[test]
+    fn clamp_status_volume_keeps_ui_payload_normalized() {
+        assert_eq!(clamp_status_volume(-0.2), 0.0);
+        assert_eq!(clamp_status_volume(0.42), 0.42);
+        assert_eq!(clamp_status_volume(1.4), 1.0);
+    }
 }
