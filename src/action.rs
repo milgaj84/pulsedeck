@@ -33,6 +33,8 @@ pub enum Action {
     /// Dynamic TUI Modules
     CycleLayout,
     ToggleHelp,
+    StepSettingForward,
+    StepSettingBackward,
     NextDeckPage,
     ToggleSettings,
     ToggleRecording,

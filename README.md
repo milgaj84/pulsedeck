@@ -175,7 +175,7 @@ Press `,` to open the settings panel. Current options:
 - **Min song duration** — threshold for auto-discarding short recordings (30s–180s). Only active when **Keep partial snippets & ads** is OFF.
 - **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte
 
-Settings are saved automatically to a JSON file in your config directory.
+Use `↑` / `↓` or `j` / `k` to move between settings. Use `Space`, `Right`, `l`, or `d` to step values forward; use `Left`, `h`, or `a` to step values backward. Settings are saved automatically to a JSON file in your config directory.
 
 ---
 

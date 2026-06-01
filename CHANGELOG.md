@@ -10,6 +10,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 
 ### Improved
+*   **Bidirectional Settings Cycling**: Added Left/Right and h/l/a/d directional shortcuts in the settings popup so cyclic values can step backward as well as forward.
 *   **Progressive Volume Steps**: Changed `+` / `-` volume control to use finer 2% steps at low volume, 5% midrange steps, and faster 10% steps at high volume.
 *   **Spectrum Tuning Feedback**: Kept the RTA Spectrum alive during `TUNING...` / connecting states with a subtle ambient pulse, matching the oscilloscope's existing interstitial feedback.
 

@@ -106,7 +106,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                     .add_modifier(Modifier::UNDERLINED)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("(Press Space to cycle)", theme::dim()),
+            Span::styled("(Space/Right forward, Left back)", theme::dim()),
         ],
         SettingRow::KeepSnippets => checkbox_row(
             app.library.settings.keep_snippets,
@@ -138,7 +138,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                     if duration_dimmed {
                         "(disabled — keeping all)"
                     } else {
-                        "(Press Space to cycle)"
+                        "(Space/Right forward, Left back)"
                     },
                     theme::dim(),
                 ),
@@ -155,7 +155,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                         .fg(theme::highlight())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("(Press Space to cycle)", theme::dim()),
+                Span::styled("(Space/Right forward, Left back)", theme::dim()),
             ]
         }
     }
@@ -196,12 +196,26 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         ),
         Span::styled(" Navigate  •  ", theme::dim()),
         Span::styled(
+            "Left/Right",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Back/Forward  •  ", theme::dim()),
+        Span::styled(
+            "h/l",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Back/Forward  •  ", theme::dim()),
+        Span::styled(
             "Space",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Toggle / Cycle  •  ", theme::dim()),
+        Span::styled(" Toggle / Forward  •  ", theme::dim()),
         Span::styled(
             "Esc/ ,",
             Style::default()
