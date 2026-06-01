@@ -10,6 +10,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 
 ### Improved
+*   **Search Debounce Indicator**: Replaced the static `Searching soon` debounce message with a fast animated initializing indicator so search feels responsive immediately while debounce still protects API calls.
 *   **Genre Cursor Preservation**: Kept the cursor anchored to the currently playing station when switching library genres, falling back to the first row only when the live station is absent.
 *   **Disabled Settings Focus State**: Softened the selected state for disabled config rows so inactive settings no longer look fully adjustable when focused.
 *   **Bidirectional Settings Cycling**: Added Left/Right and h/l/a/d directional shortcuts in the settings popup so cyclic values can step backward as well as forward.
