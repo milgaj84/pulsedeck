@@ -98,13 +98,6 @@ impl ThemeName {
             ThemeName::CatppuccinLatte => palette_latte(),
         }
     }
-
-    /// Cycle to the next theme in the list.
-    pub fn next(self) -> Self {
-        let all = Self::ALL;
-        let idx = all.iter().position(|&t| t == self).unwrap_or(0);
-        all[(idx + 1) % all.len()]
-    }
 }
 
 // ── Palette Definitions ──────────────────────────────────────────────
@@ -350,22 +343,6 @@ pub fn vol_empty() -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_theme_cycle_wraps_around() {
-        let last = *ThemeName::ALL.last().unwrap();
-        let first = *ThemeName::ALL.first().unwrap();
-        assert_eq!(last.next(), first);
-    }
-
-    #[test]
-    fn test_theme_cycle_advances() {
-        assert_eq!(ThemeName::Retrowave.next(), ThemeName::CatppuccinMocha);
-        assert_eq!(
-            ThemeName::CatppuccinMocha.next(),
-            ThemeName::CatppuccinMacchiato
-        );
-    }
 
     #[test]
     fn test_theme_key_roundtrip() {
