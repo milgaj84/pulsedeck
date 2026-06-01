@@ -6,6 +6,9 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+*   **Quiet Audio Device Probing**: Suppressed native ALSA/JACK stderr diagnostics while enumerating or opening output devices so backend probe noise does not overwrite the terminal UI.
+
 ### Added
 *   **Selectable Audio Output Device**: Added a persisted settings row for choosing Default or a detected output device, allowing PipeWire/PulseAudio Bluetooth headphones to be targeted instead of always using Rodio's default sink.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.

@@ -2159,6 +2159,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "id3",
+ "libc",
  "notify-rust",
  "ratatui",
  "reqwest",
