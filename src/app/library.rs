@@ -1,5 +1,7 @@
 use super::*;
 
+const UNDO_HISTORY_LIMIT: usize = 10;
+
 impl App {
     pub(super) fn remove_library_selection(&mut self) {
         if self.input_mode == InputMode::Normal {
@@ -19,12 +21,12 @@ impl App {
                 let url = station.url.clone();
                 match self.library.remove(&url) {
                     Ok(true) => {
-                        self.undo_removed_station = Some((station, removed_index, removed_genre));
+                        self.remember_removed_station(station, removed_index, removed_genre);
                         self.set_info_notice("Station removed. Press u to undo");
                     }
                     Ok(false) => {}
                     Err(err) => {
-                        self.undo_removed_station = Some((station, removed_index, removed_genre));
+                        self.remember_removed_station(station, removed_index, removed_genre);
                         self.set_error_notice(format!(
                             "Station removed in memory, but could not save library: {err}"
                         ));
@@ -43,9 +45,8 @@ impl App {
             return;
         }
 
-        let Some((station, previous_index, previous_genre)) = self.undo_removed_station.take()
-        else {
-            self.set_info_notice("Nothing to undo");
+        let Some((station, previous_index, previous_genre)) = self.undo_history.pop_back() else {
+            self.set_info_notice("Nothing left to undo");
             return;
         };
 
@@ -54,6 +55,7 @@ impl App {
             return;
         }
 
+        let station_name = station.name.clone();
         let insert_at = previous_index.min(self.library.stations.len());
         self.library.stations.insert(insert_at, station.clone());
         self.library.rebuild_genres();
@@ -71,10 +73,17 @@ impl App {
             .position(|visible| visible.url == station.url)
             .unwrap_or(0);
         match self.library.save() {
-            Ok(()) => self.set_info_notice("Station restored"),
+            Ok(()) => self.set_info_notice(format!("Restored station: {station_name}")),
             Err(err) => self.set_error_notice(format!(
                 "Station restored in memory, but could not save library: {err}"
             )),
+        }
+    }
+
+    fn remember_removed_station(&mut self, station: Station, index: usize, genre: String) {
+        self.undo_history.push_back((station, index, genre));
+        while self.undo_history.len() > UNDO_HISTORY_LIMIT {
+            self.undo_history.pop_front();
         }
     }
 
@@ -185,7 +194,7 @@ mod tests {
         assert_eq!(app.library.stations[0].name, "A");
         assert_eq!(app.library.stations[1].name, "B");
         assert_eq!(app.selected, 0);
-        assert_eq!(notice_text(&app), Some("Station restored"));
+        assert_eq!(notice_text(&app), Some("Restored station: A"));
     }
 
     #[test]
@@ -238,11 +247,11 @@ mod tests {
         app.update(Action::UndoRemoveLibrarySelection);
 
         assert!(app.library.contains("http://a"));
-        assert_eq!(notice_text(&app), Some("Nothing to undo"));
+        assert_eq!(notice_text(&app), Some("Nothing left to undo"));
     }
 
     #[test]
-    fn new_removal_replaces_previous_undo_slot() {
+    fn repeated_removals_restore_in_reverse_order() {
         let mut app = App::new(Library::in_memory(vec![
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
@@ -253,11 +262,57 @@ mod tests {
         app.update(Action::RemoveLibrarySelection);
         app.selected = 0;
         app.update(Action::RemoveLibrarySelection);
-        app.update(Action::UndoRemoveLibrarySelection);
 
         assert!(!app.library.contains("http://a"));
+        assert!(!app.library.contains("http://b"));
+        assert_eq!(app.undo_history.len(), 2);
+
+        app.update(Action::UndoRemoveLibrarySelection);
         assert!(app.library.contains("http://b"));
-        assert!(app.library.contains("http://c"));
+        assert!(!app.library.contains("http://a"));
+        assert_eq!(notice_text(&app), Some("Restored station: B"));
+
+        app.update(Action::UndoRemoveLibrarySelection);
+        assert!(app.library.contains("http://a"));
+        assert_eq!(notice_text(&app), Some("Restored station: A"));
+        assert_eq!(
+            app.library
+                .stations
+                .iter()
+                .map(|station| station.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["A", "B", "C"]
+        );
+    }
+
+    #[test]
+    fn undo_history_keeps_only_ten_most_recent_removals() {
+        let stations = (0..11)
+            .map(|idx| {
+                station(
+                    &format!("Station {idx}"),
+                    &format!("http://{idx}"),
+                    "Synthwave",
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut app = App::new(Library::in_memory(stations));
+
+        for _ in 0..11 {
+            app.selected = 0;
+            app.update(Action::RemoveLibrarySelection);
+        }
+
+        assert_eq!(app.undo_history.len(), 10);
+
+        for _ in 0..10 {
+            app.update(Action::UndoRemoveLibrarySelection);
+        }
+
+        assert!(!app.library.contains("http://0"));
+        assert!(app.library.contains("http://1"));
+        assert!(app.library.contains("http://10"));
+        assert_eq!(app.undo_history.len(), 0);
     }
 
     #[test]

@@ -128,7 +128,7 @@ Search results show saved stations with a star and include compact genre/country
 - Your Library is the saved station list shown on launch.
 - Rows show the selected station, currently playing station, country, and bitrate without overflowing long names.
 - To remove a saved station, highlight it in the Library and press `f`.
-- After removal, press `u` to restore the most recently removed station.
+- After removal, press `u` to restore removed stations in reverse order. PulseDeck keeps a bounded history of the 10 most recent removals.
 - Switch between genre categories with `Tab` / `Shift+Tab`; when the currently playing station is visible in the new category, the cursor follows it instead of jumping to the top.
 
 **Using the cassette deck:**

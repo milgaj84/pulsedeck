@@ -37,7 +37,7 @@ impl App {
             active_record_filepath: None,
             buffer_percent: 0,
             buffer_seconds: 0,
-            undo_removed_station: None,
+            undo_history: VecDeque::new(),
             audio,
             sample_buffer,
             visualizer_mode: ui_state.visualizer_mode(),
