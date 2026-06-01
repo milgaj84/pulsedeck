@@ -147,7 +147,7 @@ Search results show saved stations with a star and include compact genre/country
 - PulseDeck also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
 - In settings, `Space` jumps Min Song Duration through common presets, while Left/Right or h/l/a/d nudge it by 5 seconds between 15s and 600s.
-- Use the *Audio Output* row in settings to choose `Default` or a detected output device such as Bluetooth headphones exposed by PipeWire/PulseAudio.
+- Use the *Audio Output* row in settings to choose `Default` or a detected output device such as Bluetooth headphones exposed by PipeWire/PulseAudio. Native ALSA/JACK probe diagnostics are suppressed during device discovery so backend chatter does not overwrite the TUI.
 
 ---
 

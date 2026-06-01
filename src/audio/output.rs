@@ -1,7 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, OutputStreamHandle};
 
+#[cfg(unix)]
+use std::sync::Mutex;
+
 pub const DEFAULT_OUTPUT_DEVICE_LABEL: &str = "Default";
+
+#[cfg(unix)]
+static NATIVE_AUDIO_STDERR_LOCK: Mutex<()> = Mutex::new(());
 
 pub(super) struct OutputStreamSelection {
     pub(super) stream: OutputStream,
@@ -12,7 +18,15 @@ pub(super) struct OutputStreamSelection {
 ///
 /// This is best-effort because CI and headless machines often expose no output
 /// devices. The settings UI still offers `Default` even when this list is empty.
+///
+/// Some native backends, especially ALSA/JACK, write probe diagnostics directly
+/// to stderr instead of returning structured errors. Suppress that native stderr
+/// while probing so the terminal UI is not overwritten by backend chatter.
 pub fn list_output_device_names() -> Vec<String> {
+    with_suppressed_native_audio_stderr(list_output_device_names_inner)
+}
+
+fn list_output_device_names_inner() -> Vec<String> {
     let host = cpal::default_host();
     let Ok(devices) = host.output_devices() else {
         return Vec::new();
@@ -28,6 +42,10 @@ pub fn output_device_display_name(value: Option<&str>) -> String {
 pub(super) fn open_output_stream(
     preferred_name: Option<&str>,
 ) -> Result<OutputStreamSelection, String> {
+    with_suppressed_native_audio_stderr(|| open_output_stream_inner(preferred_name))
+}
+
+fn open_output_stream_inner(preferred_name: Option<&str>) -> Result<OutputStreamSelection, String> {
     let preferred_name = normalize_output_device_name(preferred_name);
 
     if let Some(name) = preferred_name.as_deref() {
@@ -91,9 +109,80 @@ where
     names
 }
 
+#[cfg(unix)]
+fn with_suppressed_native_audio_stderr<T>(operation: impl FnOnce() -> T) -> T {
+    let _lock = NATIVE_AUDIO_STDERR_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    match StderrSilencer::new() {
+        Some(_silencer) => operation(),
+        None => operation(),
+    }
+}
+
+#[cfg(not(unix))]
+fn with_suppressed_native_audio_stderr<T>(operation: impl FnOnce() -> T) -> T {
+    operation()
+}
+
+#[cfg(unix)]
+struct StderrSilencer {
+    saved_fd: libc::c_int,
+}
+
+#[cfg(unix)]
+impl StderrSilencer {
+    fn new() -> Option<Self> {
+        // SAFETY: These calls operate only on process file descriptors. We save
+        // stderr, temporarily redirect fd 2 to /dev/null, then restore it in Drop.
+        // The global mutex prevents concurrent audio probes from interleaving fd
+        // changes. If any syscall fails, we close what we opened and skip silencing.
+        unsafe {
+            let saved_fd = libc::dup(libc::STDERR_FILENO);
+            if saved_fd < 0 {
+                return None;
+            }
+
+            let dev_null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+            if dev_null < 0 {
+                libc::close(saved_fd);
+                return None;
+            }
+
+            let redirect_result = libc::dup2(dev_null, libc::STDERR_FILENO);
+            libc::close(dev_null);
+
+            if redirect_result < 0 {
+                libc::close(saved_fd);
+                return None;
+            }
+
+            Some(Self { saved_fd })
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for StderrSilencer {
+    fn drop(&mut self) {
+        // SAFETY: `saved_fd` was returned by `dup` in `new`. Restoring stderr
+        // with `dup2` and closing the saved descriptor is the matching cleanup.
+        unsafe {
+            libc::dup2(self.saved_fd, libc::STDERR_FILENO);
+            libc::close(self.saved_fd);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_audio_stderr_suppression_runs_closure() {
+        assert_eq!(with_suppressed_native_audio_stderr(|| 42), 42);
+    }
 
     #[test]
     fn normalize_output_device_name_treats_default_and_blank_as_none() {
