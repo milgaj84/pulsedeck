@@ -71,7 +71,7 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
     };
 
     let mut spans = vec![Span::styled(
-        if is_selected { " ▸  " } else { "    " },
+        setting_row_cursor_symbol(is_selected, duration_dimmed),
         cursor_style,
     )];
 
@@ -79,9 +79,25 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
 
     let mut paragraph = Paragraph::new(Line::from(spans));
     if is_selected {
-        paragraph = paragraph.style(active_bg);
+        paragraph = paragraph.style(selected_setting_row_style(duration_dimmed, active_bg));
     }
     frame.render_widget(paragraph, area);
+}
+
+fn setting_row_cursor_symbol(is_selected: bool, is_disabled: bool) -> &'static str {
+    match (is_selected, is_disabled) {
+        (true, true) => " ◦  ",
+        (true, false) => " ▸  ",
+        (false, _) => "    ",
+    }
+}
+
+fn selected_setting_row_style(is_disabled: bool, active_bg: Style) -> Style {
+    if is_disabled {
+        Style::default().bg(theme::bg())
+    } else {
+        active_bg
+    }
 }
 
 fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
@@ -226,4 +242,28 @@ fn render_footer(frame: &mut Frame, area: Rect) {
     ]);
     let footer = Paragraph::new(vec![Line::from(""), footer_line]).alignment(Alignment::Center);
     frame.render_widget(footer, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_selected_row_uses_soft_cursor() {
+        assert_eq!(setting_row_cursor_symbol(true, true), " ◦  ");
+        assert_eq!(setting_row_cursor_symbol(true, false), " ▸  ");
+        assert_eq!(setting_row_cursor_symbol(false, true), "    ");
+        assert_eq!(setting_row_cursor_symbol(false, false), "    ");
+    }
+
+    #[test]
+    fn disabled_selected_row_skips_active_background() {
+        let active_bg = Style::default().bg(Color::Red);
+
+        assert_eq!(selected_setting_row_style(false, active_bg), active_bg);
+
+        let disabled_style = selected_setting_row_style(true, active_bg);
+        assert_ne!(disabled_style, active_bg);
+        assert_eq!(disabled_style.bg, Some(theme::bg()));
+    }
 }
