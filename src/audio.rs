@@ -1,4 +1,5 @@
 mod buffer;
+mod buffer_meter;
 mod metadata;
 mod recording;
 mod session;
