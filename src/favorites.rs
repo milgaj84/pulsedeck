@@ -31,6 +31,8 @@ pub struct Settings {
     pub min_song_duration_secs: u32,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default)]
+    pub output_device_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -63,6 +65,7 @@ impl Default for Settings {
             keep_snippets: false,
             min_song_duration_secs: 90,
             theme: "Retrowave".to_string(),
+            output_device_name: None,
         }
     }
 }
@@ -346,6 +349,27 @@ mod tests {
         assert_eq!(resolve_parent_genre("AMBIENT"), "Ambient");
         assert_eq!(resolve_parent_genre("ROCK"), "Rock");
         assert_eq!(resolve_parent_genre("VAPORWAVE"), "Vaporwave");
+    }
+
+    #[test]
+    fn settings_default_uses_default_audio_output() {
+        assert_eq!(Settings::default().output_device_name, None);
+    }
+
+    #[test]
+    fn settings_deserializes_missing_audio_output_as_default() {
+        let json = r#"{
+            "notifications_enabled": true,
+            "autoplay_last": false,
+            "recording_dir": "./recordings",
+            "keep_snippets": false,
+            "min_song_duration_secs": 90,
+            "theme": "Retrowave"
+        }"#;
+
+        let settings: Settings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.output_device_name, None);
     }
 
     #[test]

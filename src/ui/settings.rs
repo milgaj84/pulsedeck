@@ -118,6 +118,17 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
             "Autoplay Last Played Station on Boot",
             label_style,
         ),
+        SettingRow::OutputDevice => vec![
+            icon_span("[ 🔊 ] "),
+            Span::styled("Audio Output: ", label_style),
+            Span::styled(
+                audio_output_label(app.library.settings.output_device_name.as_deref()),
+                Style::default()
+                    .fg(theme::highlight())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" (Space/Right forward, Left back)", theme::dim()),
+        ],
         SettingRow::RecordingDir => vec![
             icon_span("[ 🗁 ] "),
             Span::styled("Tape Capture Folder: ", label_style),
@@ -181,6 +192,10 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
             ]
         }
     }
+}
+
+fn audio_output_label(value: Option<&str>) -> String {
+    crate::audio::output_device_display_name(value)
 }
 
 fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<Span<'static>> {
@@ -253,6 +268,18 @@ fn render_footer(frame: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_output_label_defaults_to_default() {
+        assert_eq!(
+            audio_output_label(None),
+            crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL
+        );
+        assert_eq!(
+            audio_output_label(Some("BlueZ Headphones")),
+            "BlueZ Headphones"
+        );
+    }
 
     #[test]
     fn disabled_selected_row_uses_soft_cursor() {
