@@ -84,11 +84,17 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 }
 
 /// Key mapping for search mode.
-/// Printable characters remain search input; Enter is the only add-from-search action.
+/// Printable characters remain search input, except Space auditions highlighted results.
 fn map_search(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         // Exit search
         (_, KeyCode::Esc) => Some(Action::ExitSearch),
+
+        // Audition search: play highlighted result without saving it.
+        (mods, KeyCode::Enter) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::SearchAudition)
+        }
+        (_, KeyCode::Char(' ')) => Some(Action::SearchAudition),
 
         // Confirm search: add highlighted result, play it, and leave search
         (_, KeyCode::Enter) => Some(Action::SearchConfirm),
@@ -117,6 +123,10 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn modified_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
     }
 
     #[test]
@@ -166,6 +176,25 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('u')), &InputMode::Normal),
             Some(Action::UndoRemoveLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn search_mode_space_auditions_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Char(' ')), &InputMode::Search),
+            Some(Action::SearchAudition),
+        );
+    }
+
+    #[test]
+    fn search_mode_ctrl_enter_auditions_selected_result_when_supported() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Enter, KeyModifiers::CONTROL),
+                &InputMode::Search
+            ),
+            Some(Action::SearchAudition),
         );
     }
 

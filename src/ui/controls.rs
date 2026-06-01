@@ -164,6 +164,8 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
         InputMode::Search => Line::from(vec![
             Span::styled(" [", theme::dim()),
+            Span::styled("Space", theme::cyan()),
+            Span::styled("] Audition  [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
             Span::styled("] Save+Play  [", theme::dim()),
             Span::styled("Esc", theme::cyan()),

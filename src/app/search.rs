@@ -58,6 +58,16 @@ impl App {
         self.exit_search();
     }
 
+    pub(super) fn audition_search_result(&mut self) {
+        if let Some(station) = self.search_results.get(self.selected).cloned() {
+            self.playing_url = Some(station.url.clone());
+            self.playback = PlaybackState::Connecting;
+            self.audio.send(AudioCommand::Play(station.url));
+            self.sync_volume();
+            self.set_info_notice("Auditioning stream (not saved to library)");
+        }
+    }
+
     /// Return the query currently waiting for debounce, if any.
     pub fn current_debounce_query(&self) -> Option<&str> {
         match &self.search_status {
@@ -174,6 +184,13 @@ mod tests {
 
     fn test_app() -> App {
         App::new(Library::in_memory(vec![]))
+    }
+
+    fn notice_text(app: &App) -> Option<&str> {
+        match app.notice.as_ref() {
+            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message),
+            None => None,
+        }
     }
 
     #[test]
@@ -329,6 +346,44 @@ mod tests {
         assert!(!accepted);
         assert!(app.search_results.is_empty());
         assert_eq!(app.search_status, SearchStatus::WaitingForInput);
+    }
+
+    #[test]
+    fn search_audition_plays_result_without_saving_or_exiting_search() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search_results = vec![station("Lo-Fi Radio", "http://lofi")];
+        app.selected = 0;
+        app.library.settings.last_played_url = Some("http://previous".to_string());
+
+        app.update(Action::SearchAudition);
+
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.playing_url.as_deref(), Some("http://lofi"));
+        assert_eq!(app.playback, PlaybackState::Connecting);
+        assert!(!app.library.contains("http://lofi"));
+        assert_eq!(
+            app.library.settings.last_played_url.as_deref(),
+            Some("http://previous")
+        );
+        assert_eq!(
+            notice_text(&app),
+            Some("Auditioning stream (not saved to library)")
+        );
+        assert_eq!(app.search_results.len(), 1);
+    }
+
+    #[test]
+    fn search_audition_without_result_keeps_search_state_unchanged() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchAudition);
+
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.playing_url, None);
+        assert_eq!(app.playback, PlaybackState::Stopped);
+        assert!(app.search_results.is_empty());
     }
 
     #[test]

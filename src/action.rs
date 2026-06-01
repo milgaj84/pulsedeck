@@ -22,6 +22,7 @@ pub enum Action {
     SearchInput(char),
     SearchBackspace,
     SearchConfirm,
+    SearchAudition,
 
     /// Library management
     RemoveLibrarySelection,
