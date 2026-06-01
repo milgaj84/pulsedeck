@@ -44,6 +44,10 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => Some(Action::NextStation),
+        (_, KeyCode::Right) | (_, KeyCode::Char('l')) | (_, KeyCode::Char('d')) => {
+            Some(Action::StepSettingForward)
+        }
+        (_, KeyCode::Left) | (_, KeyCode::Char('a')) => Some(Action::StepSettingBackward),
 
         // Playback
         (_, KeyCode::Enter) => Some(Action::PlaySelected),
@@ -161,6 +165,42 @@ mod tests {
     #[test]
     fn search_mode_insert_does_not_add_selected_result() {
         assert_eq!(map_key(key(KeyCode::Insert), &InputMode::Search), None,);
+    }
+
+    #[test]
+    fn normal_mode_right_steps_setting_forward() {
+        assert_eq!(
+            map_key(key(KeyCode::Right), &InputMode::Normal),
+            Some(Action::StepSettingForward),
+        );
+    }
+
+    #[test]
+    fn normal_mode_left_steps_setting_backward() {
+        assert_eq!(
+            map_key(key(KeyCode::Left), &InputMode::Normal),
+            Some(Action::StepSettingBackward),
+        );
+    }
+
+    #[test]
+    fn normal_mode_l_and_d_step_setting_forward() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('l')), &InputMode::Normal),
+            Some(Action::StepSettingForward),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
+            Some(Action::StepSettingForward),
+        );
+    }
+
+    #[test]
+    fn normal_mode_a_steps_setting_backward() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('a')), &InputMode::Normal),
+            Some(Action::StepSettingBackward),
+        );
     }
 
     #[test]

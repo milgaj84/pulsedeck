@@ -34,6 +34,7 @@ impl App {
             Action::PrevGenre => self.prev_genre(),
 
             Action::ToggleHelp => self.toggle_help(),
+            Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
             Action::ToggleRecording => self.toggle_recording(),
             Action::CycleLayout => self.cycle_layout(),
