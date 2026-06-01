@@ -2,9 +2,9 @@ use crate::app::App;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table};
 
-use super::theme;
+use super::{critical, theme};
 
-pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Keep the help compact so it still fits when terminal fonts are large.
     let popup_area = super::centered_rect(70, 60, area);
 
@@ -20,6 +20,9 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
         )
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(Style::default().bg(theme::bg()));
+
+    let inner_area = block.inner(popup_area);
+    let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
 
     let header_row = Row::new(vec![
         Cell::from(Span::styled(
@@ -70,9 +73,14 @@ pub fn render(frame: &mut Frame, area: Rect, _app: &App) {
     ];
 
     let widths = [Constraint::Percentage(30), Constraint::Percentage(70)];
-    let table = Table::new(rows, widths).header(header_row).block(block);
+    let table = Table::new(rows, widths).header(header_row);
 
-    frame.render_widget(table, popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(table, content_area);
+
+    if let Some(alert_area) = alert_area {
+        critical::render_engine_fault_banner(frame, alert_area, &app.playback);
+    }
 }
 
 fn section(label: &'static str) -> Row<'static> {

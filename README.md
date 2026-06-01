@@ -137,6 +137,7 @@ Search results show saved stations with a star and include compact genre/country
 - Press `v` to cycle the deck signal display between RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
 - In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
 - During stop or station changes, the deck stays visually active while the audio fade-out completes.
+- Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
 - Press `p` to switch between the live Tape Deck and Tape History page.
 - Watch the footer chips for playback state, volume, layout, scope mode, and recording state.
 
