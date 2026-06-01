@@ -1,4 +1,5 @@
 use super::buffer::BufferQueue;
+use super::buffer_meter::BufferStatusMeter;
 use super::metadata::parse_stream_title;
 use super::recording::{inject_id3_tags, sanitize_filename};
 use super::{AudioStatus, RecordStateShared};
@@ -13,6 +14,7 @@ use std::sync::{mpsc, Arc};
 pub(super) struct StreamReader {
     url: String,
     queue: Arc<BufferQueue>,
+    buffer_meter: Arc<BufferStatusMeter>,
     pos: u64,
     metaint: Option<usize>,
     bytes_until_meta: usize,
@@ -32,6 +34,7 @@ impl StreamReader {
     pub(super) fn new(
         url: String,
         queue: Arc<BufferQueue>,
+        buffer_meter: Arc<BufferStatusMeter>,
         status_tx: mpsc::Sender<AudioStatus>,
         conn_id: u64,
         active_conn_id: Arc<AtomicU64>,
@@ -41,6 +44,7 @@ impl StreamReader {
         Self {
             url,
             queue,
+            buffer_meter,
             pos: 0,
             metaint,
             bytes_until_meta: metaint.unwrap_or(0),
@@ -57,12 +61,14 @@ impl StreamReader {
 
     fn read_metadata_block(&mut self) -> std::io::Result<()> {
         let mut length_byte = [0u8; 1];
-        self.queue.pop(&mut length_byte)?;
+        let bytes_read = self.queue.pop(&mut length_byte)?;
+        self.record_buffer_consumption(bytes_read);
         let length = length_byte[0] as usize * 16;
 
         if length > 0 {
             let mut meta_buf = vec![0u8; length];
-            self.queue.pop(&mut meta_buf)?;
+            let bytes_read = self.queue.pop(&mut meta_buf)?;
+            self.record_buffer_consumption(bytes_read);
             if let Ok(meta_str) = String::from_utf8(meta_buf) {
                 if let Some(title) = parse_stream_title(&meta_str) {
                     // Send main UI track change signal
@@ -77,6 +83,15 @@ impl StreamReader {
             }
         }
         Ok(())
+    }
+
+    fn record_buffer_consumption(&self, bytes_read: usize) {
+        self.buffer_meter.record_consumed(
+            bytes_read,
+            self.queue.len(),
+            self.queue.capacity,
+            &self.status_tx,
+        );
     }
 
     fn handle_track_change(&mut self, new_title: &str) {
@@ -246,6 +261,7 @@ impl std::io::Read for StreamReader {
         let Some(metaint) = self.metaint else {
             let n = self.queue.pop(buf)?;
             self.pos += n as u64;
+            self.record_buffer_consumption(n);
 
             // Write read bytes directly to tape recorder if currently Active
             if global_state == 2 {
@@ -265,6 +281,7 @@ impl std::io::Read for StreamReader {
         let n = self.queue.pop(&mut buf[..max_to_read])?;
         self.pos += n as u64;
         self.bytes_until_meta -= n;
+        self.record_buffer_consumption(n);
 
         // Write read bytes directly to tape recorder if currently Active
         if global_state == 2 {

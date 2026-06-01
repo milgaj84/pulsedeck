@@ -45,7 +45,7 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes, preserve crisp treble texture with soft-knee dynamics, keep bars readable, and show a subtle tuning pulse while streams connect.
 - 💾 **Favorites & history** — your stations are remembered between sessions, the station list shows compact country/bitrate metadata, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
-- 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
+- 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups, with adaptive EWMA buffer timing that stays calmer on VBR streams and bursty networks
 
 ---
 

@@ -1,4 +1,5 @@
 use super::buffer::BufferQueue;
+use super::buffer_meter::BufferStatusMeter;
 use super::stream_reader::StreamReader;
 use super::visualizer::VisualizerSource;
 use super::{AudioStatus, RecordStateShared};
@@ -9,13 +10,6 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-
-fn buffer_level_status(len: usize, capacity: usize, bytes_per_sec: usize) -> (u8, u32) {
-    let percent = len.saturating_mul(100).checked_div(capacity).unwrap_or(0) as u8;
-    let seconds = len.checked_div(bytes_per_sec).unwrap_or(0) as u32;
-
-    (percent, seconds)
-}
 
 #[derive(Clone)]
 pub(super) struct ConnectionContext {
@@ -116,8 +110,10 @@ fn try_connect_and_decode_once(
 
     let buffer_capacity = 1024 * 1024;
     let queue = Arc::new(BufferQueue::new(buffer_capacity));
+    let buffer_meter = Arc::new(BufferStatusMeter::new(bytes_per_sec));
 
     let queue_clone = queue.clone();
+    let buffer_meter_clone = buffer_meter.clone();
     let active_conn_id_clone = context.active_conn_id.clone();
     let conn_id = context.conn_id;
     let status_tx_clone = context.status_tx.clone();
@@ -140,8 +136,7 @@ fn try_connect_and_decode_once(
 
                     let len = queue_clone.len();
                     let cap = queue_clone.capacity;
-                    let (percent, seconds) = buffer_level_status(len, cap, bytes_per_sec);
-                    let _ = status_tx_clone.send(AudioStatus::BufferLevel { percent, seconds });
+                    buffer_meter_clone.report_fill_level(len, cap, &status_tx_clone);
                 }
                 Err(_) => {
                     queue_clone.set_disconnected(true);
@@ -154,6 +149,7 @@ fn try_connect_and_decode_once(
     let reader = StreamReader::new(
         url.to_string(),
         queue,
+        buffer_meter,
         context.status_tx,
         context.conn_id,
         context.active_conn_id,
@@ -168,25 +164,4 @@ fn try_connect_and_decode_once(
     sink.append(wrapped_source);
 
     Ok(sink)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn buffer_level_status_reports_percent_and_seconds() {
-        let (percent, seconds) = buffer_level_status(160_000, 1_000_000, 16_000);
-
-        assert_eq!(percent, 16);
-        assert_eq!(seconds, 10);
-    }
-
-    #[test]
-    fn buffer_level_status_handles_zero_capacity_and_rate() {
-        let (percent, seconds) = buffer_level_status(160_000, 0, 0);
-
-        assert_eq!(percent, 0);
-        assert_eq!(seconds, 0);
-    }
 }
