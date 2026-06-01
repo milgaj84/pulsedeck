@@ -429,6 +429,10 @@ fn visualizer_title(app: &App) -> &'static str {
     }
 }
 
+fn should_render_spectrum_analyzer(playback: &PlaybackState, visualizer_mode: usize) -> bool {
+    visualizer_mode == 0 && matches!(playback, PlaybackState::Playing | PlaybackState::Connecting)
+}
+
 fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
     let width = area.width as usize;
     let height = area.height as usize;
@@ -438,7 +442,7 @@ fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // Mode 0: Spectrum Analyzer (renders vertical block bars with neon tri-color gradient)
-    if app.playback == PlaybackState::Playing && app.visualizer_mode == 0 {
+    if should_render_spectrum_analyzer(&app.playback, app.visualizer_mode) {
         render_spectrum_analyzer(frame, area, app);
         return;
     }
@@ -765,6 +769,20 @@ mod tests {
                 CASSETTE_TAPE_WIDTH
             );
         }
+    }
+
+    #[test]
+    fn spectrum_renderer_stays_active_while_connecting() {
+        assert!(should_render_spectrum_analyzer(&PlaybackState::Playing, 0));
+        assert!(should_render_spectrum_analyzer(
+            &PlaybackState::Connecting,
+            0
+        ));
+        assert!(!should_render_spectrum_analyzer(&PlaybackState::Paused, 0));
+        assert!(!should_render_spectrum_analyzer(
+            &PlaybackState::Connecting,
+            1
+        ));
     }
 
     #[test]

@@ -4,6 +4,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Improved
+*   **Spectrum Tuning Feedback**: Kept the RTA Spectrum alive during `TUNING...` / connecting states with a subtle ambient pulse, matching the oscilloscope's existing interstitial feedback.
+
+---
+
 ## [0.1.6] - 2026-05-26
 
 ### Improved

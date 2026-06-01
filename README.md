@@ -42,7 +42,7 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
 - 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars, footer chips, list metadata, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
 - 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck. Full-deck mode keeps the stable cassette design and adds a framed signal screen with a themed status strip.
-- 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes while keeping bars readable.
+- 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes, keeps bars readable, and shows a subtle tuning pulse while streams connect.
 - 💾 **Favorites & history** — your stations are remembered between sessions, the station list shows compact country/bitrate metadata, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups so your audio doesn't cut out when the connection stutters
@@ -132,6 +132,7 @@ Search results show saved stations with a star and include compact genre/country
 
 - Press `b` to cycle between split view, library-only view, and full-deck Bento mode.
 - Press `v` to cycle the deck signal display between RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
+- In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
 - Press `p` to switch between the live Tape Deck and Tape History page.
 - Watch the footer chips for playback state, volume, layout, scope mode, and recording state.
 
