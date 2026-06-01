@@ -160,7 +160,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                     if duration_dimmed {
                         "(disabled — keeping all)"
                     } else {
-                        "(Space/Right forward, Left back)"
+                        "(Space presets, Left/Right +/-5s)"
                     },
                     theme::dim(),
                 ),

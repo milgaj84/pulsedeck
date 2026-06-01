@@ -3,7 +3,10 @@ use crate::action::Action;
 use crate::ui::theme::ThemeName;
 
 const RECORDING_DIR_CHOICES: [&str; 3] = ["./recordings", "./music", "./driftfm-captures"];
-const MIN_SONG_DURATION_CHOICES: [u32; 5] = [30, 60, 90, 120, 180];
+const MIN_SONG_DURATION_PRESETS: [u32; 7] = [30, 45, 60, 90, 120, 180, 300];
+const MIN_SONG_DURATION_MIN_SECS: u32 = 15;
+const MIN_SONG_DURATION_MAX_SECS: u32 = 600;
+const MIN_SONG_DURATION_FINE_STEP_SECS: u32 = 5;
 
 impl App {
     pub(super) fn handle_settings_action(&mut self, action: Action) {
@@ -18,13 +21,14 @@ impl App {
                     self.selected_setting_idx - 1
                 };
             }
-            Action::PlaySelected | Action::TogglePause | Action::StepSettingForward
-                if self.apply_selected_setting(true) =>
-            {
+            Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
+                self.save_library_or_notice("settings");
+            }
+            Action::StepSettingForward if self.apply_directional_setting(true) => {
                 self.save_library_or_notice("settings");
             }
             Action::StepSettingBackward | Action::ToggleHelp
-                if self.apply_selected_setting(false) =>
+                if self.apply_directional_setting(false) =>
             {
                 self.save_library_or_notice("settings");
             }
@@ -85,8 +89,8 @@ impl App {
                     return false;
                 }
 
-                self.library.settings.min_song_duration_secs = step_choice(
-                    &MIN_SONG_DURATION_CHOICES,
+                self.library.settings.min_song_duration_secs = step_numeric_preset(
+                    &MIN_SONG_DURATION_PRESETS,
                     self.library.settings.min_song_duration_secs,
                     forward,
                 );
@@ -99,6 +103,23 @@ impl App {
                 crate::ui::theme::set_active(next);
                 true
             }
+            None => false,
+        }
+    }
+
+    fn apply_directional_setting(&mut self, forward: bool) -> bool {
+        match self.selected_setting_row() {
+            Some(SettingRow::MinSongDuration) => {
+                if self.library.settings.keep_snippets {
+                    self.set_info_notice("Min duration is disabled while keeping all snippets");
+                    return false;
+                }
+
+                self.library.settings.min_song_duration_secs =
+                    nudge_min_song_duration(self.library.settings.min_song_duration_secs, forward);
+                true
+            }
+            Some(_) => self.apply_selected_setting(forward),
             None => false,
         }
     }
@@ -124,6 +145,40 @@ fn step_choice<T: Copy + PartialEq>(choices: &[T], current: T, forward: bool) ->
     } else {
         choices[index - 1]
     }
+}
+
+fn step_numeric_preset(choices: &[u32], current: u32, forward: bool) -> u32 {
+    if choices.is_empty() {
+        return current;
+    }
+
+    if choices.contains(&current) {
+        return step_choice(choices, current, forward);
+    }
+
+    if forward {
+        choices
+            .iter()
+            .copied()
+            .find(|choice| *choice > current)
+            .unwrap_or(choices[0])
+    } else {
+        choices
+            .iter()
+            .rev()
+            .copied()
+            .find(|choice| *choice < current)
+            .unwrap_or(choices[choices.len() - 1])
+    }
+}
+
+fn nudge_min_song_duration(current: u32, forward: bool) -> u32 {
+    if forward {
+        current.saturating_add(MIN_SONG_DURATION_FINE_STEP_SECS)
+    } else {
+        current.saturating_sub(MIN_SONG_DURATION_FINE_STEP_SECS)
+    }
+    .clamp(MIN_SONG_DURATION_MIN_SECS, MIN_SONG_DURATION_MAX_SECS)
 }
 
 #[cfg(test)]
@@ -214,16 +269,62 @@ mod tests {
     }
 
     #[test]
-    fn settings_backward_wraps_min_song_duration() {
+    fn settings_min_duration_routes_space_to_presets_and_arrows_to_fine_steps() {
         let mut app = test_app();
         app.show_settings = true;
         app.selected_setting_idx = SettingRow::MinSongDuration.index();
         app.library.settings.keep_snippets = false;
         app.library.settings.min_song_duration_secs = 30;
 
-        app.update(Action::StepSettingBackward);
+        app.update(Action::TogglePause);
+        assert_eq!(app.library.settings.min_song_duration_secs, 45);
 
-        assert_eq!(app.library.settings.min_song_duration_secs, 180);
+        app.update(Action::StepSettingForward);
+        assert_eq!(app.library.settings.min_song_duration_secs, 50);
+
+        app.update(Action::StepSettingBackward);
+        assert_eq!(app.library.settings.min_song_duration_secs, 45);
+
+        app.update(Action::TogglePause);
+        assert_eq!(app.library.settings.min_song_duration_secs, 60);
+    }
+
+    #[test]
+    fn min_duration_helpers_step_presets_from_standard_and_custom_values() {
+        assert_eq!(
+            step_numeric_preset(&MIN_SONG_DURATION_PRESETS, 30, true),
+            45
+        );
+        assert_eq!(
+            step_numeric_preset(&MIN_SONG_DURATION_PRESETS, 180, true),
+            300
+        );
+        assert_eq!(
+            step_numeric_preset(&MIN_SONG_DURATION_PRESETS, 300, true),
+            30
+        );
+        assert_eq!(
+            step_numeric_preset(&MIN_SONG_DURATION_PRESETS, 47, true),
+            60
+        );
+        assert_eq!(
+            step_numeric_preset(&MIN_SONG_DURATION_PRESETS, 47, false),
+            45
+        );
+    }
+
+    #[test]
+    fn min_duration_helper_nudges_by_five_seconds_and_clamps() {
+        assert_eq!(nudge_min_song_duration(120, true), 125);
+        assert_eq!(nudge_min_song_duration(120, false), 115);
+        assert_eq!(
+            nudge_min_song_duration(MIN_SONG_DURATION_MIN_SECS, false),
+            MIN_SONG_DURATION_MIN_SECS
+        );
+        assert_eq!(
+            nudge_min_song_duration(MIN_SONG_DURATION_MAX_SECS, true),
+            MIN_SONG_DURATION_MAX_SECS
+        );
     }
 
     #[test]
