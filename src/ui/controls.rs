@@ -19,7 +19,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
 
-    match (&app.playback, app.now_playing()) {
+    if app.local_playback_path.is_some() {
+        render_local_tape_status(&mut spans, app);
+    } else {
+        match (&app.playback, app.now_playing()) {
         (PlaybackState::Playing, Some(station)) => {
             status_chip(&mut spans, "▶", "PLAY", theme::playing());
             spans.push(Span::styled(station.name.as_str(), theme::cyan()));
@@ -110,6 +113,38 @@ fn status_chip(spans: &mut Vec<Span>, icon: &'static str, label: &'static str, s
     spans.push(Span::styled("  ", theme::dim()));
 }
 
+fn render_local_tape_status(spans: &mut Vec<Span>, app: &App) {
+    match app.playback {
+        PlaybackState::Playing => status_chip(spans, "▶", "TAPE", theme::playing()),
+        PlaybackState::Paused => status_chip(spans, "⏸", "TAPE", theme::neon()),
+        PlaybackState::FadingOut { .. } => {
+            status_chip(spans, "◒", "TAPE", Style::default().fg(theme::warm()));
+        }
+        PlaybackState::Connecting => {
+            status_chip(spans, "◌", "TAPE", Style::default().fg(theme::warm()));
+        }
+        PlaybackState::Error(_) => status_chip(spans, "✗", "TAPE", theme::error()),
+        PlaybackState::Stopped => status_chip(spans, "■", "TAPE", theme::dim()),
+    }
+
+    if let Some(track) = app.current_track.as_ref() {
+        spans.push(Span::styled(
+            track.as_str(),
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if let Some(path) = app.local_playback_path.as_ref() {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Local tape");
+        spans.push(Span::styled(name.to_string(), theme::cyan()));
+    } else {
+        spans.push(Span::styled("Local tape", theme::dim()));
+    }
+}
+
 fn volume_label(app: &App) -> String {
     if app.muted {
         "VOL MUTE ".to_string()
@@ -182,6 +217,23 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
                     .fg(theme::accent_secondary())
                     .add_modifier(Modifier::ITALIC),
             ),
+        ]),
+        InputMode::Normal if app.is_tape_archive_focused() => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Play/Open  [", theme::dim()),
+            Span::styled("Space", theme::cyan()),
+            Span::styled("] Expand/Pause  [", theme::dim()),
+            Span::styled("Ctrl+r", theme::cyan()),
+            Span::styled("] Refresh  [", theme::dim()),
+            Span::styled("f/Del", theme::cyan()),
+            Span::styled("] Delete  [", theme::dim()),
+            Span::styled("p", theme::cyan()),
+            Span::styled("] Deck  [", theme::dim()),
+            Span::styled("h", theme::cyan()),
+            Span::styled("] Help  [", theme::dim()),
+            Span::styled("q", theme::cyan()),
+            Span::styled("] Quit", theme::dim()),
         ]),
         InputMode::Normal => Line::from(vec![
             Span::styled(" [", theme::dim()),
