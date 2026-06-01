@@ -97,7 +97,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Tab` / `Shift+Tab` | Library | Switch genre categories |
 | `Space` | Playback | Pause / resume |
 | `s` | Playback | Stop playback |
-| `+` / `-` | Playback | Volume up / down |
+| `+` / `-` | Playback | Volume up / down with fine low-volume and faster high-volume steps |
 | `m` | Playback | Mute / unmute |
 | `r` | Playback | Start / stop recording; PulseDeck shows footer status when recording is armed, active, stopped, or unavailable |
 | `b` | View | Cycle Split / Library / Deck layout |
