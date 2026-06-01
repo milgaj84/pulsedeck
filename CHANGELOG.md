@@ -10,6 +10,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 
 ### Improved
+*   **Fine Min Duration Settings**: Split Min Song Duration controls so Space cycles common presets including 45s and 300s, while directional controls nudge by 5 seconds within a 15s to 600s range.
 *   **Overlay Critical Engine Alerts**: Mirrored playback engine errors inside help and settings overlays so stream failures remain visible even when modal screens cover the dashboard.
 *   **Search Stale Response Telemetry**: Added a visible stale-response discard state so late async search payloads identify the ignored query instead of silently disappearing from the search bar.
 *   **Adaptive Buffer Timing**: Replaced static bitrate-only buffer seconds with an EWMA consumption meter driven by real bytes popped from the playback queue, reducing VBR and burst-network status jitter.
