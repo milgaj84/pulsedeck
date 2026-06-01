@@ -33,6 +33,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
                 ));
             }
         }
+        (PlaybackState::FadingOut { .. }, Some(station)) => {
+            status_chip(&mut spans, "◒", "FADE", Style::default().fg(theme::warm()));
+            spans.push(Span::styled(station.name.as_str(), theme::dim()));
+        }
         (PlaybackState::Paused, Some(station)) => {
             status_chip(&mut spans, "⏸", "PAUSE", theme::neon());
             spans.push(Span::styled(station.name.as_str(), theme::dim()));

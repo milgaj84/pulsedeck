@@ -5,8 +5,9 @@ impl App {
     pub(super) fn play_selected(&mut self) {
         let station = self.visible_stations().get(self.selected).copied().cloned();
         if let Some(station) = station {
+            let next_playback = self.playback_after_play_command();
             self.playing_url = Some(station.url.clone());
-            self.playback = PlaybackState::Connecting;
+            self.playback = next_playback;
 
             // Persist last played station URL.
             self.library.settings.last_played_url = Some(station.url.clone());
@@ -28,7 +29,7 @@ impl App {
             PlaybackState::Stopped | PlaybackState::Error(_) => {
                 self.play_selected();
             }
-            PlaybackState::Connecting => {
+            PlaybackState::Connecting | PlaybackState::FadingOut { .. } => {
                 self.stop_playback();
             }
         }
@@ -36,8 +37,18 @@ impl App {
 
     pub(super) fn stop_playback(&mut self) {
         self.audio.send(AudioCommand::Stop);
-        self.playing_url = None;
-        self.playback = PlaybackState::Stopped;
+
+        if matches!(
+            &self.playback,
+            PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
+        ) {
+            self.playback = PlaybackState::FadingOut {
+                current_volume: self.current_output_volume_fraction(),
+            };
+        } else {
+            self.playing_url = None;
+            self.playback = PlaybackState::Stopped;
+        }
     }
 
     pub(super) fn stop_audio_before_quit(&mut self) {
@@ -65,14 +76,32 @@ impl App {
         super::ui_state::save_ui_state_or_notice(self);
     }
 
-    /// Sync volume to audio engine, respecting mute state.
-    pub(super) fn sync_volume(&self) {
-        let vol = if self.muted {
+    fn playback_after_play_command(&self) -> PlaybackState {
+        if matches!(
+            &self.playback,
+            PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
+        ) {
+            PlaybackState::FadingOut {
+                current_volume: self.current_output_volume_fraction(),
+            }
+        } else {
+            PlaybackState::Connecting
+        }
+    }
+
+    fn current_output_volume_fraction(&self) -> f32 {
+        if self.muted {
             0.0
         } else {
             self.volume as f32 / 100.0
-        };
-        self.audio.send(AudioCommand::SetVolume(vol));
+        }
+    }
+
+    /// Sync volume to audio engine, respecting mute state.
+    pub(super) fn sync_volume(&self) {
+        self.audio.send(AudioCommand::SetVolume(
+            self.current_output_volume_fraction(),
+        ));
     }
 }
 
@@ -119,15 +148,38 @@ mod tests {
     }
 
     #[test]
-    fn stop_clears_playing_url_and_sets_stopped_state() {
+    fn play_selected_while_playing_enters_fading_out_state() {
+        let mut app = test_app();
+        app.playback = PlaybackState::Playing;
+        app.volume = 80;
+
+        app.play_selected();
+
+        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
+        match app.playback {
+            PlaybackState::FadingOut { current_volume } => {
+                assert!((current_volume - 0.8).abs() < 0.001);
+            }
+            other => panic!("expected fading out state, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_while_playing_enters_fading_out_and_keeps_station_context() {
         let mut app = test_app();
         app.playing_url = Some("http://a".to_string());
         app.playback = PlaybackState::Playing;
+        app.volume = 80;
 
         app.stop_playback();
 
-        assert_eq!(app.playing_url, None);
-        assert_eq!(app.playback, PlaybackState::Stopped);
+        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
+        match app.playback {
+            PlaybackState::FadingOut { current_volume } => {
+                assert!((current_volume - 0.8).abs() < 0.001);
+            }
+            other => panic!("expected fading out state, got {other:?}"),
+        }
     }
 
     #[test]
