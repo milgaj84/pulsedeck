@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["full"] }
 
 # Audio playback
 rodio = { version = "0.20", features = ["symphonia-all"] }
+cpal = "0.15"
 
 # HTTP + JSON
 reqwest = { version = "0.12", features = ["json", "blocking"] }

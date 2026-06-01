@@ -1,6 +1,7 @@
 mod buffer;
 mod buffer_meter;
 mod metadata;
+mod output;
 mod recording;
 mod session;
 mod stream_reader;
@@ -10,6 +11,9 @@ use rodio::{OutputStream, Sink};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
+pub use output::{
+    list_output_device_names, output_device_display_name, DEFAULT_OUTPUT_DEVICE_LABEL,
+};
 use session::{connect_and_decode, ConnectionContext};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -23,6 +27,7 @@ pub enum AudioCommand {
     Resume,
     Stop,
     SetVolume(f32), // 0.0 — 1.0
+    SetOutputDevice(Option<String>),
     StartRecording {
         recording_dir: String,
         category: String,
@@ -96,6 +101,8 @@ fn audio_loop(
     // systems without an immediately available output device.
     let mut output_stream: Option<OutputStream> = None;
     let mut output_handle: Option<rodio::OutputStreamHandle> = None;
+    let mut preferred_output_device_name: Option<String> = None;
+    let mut reopen_output_on_next_connection = false;
 
     let mut current_sink: Option<Sink> = None;
     let mut connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>> = None;
@@ -131,6 +138,8 @@ fn audio_loop(
                     status_tx: &status_tx,
                     record_state: &record_state,
                     sample_buffer: &sample_buffer,
+                    preferred_output_device_name: &preferred_output_device_name,
+                    reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
                 },
             );
         };
@@ -179,6 +188,18 @@ fn audio_loop(
                         if let Some(ref sink) = current_sink {
                             sink.set_volume(vol);
                         }
+                    }
+                }
+                AudioCommand::SetOutputDevice(device_name) => {
+                    preferred_output_device_name =
+                        output::normalize_output_device_name(device_name.as_deref());
+
+                    if current_sink.is_some() {
+                        reopen_output_on_next_connection = true;
+                    } else {
+                        output_stream = None;
+                        output_handle = None;
+                        reopen_output_on_next_connection = false;
                     }
                 }
                 AudioCommand::StartRecording {
@@ -335,13 +356,14 @@ fn clamp_status_volume(current_volume: f32) -> f32 {
 fn ensure_output_handle(
     output_stream: &mut Option<OutputStream>,
     output_handle: &mut Option<rodio::OutputStreamHandle>,
+    preferred_output_device_name: Option<&str>,
     status_tx: &mpsc::Sender<AudioStatus>,
 ) -> Option<rodio::OutputStreamHandle> {
     if output_handle.is_none() {
-        match OutputStream::try_default() {
-            Ok((stream, handle)) => {
-                *output_stream = Some(stream);
-                *output_handle = Some(handle);
+        match output::open_output_stream(preferred_output_device_name) {
+            Ok(selection) => {
+                *output_stream = Some(selection.stream);
+                *output_handle = Some(selection.handle);
             }
             Err(err) => {
                 let _ = status_tx.send(AudioStatus::Error(format!("Soundcard error: {err}")));
@@ -362,12 +384,23 @@ struct SpawnConnectionState<'a> {
     status_tx: &'a mpsc::Sender<AudioStatus>,
     record_state: &'a Arc<RecordStateShared>,
     sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
+    preferred_output_device_name: &'a Option<String>,
+    reopen_output_on_next_connection: &'a mut bool,
 }
 
 fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
-    let Some(handle) =
-        ensure_output_handle(state.output_stream, state.output_handle, state.status_tx)
-    else {
+    if *state.reopen_output_on_next_connection {
+        *state.output_stream = None;
+        *state.output_handle = None;
+        *state.reopen_output_on_next_connection = false;
+    }
+
+    let Some(handle) = ensure_output_handle(
+        state.output_stream,
+        state.output_handle,
+        state.preferred_output_device_name.as_deref(),
+        state.status_tx,
+    ) else {
         return;
     };
 

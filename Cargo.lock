@@ -2155,6 +2155,7 @@ name = "pulsedeck"
 version = "0.1.6"
 dependencies = [
  "anyhow",
+ "cpal",
  "crossterm",
  "dirs",
  "id3",

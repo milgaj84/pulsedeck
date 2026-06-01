@@ -70,6 +70,19 @@ impl App {
                 self.library.settings.autoplay_last = !self.library.settings.autoplay_last;
                 true
             }
+            Some(SettingRow::OutputDevice) => {
+                self.library.settings.output_device_name = step_output_device_preference(
+                    self.library.settings.output_device_name.as_deref(),
+                    &available_output_device_choices(),
+                    forward,
+                );
+                self.sync_output_device();
+                self.set_info_notice(format!(
+                    "Audio output: {}",
+                    output_device_display_name(self.library.settings.output_device_name.as_deref())
+                ));
+                true
+            }
             Some(SettingRow::RecordingDir) => {
                 self.library.settings.recording_dir = step_choice(
                     &RECORDING_DIR_CHOICES,
@@ -107,6 +120,12 @@ impl App {
         }
     }
 
+    pub(super) fn sync_output_device(&self) {
+        self.audio.send(crate::audio::AudioCommand::SetOutputDevice(
+            self.library.settings.output_device_name.clone(),
+        ));
+    }
+
     fn apply_directional_setting(&mut self, forward: bool) -> bool {
         match self.selected_setting_row() {
             Some(SettingRow::MinSongDuration) => {
@@ -122,6 +141,46 @@ impl App {
             Some(_) => self.apply_selected_setting(forward),
             None => false,
         }
+    }
+}
+
+fn available_output_device_choices() -> Vec<String> {
+    let mut choices = vec![crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL.to_string()];
+    choices.extend(crate::audio::list_output_device_names());
+    choices
+}
+
+fn output_device_display_name(value: Option<&str>) -> String {
+    crate::audio::output_device_display_name(value)
+}
+
+fn step_output_device_preference(
+    current: Option<&str>,
+    choices: &[String],
+    forward: bool,
+) -> Option<String> {
+    if choices.is_empty() {
+        return None;
+    }
+
+    let current_label = output_device_display_name(current);
+    let current_index = choices
+        .iter()
+        .position(|choice| choice.eq_ignore_ascii_case(&current_label));
+
+    let next_index = match (current_index, forward) {
+        (Some(index), true) => (index + 1) % choices.len(),
+        (Some(0), false) => choices.len() - 1,
+        (Some(index), false) => index - 1,
+        (None, true) => 0,
+        (None, false) => choices.len() - 1,
+    };
+
+    let next = choices[next_index].trim();
+    if next.eq_ignore_ascii_case(crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL) {
+        None
+    } else {
+        Some(next.to_string())
     }
 }
 
@@ -324,6 +383,61 @@ mod tests {
         assert_eq!(
             nudge_min_song_duration(MIN_SONG_DURATION_MAX_SECS, true),
             MIN_SONG_DURATION_MAX_SECS
+        );
+    }
+
+    #[test]
+    fn output_device_preference_cycles_default_and_devices() {
+        let choices = vec![
+            crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL.to_string(),
+            "Built-in Speakers".to_string(),
+            "BlueZ Headphones".to_string(),
+        ];
+
+        assert_eq!(
+            step_output_device_preference(None, &choices, true).as_deref(),
+            Some("Built-in Speakers")
+        );
+        assert_eq!(
+            step_output_device_preference(Some("Built-in Speakers"), &choices, true).as_deref(),
+            Some("BlueZ Headphones")
+        );
+        assert_eq!(
+            step_output_device_preference(Some("BlueZ Headphones"), &choices, true),
+            None
+        );
+        assert_eq!(
+            step_output_device_preference(None, &choices, false).as_deref(),
+            Some("BlueZ Headphones")
+        );
+    }
+
+    #[test]
+    fn output_device_preference_handles_missing_saved_device() {
+        let choices = vec![
+            crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL.to_string(),
+            "Built-in Speakers".to_string(),
+        ];
+
+        assert_eq!(
+            step_output_device_preference(Some("Missing Bluetooth"), &choices, true),
+            None
+        );
+        assert_eq!(
+            step_output_device_preference(Some("Missing Bluetooth"), &choices, false).as_deref(),
+            Some("Built-in Speakers")
+        );
+    }
+
+    #[test]
+    fn output_device_display_name_uses_default_label_for_none() {
+        assert_eq!(
+            output_device_display_name(None),
+            crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL
+        );
+        assert_eq!(
+            output_device_display_name(Some("BlueZ Headphones")),
+            "BlueZ Headphones"
         );
     }
 

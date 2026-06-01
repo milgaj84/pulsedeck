@@ -65,6 +65,7 @@ pub enum LayoutMode {
 pub enum SettingRow {
     Notifications,
     AutoplayLast,
+    OutputDevice,
     RecordingDir,
     KeepSnippets,
     MinSongDuration,
@@ -72,9 +73,10 @@ pub enum SettingRow {
 }
 
 impl SettingRow {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Notifications,
         Self::AutoplayLast,
+        Self::OutputDevice,
         Self::RecordingDir,
         Self::KeepSnippets,
         Self::MinSongDuration,
@@ -91,10 +93,11 @@ impl SettingRow {
         match self {
             Self::Notifications => 0,
             Self::AutoplayLast => 1,
-            Self::RecordingDir => 2,
-            Self::KeepSnippets => 3,
-            Self::MinSongDuration => 4,
-            Self::Theme => 5,
+            Self::OutputDevice => 2,
+            Self::RecordingDir => 3,
+            Self::KeepSnippets => 4,
+            Self::MinSongDuration => 5,
+            Self::Theme => 6,
         }
     }
 }

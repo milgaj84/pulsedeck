@@ -44,6 +44,7 @@ impl App {
             visualizer_peaks: Vec::new(),
         };
 
+        app.sync_output_device();
         app.sync_volume();
 
         // Autoplay last played station on boot if enabled.
