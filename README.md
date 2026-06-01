@@ -189,7 +189,7 @@ Press `p` to open the **Local Tape Library**, a disk-backed browser for recordin
 - Use `Esc` while filtering to clear the local tape filter and return to the folder view.
 - Use `Ctrl+r` to rescan the recording folder without restarting.
 - Use `o` on a selected track to open its containing folder in the host file manager.
-- Use `f` or `Delete` on a selected track to move it to the OS trash, then `y` to confirm or `n` / `Esc` to cancel.
+- Use `f` or `Delete` on a selected track to request removal; confirmation moves it to the OS trash, then `y` to confirm or `n` / `Esc` to cancel.
 - When a local tape finishes, PulseDeck automatically hands off to the next recording in the same folder.
 
 Local tape playback uses the same audio output and volume controls as live streams. Recording remains limited to live streams, so pressing `r` while a local tape is active shows a friendly notice instead of trying to re-record a file.
