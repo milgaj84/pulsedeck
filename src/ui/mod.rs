@@ -9,17 +9,25 @@ pub mod stations;
 pub mod theme;
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, InputMode, LayoutMode};
+
+const MIN_REQUIRED_WIDTH: u16 = 80;
+const MIN_REQUIRED_HEIGHT: u16 = 24;
 
 /// Render the entire UI. Root layout composition.
 pub fn draw(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
-    // Fill background with pure black
-    let bg = Block::default().style(Style::default().bg(theme::bg()));
+    // Fill background with the active theme before any layout work.
+    let bg = Block::default().style(theme::clear());
     frame.render_widget(bg, size);
+
+    if is_compact_terminal(size) {
+        render_compact_terminal_warning(frame, size);
+        return;
+    }
 
     let is_searching = app.input_mode == InputMode::Search;
 
@@ -98,6 +106,41 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 }
 
+pub fn is_compact_terminal(size: Rect) -> bool {
+    size.width < MIN_REQUIRED_WIDTH || size.height < MIN_REQUIRED_HEIGHT
+}
+
+fn render_compact_terminal_warning(frame: &mut Frame, area: Rect) {
+    render_boundary_warning(
+        frame,
+        area,
+        "Console Screen Too Compact",
+        format!(
+            "Expand terminal to at least {}x{} (current: {}x{})",
+            MIN_REQUIRED_WIDTH, MIN_REQUIRED_HEIGHT, area.width, area.height
+        ),
+    );
+}
+
+pub fn render_boundary_warning(frame: &mut Frame, area: Rect, title: &str, detail: String) {
+    let diagnostic_area = centered_rect(90, 40, area);
+    let warning = Paragraph::new(vec![
+        Line::from(Span::styled(title.to_string(), theme::title())),
+        Line::from(""),
+        Line::from(Span::styled(detail, theme::dim())),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::border())
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(theme::clear()),
+    );
+
+    frame.render_widget(warning, diagnostic_area);
+}
+
 /// Render a horizontal neon separator line.
 fn render_separator(frame: &mut Frame, area: Rect) {
     let width = area.width as usize;
@@ -128,4 +171,29 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_terminal_rejects_width_below_minimum() {
+        assert!(is_compact_terminal(Rect::new(0, 0, 79, 24)));
+    }
+
+    #[test]
+    fn compact_terminal_rejects_height_below_minimum() {
+        assert!(is_compact_terminal(Rect::new(0, 0, 80, 23)));
+    }
+
+    #[test]
+    fn compact_terminal_accepts_exact_minimum() {
+        assert!(!is_compact_terminal(Rect::new(0, 0, 80, 24)));
+    }
+
+    #[test]
+    fn compact_terminal_accepts_larger_terminal() {
+        assert!(!is_compact_terminal(Rect::new(0, 0, 120, 40)));
+    }
 }

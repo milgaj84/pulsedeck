@@ -19,6 +19,13 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub(super) const HARDWARE_OUTPUT_ERROR_PREFIX: &str = "Hardware output error:";
+const MAX_HARDWARE_RECOVERY_RETRIES: u8 = 1;
+
+pub(super) fn hardware_output_error(message: impl Into<String>) -> String {
+    format!("{HARDWARE_OUTPUT_ERROR_PREFIX} {}", message.into())
+}
+
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -110,6 +117,8 @@ fn audio_loop(
     // Concurrency guard to abandon stale threads instantly
     let active_conn_id = Arc::new(AtomicU64::new(0));
     let mut current_conn_id: u64 = 0;
+    let mut current_url: Option<String> = None;
+    let mut hardware_recovery_retries: u8 = 0;
 
     // Shared thread-safe recording control state
     let record_state = Arc::new(RecordStateShared {
@@ -126,9 +135,12 @@ fn audio_loop(
     let mut pending_action: Option<AudioCommand> = None;
 
     macro_rules! spawn_connection_for {
-        ($url:expr) => {
+        ($url:expr) => {{
+            let url = $url;
+            current_url = Some(url.clone());
+            hardware_recovery_retries = 0;
             spawn_connection(
-                $url,
+                url,
                 &mut SpawnConnectionState {
                     conn_id_ref: &mut current_conn_id,
                     active_ref: &active_conn_id,
@@ -142,7 +154,29 @@ fn audio_loop(
                     reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
                 },
             );
-        };
+        }};
+    }
+
+    macro_rules! retry_connection_for {
+        ($url:expr) => {{
+            let url = $url;
+            current_url = Some(url.clone());
+            spawn_connection(
+                url,
+                &mut SpawnConnectionState {
+                    conn_id_ref: &mut current_conn_id,
+                    active_ref: &active_conn_id,
+                    connect_ref: &mut connect_thread,
+                    output_stream: &mut output_stream,
+                    output_handle: &mut output_handle,
+                    status_tx: &status_tx,
+                    record_state: &record_state,
+                    sample_buffer: &sample_buffer,
+                    preferred_output_device_name: &preferred_output_device_name,
+                    reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
+                },
+            );
+        }};
     }
 
     loop {
@@ -319,7 +353,21 @@ fn audio_loop(
                     Ok(Err(e)) => {
                         // Stale thread errors are ignored (they are "Abandoned" or cancelled)
                         if e != "Abandoned" {
-                            let _ = status_tx.send(AudioStatus::Error(e));
+                            if is_hardware_output_error(&e)
+                                && hardware_recovery_retries < MAX_HARDWARE_RECOVERY_RETRIES
+                            {
+                                hardware_recovery_retries += 1;
+                                reset_output_handle(&mut output_stream, &mut output_handle);
+                                let _ = status_tx.send(AudioStatus::Connecting);
+
+                                if let Some(url) = current_url.clone() {
+                                    retry_connection_for!(url);
+                                } else {
+                                    let _ = status_tx.send(AudioStatus::Error(e));
+                                }
+                            } else {
+                                let _ = status_tx.send(AudioStatus::Error(e));
+                            }
                         }
                     }
                     Err(_) => {
@@ -351,6 +399,18 @@ fn fade_out_next_volume(current_volume: f32) -> f32 {
 
 fn clamp_status_volume(current_volume: f32) -> f32 {
     current_volume.clamp(0.0, 1.0)
+}
+
+fn reset_output_handle(
+    output_stream: &mut Option<OutputStream>,
+    output_handle: &mut Option<rodio::OutputStreamHandle>,
+) {
+    *output_handle = None;
+    *output_stream = None;
+}
+
+fn is_hardware_output_error(error: &str) -> bool {
+    error.starts_with(HARDWARE_OUTPUT_ERROR_PREFIX)
 }
 
 fn ensure_output_handle(
@@ -445,5 +505,30 @@ mod tests {
         assert_eq!(clamp_status_volume(-0.2), 0.0);
         assert_eq!(clamp_status_volume(0.42), 0.42);
         assert_eq!(clamp_status_volume(1.4), 1.0);
+    }
+
+    #[test]
+    fn hardware_output_error_uses_recovery_prefix() {
+        let error = hardware_output_error("Sink error: stale handle");
+
+        assert!(is_hardware_output_error(&error));
+        assert!(error.contains("stale handle"));
+    }
+
+    #[test]
+    fn non_hardware_error_does_not_trigger_recovery() {
+        assert!(!is_hardware_output_error("Connection failed: timeout"));
+        assert!(!is_hardware_output_error("Decode error: unsupported"));
+    }
+
+    #[test]
+    fn reset_output_handle_accepts_empty_handles() {
+        let mut stream: Option<OutputStream> = None;
+        let mut handle: Option<rodio::OutputStreamHandle> = None;
+
+        reset_output_handle(&mut stream, &mut handle);
+
+        assert!(stream.is_none());
+        assert!(handle.is_none());
     }
 }

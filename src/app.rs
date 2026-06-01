@@ -16,7 +16,7 @@ mod visualizer;
 use crate::audio::AudioEngine;
 use crate::favorites::Library;
 use crate::radio::Station;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 pub use types::{
@@ -38,6 +38,9 @@ pub struct App {
     pub search_results: Vec<Station>,
 
     pub selected: usize,
+    normal_selected_snapshot: usize,
+    search_selected_snapshot: usize,
+    genre_selection_memory: HashMap<String, usize>,
     pub playback: PlaybackState,
     pub playing_url: Option<String>,
     pub volume: u8, // 0-100

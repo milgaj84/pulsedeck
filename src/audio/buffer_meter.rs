@@ -16,6 +16,8 @@ pub(super) struct BufferStatusMeter {
 struct BufferStatusState {
     historical_velocity: f32,
     last_consumed_at: Option<Instant>,
+    last_sent_percent: Option<u8>,
+    last_sent_seconds: Option<u32>,
 }
 
 impl BufferStatusMeter {
@@ -27,6 +29,8 @@ impl BufferStatusMeter {
             state: Mutex::new(BufferStatusState {
                 historical_velocity: fallback_velocity,
                 last_consumed_at: None,
+                last_sent_percent: None,
+                last_sent_seconds: None,
             }),
         }
     }
@@ -37,17 +41,15 @@ impl BufferStatusMeter {
         capacity: usize,
         status_tx: &mpsc::Sender<AudioStatus>,
     ) {
-        let (percent, seconds) = {
-            let state = self.state.lock().unwrap();
-            buffer_status_from_velocity(
-                len,
-                capacity,
-                state.historical_velocity,
-                self.fallback_velocity,
-            )
-        };
+        let mut state = self.state.lock().unwrap();
+        let (percent, seconds) = buffer_status_from_velocity(
+            len,
+            capacity,
+            state.historical_velocity,
+            self.fallback_velocity,
+        );
 
-        send_buffer_status(status_tx, percent, seconds);
+        send_buffer_status_if_changed(status_tx, &mut state, percent, seconds);
     }
 
     pub(super) fn record_consumed(
@@ -61,40 +63,50 @@ impl BufferStatusMeter {
             return;
         }
 
-        let (percent, seconds) = {
-            let mut state = self.state.lock().unwrap();
-            let now = Instant::now();
-            let delta_t = state
-                .last_consumed_at
-                .replace(now)
-                .map(|last| now.saturating_duration_since(last).as_secs_f32())
-                .unwrap_or(0.0);
+        let mut state = self.state.lock().unwrap();
+        let now = Instant::now();
+        let delta_t = state
+            .last_consumed_at
+            .replace(now)
+            .map(|last| now.saturating_duration_since(last).as_secs_f32())
+            .unwrap_or(0.0);
 
-            if delta_t >= MIN_MEASURED_SECONDS {
-                buffer_level_status_adaptive_with_fallback(
-                    len,
-                    capacity,
-                    &mut state.historical_velocity,
-                    bytes_read,
-                    delta_t,
-                    self.fallback_velocity,
-                )
-            } else {
-                buffer_status_from_velocity(
-                    len,
-                    capacity,
-                    state.historical_velocity,
-                    self.fallback_velocity,
-                )
-            }
+        let (percent, seconds) = if delta_t >= MIN_MEASURED_SECONDS {
+            buffer_level_status_adaptive_with_fallback(
+                len,
+                capacity,
+                &mut state.historical_velocity,
+                bytes_read,
+                delta_t,
+                self.fallback_velocity,
+            )
+        } else {
+            buffer_status_from_velocity(
+                len,
+                capacity,
+                state.historical_velocity,
+                self.fallback_velocity,
+            )
         };
 
-        send_buffer_status(status_tx, percent, seconds);
+        send_buffer_status_if_changed(status_tx, &mut state, percent, seconds);
     }
 }
 
-fn send_buffer_status(status_tx: &mpsc::Sender<AudioStatus>, percent: u8, seconds: u32) {
-    let _ = status_tx.send(AudioStatus::BufferLevel { percent, seconds });
+fn send_buffer_status_if_changed(
+    status_tx: &mpsc::Sender<AudioStatus>,
+    state: &mut BufferStatusState,
+    percent: u8,
+    seconds: u32,
+) {
+    let changed =
+        state.last_sent_percent != Some(percent) || state.last_sent_seconds != Some(seconds);
+
+    if changed {
+        state.last_sent_percent = Some(percent);
+        state.last_sent_seconds = Some(seconds);
+        let _ = status_tx.send(AudioStatus::BufferLevel { percent, seconds });
+    }
 }
 
 fn buffer_level_status_adaptive_with_fallback(
@@ -216,5 +228,57 @@ mod tests {
         assert!(first < 64_000.0);
         assert!(second > 8_000.0);
         assert!(second < first);
+    }
+
+    #[test]
+    fn buffer_status_sends_first_measurement() {
+        let meter = BufferStatusMeter::new(16_000);
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        meter.report_fill_level(160_000, 1_000_000, &tx);
+
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AudioStatus::BufferLevel {
+                percent: 16,
+                seconds: 10
+            })
+        ));
+    }
+
+    #[test]
+    fn buffer_status_suppresses_identical_measurements() {
+        let meter = BufferStatusMeter::new(16_000);
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        meter.report_fill_level(160_000, 1_000_000, &tx);
+        meter.report_fill_level(160_000, 1_000_000, &tx);
+
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn buffer_status_sends_when_percent_changes() {
+        let meter = BufferStatusMeter::new(16_000);
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        meter.report_fill_level(160_000, 1_000_000, &tx);
+        meter.report_fill_level(170_000, 1_000_000, &tx);
+
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn buffer_status_sends_when_seconds_changes() {
+        let meter = BufferStatusMeter::new(16_000);
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        meter.report_fill_level(160_000, 1_000_000, &tx);
+        meter.report_fill_level(168_000, 1_000_000, &tx);
+
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_ok());
     }
 }

@@ -4,9 +4,26 @@ use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table};
 
 use super::{critical, theme};
 
+const MIN_HELP_WIDTH: u16 = 60;
+const MIN_HELP_HEIGHT: u16 = 14;
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Keep the help compact so it still fits when terminal fonts are large.
     let popup_area = super::centered_rect(70, 60, area);
+
+    if help_area_is_compact(popup_area) {
+        frame.render_widget(Clear, popup_area);
+        super::render_boundary_warning(
+            frame,
+            popup_area,
+            "Controls Overlay Too Compact",
+            format!(
+                "Expand terminal or close help (overlay: {}x{})",
+                popup_area.width, popup_area.height
+            ),
+        );
+        return;
+    }
 
     frame.render_widget(Clear, popup_area);
 
@@ -19,7 +36,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .style(Style::default().bg(theme::bg()));
+        .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
     let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
@@ -89,6 +106,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+fn help_area_is_compact(area: Rect) -> bool {
+    area.width < MIN_HELP_WIDTH || area.height < MIN_HELP_HEIGHT
+}
+
 fn section(label: &'static str) -> Row<'static> {
     Row::new(vec![
         Cell::from(Span::styled(
@@ -106,4 +127,20 @@ fn shortcut(key: &'static str, action: &'static str) -> Row<'static> {
         Cell::from(Span::styled(key, Style::default().fg(theme::highlight()))),
         Cell::from(Span::styled(action, theme::text())),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_overlay_rejects_tiny_area() {
+        assert!(help_area_is_compact(Rect::new(0, 0, 59, 14)));
+        assert!(help_area_is_compact(Rect::new(0, 0, 60, 13)));
+    }
+
+    #[test]
+    fn help_overlay_accepts_minimum_area() {
+        assert!(!help_area_is_compact(Rect::new(0, 0, 60, 14)));
+    }
 }

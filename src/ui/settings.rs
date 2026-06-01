@@ -5,9 +5,26 @@ use crate::app::{App, SettingRow};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+const MIN_SETTINGS_WIDTH: u16 = 60;
+const MIN_SETTINGS_HEIGHT: u16 = 16;
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Elegant config popup at 54% width, 64% height to fit all setting rows
     let popup_area = super::centered_rect(54, 64, area);
+
+    if settings_area_is_compact(popup_area) {
+        frame.render_widget(Clear, popup_area);
+        super::render_boundary_warning(
+            frame,
+            popup_area,
+            "Config Console Too Compact",
+            format!(
+                "Expand terminal or close settings (overlay: {}x{})",
+                popup_area.width, popup_area.height
+            ),
+        );
+        return;
+    }
 
     // Clear background
     frame.render_widget(Clear, popup_area);
@@ -25,7 +42,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .style(Style::default().bg(theme::bg()));
+        .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
     let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
@@ -50,6 +67,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(alert_area) = alert_area {
         critical::render_engine_fault_banner(frame, alert_area, &app.playback);
     }
+}
+
+fn settings_area_is_compact(area: Rect) -> bool {
+    area.width < MIN_SETTINGS_WIDTH || area.height < MIN_SETTINGS_HEIGHT
 }
 
 fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow) {
@@ -298,5 +319,16 @@ mod tests {
         let disabled_style = selected_setting_row_style(true, active_bg);
         assert_ne!(disabled_style, active_bg);
         assert_eq!(disabled_style.bg, Some(theme::bg()));
+    }
+
+    #[test]
+    fn settings_overlay_rejects_tiny_area() {
+        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 16)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 15)));
+    }
+
+    #[test]
+    fn settings_overlay_accepts_minimum_area() {
+        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 16)));
     }
 }

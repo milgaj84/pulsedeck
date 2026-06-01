@@ -159,7 +159,8 @@ fn try_connect_and_decode_once(
 
     let source = Decoder::new(reader).map_err(|err| format!("Decode error: {err}"))?;
     let wrapped_source = VisualizerSource::new(source, context.sample_buffer);
-    let sink = Sink::try_new(handle).map_err(|err| format!("Sink error: {err}"))?;
+    let sink = Sink::try_new(handle)
+        .map_err(|err| super::hardware_output_error(format!("Sink error: {err}")))?;
 
     sink.append(wrapped_source);
 

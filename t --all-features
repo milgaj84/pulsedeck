@@ -1,0 +1,398 @@
+[1mdiff --git a/src/audio/buffer_meter.rs b/src/audio/buffer_meter.rs[m
+[1mindex 973109a..62624fe 100644[m
+[1m--- a/src/audio/buffer_meter.rs[m
+[1m+++ b/src/audio/buffer_meter.rs[m
+[36m@@ -16,6 +16,8 @@[m [mpub(super) struct BufferStatusMeter {[m
+ struct BufferStatusState {[m
+     historical_velocity: f32,[m
+     last_consumed_at: Option<Instant>,[m
+[32m+[m[32m    last_sent_percent: Option<u8>,[m
+[32m+[m[32m    last_sent_seconds: Option<u32>,[m
+ }[m
+ [m
+ impl BufferStatusMeter {[m
+[36m@@ -27,6 +29,8 @@[m [mimpl BufferStatusMeter {[m
+             state: Mutex::new(BufferStatusState {[m
+                 historical_velocity: fallback_velocity,[m
+                 last_consumed_at: None,[m
+[32m+[m[32m                last_sent_percent: None,[m
+[32m+[m[32m                last_sent_seconds: None,[m
+             }),[m
+         }[m
+     }[m
+[36m@@ -37,17 +41,15 @@[m [mimpl BufferStatusMeter {[m
+         capacity: usize,[m
+         status_tx: &mpsc::Sender<AudioStatus>,[m
+     ) {[m
+[31m-        let (percent, seconds) = {[m
+[31m-            let state = self.state.lock().unwrap();[m
+[31m-            buffer_status_from_velocity([m
+[31m-                len,[m
+[31m-                capacity,[m
+[31m-                state.historical_velocity,[m
+[31m-                self.fallback_velocity,[m
+[31m-            )[m
+[31m-        };[m
+[32m+[m[32m        let mut state = self.state.lock().unwrap();[m
+[32m+[m[32m        let (percent, seconds) = buffer_status_from_velocity([m
+[32m+[m[32m            len,[m
+[32m+[m[32m            capacity,[m
+[32m+[m[32m            state.historical_velocity,[m
+[32m+[m[32m            self.fallback_velocity,[m
+[32m+[m[32m        );[m
+ [m
+[31m-        send_buffer_status(status_tx, percent, seconds);[m
+[32m+[m[32m        send_buffer_status_if_changed(status_tx, &mut state, percent, seconds);[m
+     }[m
+ [m
+     pub(super) fn record_consumed([m
+[36m@@ -61,40 +63,50 @@[m [mimpl BufferStatusMeter {[m
+             return;[m
+         }[m
+ [m
+[31m-        let (percent, seconds) = {[m
+[31m-            let mut state = self.state.lock().unwrap();[m
+[31m-            let now = Instant::now();[m
+[31m-            let delta_t = state[m
+[31m-                .last_consumed_at[m
+[31m-                .replace(now)[m
+[31m-                .map(|last| now.saturating_duration_since(last).as_secs_f32())[m
+[31m-                .unwrap_or(0.0);[m
+[31m-[m
+[31m-            if delta_t >= MIN_MEASURED_SECONDS {[m
+[31m-                buffer_level_status_adaptive_with_fallback([m
+[31m-                    len,[m
+[31m-                    capacity,[m
+[31m-                    &mut state.historical_velocity,[m
+[31m-                    bytes_read,[m
+[31m-                    delta_t,[m
+[31m-                    self.fallback_velocity,[m
+[31m-                )[m
+[31m-            } else {[m
+[31m-                buffer_status_from_velocity([m
+[31m-                    len,[m
+[31m-                    capacity,[m
+[31m-                    state.historical_velocity,[m
+[31m-                    self.fallback_velocity,[m
+[31m-                )[m
+[31m-            }[m
+[32m+[m[32m        let mut state = self.state.lock().unwrap();[m
+[32m+[m[32m        let now = Instant::now();[m
+[32m+[m[32m        let delta_t = state[m
+[32m+[m[32m            .last_consumed_at[m
+[32m+[m[32m            .replace(now)[m
+[32m+[m[32m            .map(|last| now.saturating_duration_since(last).as_secs_f32())[m
+[32m+[m[32m            .unwrap_or(0.0);[m
+[32m+[m
+[32m+[m[32m        let (percent, seconds) = if delta_t >= MIN_MEASURED_SECONDS {[m
+[32m+[m[32m            buffer_level_status_adaptive_with_fallback([m
+[32m+[m[32m                len,[m
+[32m+[m[32m                capacity,[m
+[32m+[m[32m                &mut state.historical_velocity,[m
+[32m+[m[32m                bytes_read,[m
+[32m+[m[32m                delta_t,[m
+[32m+[m[32m                self.fallback_velocity,[m
+[32m+[m[32m            )[m
+[32m+[m[32m        } else {[m
+[32m+[m[32m            buffer_status_from_velocity([m
+[32m+[m[32m                len,[m
+[32m+[m[32m                capacity,[m
+[32m+[m[32m                state.historical_velocity,[m
+[32m+[m[32m                self.fallback_velocity,[m
+[32m+[m[32m            )[m
+         };[m
+ [m
+[31m-        send_buffer_status(status_tx, percent, seconds);[m
+[32m+[m[32m        send_buffer_status_if_changed(status_tx, &mut state, percent, seconds);[m
+     }[m
+ }[m
+ [m
+[31m-fn send_buffer_status(status_tx: &mpsc::Sender<AudioStatus>, percent: u8, seconds: u32) {[m
+[31m-    let _ = status_tx.send(AudioStatus::BufferLevel { percent, seconds });[m
+[32m+[m[32mfn send_buffer_status_if_changed([m
+[32m+[m[32m    status_tx: &mpsc::Sender<AudioStatus>,[m
+[32m+[m[32m    state: &mut BufferStatusState,[m
+[32m+[m[32m    percent: u8,[m
+[32m+[m[32m    seconds: u32,[m
+[32m+[m[32m) {[m
+[32m+[m[32m    let changed =[m
+[32m+[m[32m        state.last_sent_percent != Some(percent) || state.last_sent_seconds != Some(seconds);[m
+[32m+[m
+[32m+[m[32m    if changed {[m
+[32m+[m[32m        state.last_sent_percent = Some(percent);[m
+[32m+[m[32m        state.last_sent_seconds = Some(seconds);[m
+[32m+[m[32m        let _ = status_tx.send(AudioStatus::BufferLevel { percent, seconds });[m
+[32m+[m[32m    }[m
+ }[m
+ [m
+ fn buffer_level_status_adaptive_with_fallback([m
+[36m@@ -217,4 +229,56 @@[m [mmod tests {[m
+         assert!(second > 8_000.0);[m
+         assert!(second < first);[m
+     }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn buffer_status_sends_first_measurement() {[m
+[32m+[m[32m        let meter = BufferStatusMeter::new(16_000);[m
+[32m+[m[32m        let (tx, rx) = std::sync::mpsc::channel();[m
+[32m+[m
+[32m+[m[32m        meter.report_fill_level(160_000, 1_000_000, &tx);[m
+[32m+[m
+[32m+[m[32m        assert!(matches!([m
+[32m+[m[32m            rx.try_recv(),[m
+[32m+[m[32m            Ok(AudioStatus::BufferLevel {[m
+[32m+[m[32m                percent: 16,[m
+[32m+[m[32m                seconds: 10[m
+[32m+[m[32m            })[m
+[32m+[m[32m        ));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn buffer_status_suppresses_identical_measurements() {[m
+[32m+[m[32m        let meter = BufferStatusMeter::new(16_000);[m
+[32m+[m[32m        let (tx, rx) = std::sync::mpsc::channel();[m
+[32m+[m
+[32m+[m[32m        meter.report_fill_level(160_000, 1_000_000, &tx);[m
+[32m+[m[32m        meter.report_fill_level(160_000, 1_000_000, &tx);[m
+[32m+[m
+[32m+[m[32m        assert!(rx.try_recv().is_ok());[m
+[32m+[m[32m        assert!(rx.try_recv().is_err());[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn buffer_status_sends_when_percent_changes() {[m
+[32m+[m[32m        let meter = BufferStatusMeter::new(16_000);[m
+[32m+[m[32m        let (tx, rx) = std::sync::mpsc::channel();[m
+[32m+[m
+[32m+[m[32m        meter.report_fill_level(160_000, 1_000_000, &tx);[m
+[32m+[m[32m        meter.report_fill_level(170_000, 1_000_000, &tx);[m
+[32m+[m
+[32m+[m[32m        assert!(rx.try_recv().is_ok());[m
+[32m+[m[32m        assert!(rx.try_recv().is_ok());[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn buffer_status_sends_when_seconds_changes() {[m
+[32m+[m[32m        let meter = BufferStatusMeter::new(16_000);[m
+[32m+[m[32m        let (tx, rx) = std::sync::mpsc::channel();[m
+[32m+[m
+[32m+[m[32m        meter.report_fill_level(160_000, 1_000_000, &tx);[m
+[32m+[m[32m        meter.report_fill_level(168_000, 1_000_000, &tx);[m
+[32m+[m
+[32m+[m[32m        assert!(rx.try_recv().is_ok());[m
+[32m+[m[32m        assert!(rx.try_recv().is_ok());[m
+[32m+[m[32m    }[m
+ }[m
+[1mdiff --git a/src/ui/mod.rs b/src/ui/mod.rs[m
+[1mindex 26719ce..dfaee5e 100644[m
+[1m--- a/src/ui/mod.rs[m
+[1m+++ b/src/ui/mod.rs[m
+[36m@@ -9,18 +9,26 @@[m [mpub mod stations;[m
+ pub mod theme;[m
+ [m
+ use ratatui::prelude::*;[m
+[31m-use ratatui::widgets::{Block, Paragraph};[m
+[32m+[m[32muse ratatui::widgets::{Block, Borders, Paragraph};[m
+ [m
+ use crate::app::{App, InputMode, LayoutMode};[m
+ [m
+[32m+[m[32mconst MIN_REQUIRED_WIDTH: u16 = 80;[m
+[32m+[m[32mconst MIN_REQUIRED_HEIGHT: u16 = 24;[m
+[32m+[m
+ /// Render the entire UI. Root layout composition.[m
+ pub fn draw(frame: &mut Frame, app: &App) {[m
+     let size = frame.area();[m
+ [m
+[31m-    // Fill background with pure black[m
+[31m-    let bg = Block::default().style(Style::default().bg(theme::bg()));[m
+[32m+[m[32m    // Fill background with the active theme before any layout work.[m
+[32m+[m[32m    let bg = Block::default().style(theme::clear());[m
+     frame.render_widget(bg, size);[m
+ [m
+[32m+[m[32m    if is_compact_terminal(size) {[m
+[32m+[m[32m        render_compact_terminal_warning(frame, size);[m
+[32m+[m[32m        return;[m
+[32m+[m[32m    }[m
+[32m+[m
+     let is_searching = app.input_mode == InputMode::Search;[m
+ [m
+     // Main vertical layout: header | separator | main content split | separator | controls[m
+[36m@@ -129,3 +137,28 @@[m [mpub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {[m
+         ])[m
+         .split(popup_layout[1])[1][m
+ }[m
+[32m+[m
+[32m+[m[32m#[cfg(test)][m
+[32m+[m[32mmod tests {[m
+[32m+[m[32m    use super::*;[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn compact_terminal_rejects_width_below_minimum() {[m
+[32m+[m[32m        assert!(is_compact_terminal(Rect::new(0, 0, 79, 24)));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn compact_terminal_rejects_height_below_minimum() {[m
+[32m+[m[32m        assert!(is_compact_terminal(Rect::new(0, 0, 80, 23)));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn compact_terminal_accepts_exact_minimum() {[m
+[32m+[m[32m        assert!(!is_compact_terminal(Rect::new(0, 0, 80, 24)));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn compact_terminal_accepts_larger_terminal() {[m
+[32m+[m[32m        assert!(!is_compact_terminal(Rect::new(0, 0, 120, 40)));[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[1mdiff --git a/src/ui/stations.rs b/src/ui/stations.rs[m
+[1mindex 367dde4..bf26025 100644[m
+[1m--- a/src/ui/stations.rs[m
+[1m+++ b/src/ui/stations.rs[m
+[36m@@ -94,7 +94,12 @@[m [mpub fn render(frame: &mut Frame, area: Rect, app: &App) {[m
+             let fixed_width =[m
+                 visible_len(cursor) + visible_len(save_marker) + visible_len(&meta_chip) + 2;[m
+             let name_width = row_width.saturating_sub(fixed_width).max(8);[m
+[31m-            let name = truncate_with_ellipsis(station.name.as_str(), name_width);[m
+[32m+[m[32m            let search_query = if app.input_mode == InputMode::Search {[m
+[32m+[m[32m                Some(app.search_query.as_str())[m
+[32m+[m[32m            } else {[m
+[32m+[m[32m                None[m
+[32m+[m[32m            };[m
+[32m+[m[32m            let name = truncate_station_name(station.name.as_str(), search_query, name_width);[m
+             let padding = row_width.saturating_sub([m
+                 visible_len(cursor)[m
+                     + visible_len(save_marker)[m
+[36m@@ -121,7 +126,7 @@[m [mpub fn render(frame: &mut Frame, area: Rect, app: &App) {[m
+                 .borders(Borders::ALL)[m
+                 .border_style(theme::border())[m
+                 .border_type(ratatui::widgets::BorderType::Rounded)[m
+[31m-                .style(Style::default().bg(theme::bg())),[m
+[32m+[m[32m                .style(theme::clear()),[m
+         )[m
+         .highlight_style(theme::selected())[m
+         .highlight_symbol("");[m
+[36m@@ -202,6 +207,69 @@[m [mfn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {[m
+     }[m
+ }[m
+ [m
+[32m+[m[32mfn truncate_station_name(value: &str, query: Option<&str>, max_chars: usize) -> String {[m
+[32m+[m[32m    match query.map(str::trim).filter(|query| !query.is_empty()) {[m
+[32m+[m[32m        Some(query) => adaptive_search_truncate(value, query, max_chars),[m
+[32m+[m[32m        None => truncate_with_ellipsis(value, max_chars),[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> String {[m
+[32m+[m[32m    let value_len = visible_len(value);[m
+[32m+[m[32m    if value_len <= max_chars {[m
+[32m+[m[32m        return value.to_string();[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if max_chars <= 1 {[m
+[32m+[m[32m        return "…".to_string();[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    let Some(match_start) = find_case_insensitive_char_index(value, query) else {[m
+[32m+[m[32m        return truncate_with_ellipsis(value, max_chars);[m
+[32m+[m[32m    };[m
+[32m+[m
+[32m+[m[32m    if match_start < max_chars.saturating_sub(1) {[m
+[32m+[m[32m        return truncate_with_ellipsis(value, max_chars);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    let available = max_chars.saturating_sub(2);[m
+[32m+[m[32m    if available == 0 {[m
+[32m+[m[32m        return "…".to_string();[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    let query_len = visible_len(query).max(1);[m
+[32m+[m[32m    let context_before = available.saturating_sub(query_len) / 2;[m
+[32m+[m[32m    let start = match_start[m
+[32m+[m[32m        .saturating_sub(context_before)[m
+[32m+[m[32m        .min(value_len.saturating_sub(available));[m
+[32m+[m[32m    let end = start + available;[m
+[32m+[m
+[32m+[m[32m    if start == 0 {[m
+[32m+[m[32m        return truncate_with_ellipsis(value, max_chars);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if end >= value_len {[m
+[32m+[m[32m        let tail_width = max_chars.saturating_sub(1);[m
+[32m+[m[32m        let tail_start = value_len.saturating_sub(tail_width);[m
+[32m+[m[32m        let tail = value.chars().skip(tail_start).collect::<String>();[m
+[32m+[m[32m        return format!("…{tail}");[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    let window = value[m
+[32m+[m[32m        .chars()[m
+[32m+[m[32m        .skip(start)[m
+[32m+[m[32m        .take(available)[m
+[32m+[m[32m        .collect::<String>();[m
+[32m+[m[32m    format!("…{window}…")[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfn find_case_insensitive_char_index(value: &str, query: &str) -> Option<usize> {[m
+[32m+[m[32m    let value_lower = value.to_lowercase();[m
+[32m+[m[32m    let query_lower = query.to_lowercase();[m
+[32m+[m[32m    let byte_index = value_lower.find(&query_lower)?;[m
+[32m+[m[32m    Some(value_lower[..byte_index].chars().count())[m
+[32m+[m[32m}[m
+[32m+[m
+ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {[m
+     let value_len = visible_len(value);[m
+     if value_len <= max_chars {[m
+[36m@@ -253,4 +321,52 @@[m [mmod tests {[m
+             "US · 128k"[m
+         );[m
+     }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_keeps_matching_suffix_visible() {[m
+[32m+[m[32m        let truncated = truncate_station_name([m
+[32m+[m[32m            "SomaFM Deep Space One Underground 80s",[m
+[32m+[m[32m            Some("Underground"),[m
+[32m+[m[32m            18,[m
+[32m+[m[32m        );[m
+[32m+[m
+[32m+[m[32m        assert!(truncated.starts_with('…'));[m
+[32m+[m[32m        assert!(truncated.contains("Underground"));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_keeps_matching_tail_visible() {[m
+[32m+[m[32m        let truncated = truncate_station_name("SomaFM Deep Space One", Some("Space One"), 12);[m
+[32m+[m
+[32m+[m[32m        assert!(truncated.starts_with('…'));[m
+[32m+[m[32m        assert!(truncated.contains("Space One"));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_falls_back_when_query_is_blank() {[m
+[32m+[m[32m        assert_eq!([m
+[32m+[m[32m            truncate_station_name("SomaFM Deep Space One", Some("   "), 10),[m
+[32m+[m[32m            "SomaFM De…"[m
+[32m+[m[32m        );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_falls_back_when_query_is_missing() {[m
+[32m+[m[32m        assert_eq!([m
+[32m+[m[32m            truncate_station_name("SomaFM Deep Space One", Some("jazz"), 10),[m
+[32m+[m[32m            "SomaFM De…"[m
+[32m+[m[32m        );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_handles_tiny_width() {[m
+[32m+[m[32m        assert_eq!(truncate_station_name("SomaFM", Some("fm"), 1), "…");[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    #[test][m
+[32m+[m[32m    fn search_truncation_is_unicode_safe() {[m
+[32m+[m[32m        let truncated = truncate_station_name("São Paulo Rádio Underground", Some("rádio"), 10);[m
+[32m+[m
+[32m+[m[32m        assert!(truncated.contains("Rádio"));[m
+[32m+[m[32m    }[m
+ }[m
