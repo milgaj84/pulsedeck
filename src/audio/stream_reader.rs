@@ -30,28 +30,32 @@ pub(super) struct StreamReader {
     active_track_start_time: Option<std::time::Instant>,
 }
 
+pub(super) struct StreamReaderConfig {
+    pub(super) url: String,
+    pub(super) queue: Arc<BufferQueue>,
+    pub(super) buffer_meter: Arc<BufferStatusMeter>,
+    pub(super) status_tx: mpsc::Sender<AudioStatus>,
+    pub(super) conn_id: u64,
+    pub(super) active_conn_id: Arc<AtomicU64>,
+    pub(super) record_state: Arc<RecordStateShared>,
+    pub(super) metaint: Option<usize>,
+}
+
 impl StreamReader {
-    pub(super) fn new(
-        url: String,
-        queue: Arc<BufferQueue>,
-        buffer_meter: Arc<BufferStatusMeter>,
-        status_tx: mpsc::Sender<AudioStatus>,
-        conn_id: u64,
-        active_conn_id: Arc<AtomicU64>,
-        record_state: Arc<RecordStateShared>,
-        metaint: Option<usize>,
-    ) -> Self {
+    pub(super) fn new(config: StreamReaderConfig) -> Self {
+        let bytes_until_meta = config.metaint.unwrap_or(0);
+
         Self {
-            url,
-            queue,
-            buffer_meter,
+            url: config.url,
+            queue: config.queue,
+            buffer_meter: config.buffer_meter,
             pos: 0,
-            metaint,
-            bytes_until_meta: metaint.unwrap_or(0),
-            status_tx,
-            conn_id,
-            active_conn_id,
-            record_state,
+            metaint: config.metaint,
+            bytes_until_meta,
+            status_tx: config.status_tx,
+            conn_id: config.conn_id,
+            active_conn_id: config.active_conn_id,
+            record_state: config.record_state,
             active_writer: None,
             active_file_path: None,
             active_track_title: None,

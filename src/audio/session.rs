@@ -1,6 +1,6 @@
 use super::buffer::BufferQueue;
 use super::buffer_meter::BufferStatusMeter;
-use super::stream_reader::StreamReader;
+use super::stream_reader::{StreamReader, StreamReaderConfig};
 use super::visualizer::VisualizerSource;
 use super::{AudioStatus, RecordStateShared};
 
@@ -146,16 +146,16 @@ fn try_connect_and_decode_once(
         }
     });
 
-    let reader = StreamReader::new(
-        url.to_string(),
+    let reader = StreamReader::new(StreamReaderConfig {
+        url: url.to_string(),
         queue,
         buffer_meter,
-        context.status_tx,
-        context.conn_id,
-        context.active_conn_id,
-        context.record_state,
+        status_tx: context.status_tx,
+        conn_id: context.conn_id,
+        active_conn_id: context.active_conn_id,
+        record_state: context.record_state,
         metaint,
-    );
+    });
 
     let source = Decoder::new(reader).map_err(|err| format!("Decode error: {err}"))?;
     let wrapped_source = VisualizerSource::new(source, context.sample_buffer);
