@@ -43,6 +43,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .collect::<String>();
             Span::styled(format!("  Search failed: {}", message), theme::error())
         }
+        SearchStatus::StaleResponseDiscarded {
+            query,
+            received_stale,
+        } => Span::styled(
+            stale_response_text(query, received_stale),
+            Style::default().fg(theme::warm()),
+        ),
     };
 
     let spans = vec![
@@ -71,6 +78,26 @@ fn search_debounce_frame(tick_count: u64) -> &'static str {
     SEARCH_DEBOUNCE_FRAMES[tick_count as usize % SEARCH_DEBOUNCE_FRAMES.len()]
 }
 
+fn stale_response_text(query: &str, received_stale: &str) -> String {
+    format!(
+        "  ⊘ discarded stale {}; {} is current",
+        compact_search_label(received_stale),
+        compact_search_label(query)
+    )
+}
+
+fn compact_search_label(value: &str) -> String {
+    const MAX_CHARS: usize = 24;
+    let mut chars = value.chars();
+
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +116,20 @@ mod tests {
 
         assert_eq!(text, "  ⠹ initializing query for lofi...");
         assert!(!text.contains("soon"));
+    }
+
+    #[test]
+    fn stale_response_text_reports_discarded_query() {
+        let text = stale_response_text("jazz", "synth");
+
+        assert_eq!(text, "  ⊘ discarded stale synth; jazz is current");
+    }
+
+    #[test]
+    fn compact_search_label_truncates_long_queries() {
+        assert_eq!(
+            compact_search_label("abcdefghijklmnopqrstuvwxyz"),
+            "abcdefghijklmnopqrstuvwx…"
+        );
     }
 }

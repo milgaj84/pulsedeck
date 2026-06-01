@@ -117,12 +117,17 @@ impl App {
         query: String,
         result: Result<Vec<Station>, String>,
     ) -> bool {
-        let current_query = self.search_query.trim();
+        let current_query = self.search_query.trim().to_string();
         let is_current_search = self.input_mode == InputMode::Search
             && current_query == query
-            && matches!(&self.search_status, SearchStatus::Searching { query: q } if q == &query);
+            && matches!(
+                &self.search_status,
+                SearchStatus::Searching { query: q }
+                    | SearchStatus::StaleResponseDiscarded { query: q, .. } if q == &query
+            );
 
         if !is_current_search {
+            self.note_stale_search_response(&current_query, query);
             return false;
         }
 
@@ -147,6 +152,25 @@ impl App {
         true
     }
 
+    fn note_stale_search_response(&mut self, current_query: &str, received_stale: String) {
+        if self.input_mode != InputMode::Search
+            || current_query.chars().count() < types::SEARCH_MIN_CHARS
+            || current_query == received_stale
+        {
+            return;
+        }
+
+        self.searching_api = matches!(
+            &self.search_status,
+            SearchStatus::Searching { query }
+                | SearchStatus::StaleResponseDiscarded { query, .. } if query == current_query
+        );
+        self.search_status = SearchStatus::StaleResponseDiscarded {
+            query: current_query.to_string(),
+            received_stale,
+        };
+    }
+
     pub(super) fn refresh_search_state(&mut self) {
         let query = self.search_query.trim().to_string();
 
@@ -165,7 +189,8 @@ impl App {
                 | SearchStatus::Searching { query: q }
                 | SearchStatus::Ready { query: q }
                 | SearchStatus::Empty { query: q }
-                | SearchStatus::Error { query: q, .. } if q == &query
+                | SearchStatus::Error { query: q, .. }
+                | SearchStatus::StaleResponseDiscarded { query: q, .. } if q == &query
         );
 
         if is_already_current {
@@ -325,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_search_response_is_ignored() {
+    fn stale_search_response_is_reported_without_overwriting_results() {
         let mut app = test_app();
         app.update(Action::EnterSearch);
         app.update(Action::SearchInput('l'));
@@ -341,10 +366,72 @@ mod tests {
 
         assert!(!accepted);
         assert!(app.search_results.is_empty());
+        assert!(app.searching_api);
         assert_eq!(
             app.search_status,
-            SearchStatus::Searching {
-                query: "lofi".to_string()
+            SearchStatus::StaleResponseDiscarded {
+                query: "lofi".to_string(),
+                received_stale: "lo".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn current_response_is_accepted_after_stale_response_notice() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('j'));
+        app.update(Action::SearchInput('a'));
+        app.update(Action::SearchInput('z'));
+        app.update(Action::SearchInput('z'));
+        app.mark_search_started("jazz");
+
+        assert!(!app.apply_search_response("synth".to_string(), Ok(vec![])));
+
+        let accepted = app.apply_search_response(
+            "jazz".to_string(),
+            Ok(vec![station("Jazz Radio", "http://jazz")]),
+        );
+
+        assert!(accepted);
+        assert_eq!(app.search_results.len(), 1);
+        assert_eq!(
+            app.search_status,
+            SearchStatus::Ready {
+                query: "jazz".to_string()
+            }
+        );
+        assert!(!app.searching_api);
+    }
+
+    #[test]
+    fn late_stale_response_after_ready_keeps_results_and_reports_discard() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.update(Action::SearchInput('j'));
+        app.update(Action::SearchInput('a'));
+        app.update(Action::SearchInput('z'));
+        app.update(Action::SearchInput('z'));
+        app.mark_search_started("jazz");
+        assert!(app.apply_search_response(
+            "jazz".to_string(),
+            Ok(vec![station("Jazz Radio", "http://jazz")]),
+        ));
+
+        let accepted = app.apply_search_response(
+            "synth".to_string(),
+            Ok(vec![station("Synth Radio", "http://synth")]),
+        );
+
+        assert!(!accepted);
+        assert_eq!(app.search_results.len(), 1);
+        assert_eq!(app.search_results[0].url, "http://jazz");
+        assert!(!app.searching_api);
+        assert_eq!(
+            app.search_status,
+            SearchStatus::StaleResponseDiscarded {
+                query: "jazz".to_string(),
+                received_stale: "synth".to_string()
             }
         );
     }
