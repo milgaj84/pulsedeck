@@ -1,4 +1,5 @@
 pub mod controls;
+pub mod critical;
 pub mod deck;
 pub mod header;
 pub mod help;

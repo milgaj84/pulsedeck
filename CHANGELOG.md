@@ -10,6 +10,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 
 ### Improved
+*   **Overlay Critical Engine Alerts**: Mirrored playback engine errors inside help and settings overlays so stream failures remain visible even when modal screens cover the dashboard.
 *   **Search Stale Response Telemetry**: Added a visible stale-response discard state so late async search payloads identify the ignored query instead of silently disappearing from the search bar.
 *   **Adaptive Buffer Timing**: Replaced static bitrate-only buffer seconds with an EWMA consumption meter driven by real bytes popped from the playback queue, reducing VBR and burst-network status jitter.
 *   **Treble Texture Spectrum Response**: Replaced the hard high-frequency gain shelf with a soft-knee curve and variance-aware treble expansion so crisp hats and synth arpeggios keep visual texture without reviving noisy final-band spikes.
