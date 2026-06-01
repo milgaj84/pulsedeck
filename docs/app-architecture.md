@@ -21,6 +21,26 @@ PulseDeck routes input through a small action pipeline:
 - `src/app/visualizer.rs` owns FFT and visualizer peak updates.
 - `src/app/idle.rs` owns platform-specific user idle detection for notifications.
 
+## UI boundary rendering
+
+`src/ui/mod.rs` owns the root terminal-size gate. When the frame is below the supported 80x24 minimum, PulseDeck renders a small diagnostic panel and skips deck, station, footer, help, and settings composition. Help and settings also have local overlay-size guards so modal layouts do not draw broken borders inside cramped popup rectangles.
+
+## Theme styling
+
+Full-screen clears and overlay canvas blocks must use semantic helpers from `src/ui/theme.rs`, especially `theme::clear()`. Raw background colors belong inside palette definitions only, so Catppuccin Latte and dark themes share the same rendering path.
+
+## Audio status flow
+
+The audio thread sends high-level `AudioStatus` messages into the app. Buffer telemetry is low-priority and is deduplicated in `src/audio/buffer_meter.rs` before it enters the channel, preventing repeated identical fill-level packets from delaying more important playback state changes.
+
+## Audio output recovery
+
+`src/audio.rs` owns output-stream handles and connection retries. Hardware-style sink failures are tagged with a dedicated prefix, stale output handles are dropped, and the active URL gets one guarded retry. Network and decode failures do not enter the hardware recovery path.
+
+## Selection context
+
+`App::selected` remains the visible cursor index, while app state also tracks normal/search snapshots and per-genre library cursor memory. Entering search preserves the library cursor, leaving search restores it, and genre changes restore the last row visited in that category when possible.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

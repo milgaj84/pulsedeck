@@ -6,6 +6,17 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+*   **Compact Terminal Boundary Guard**: Added a root 80x24 terminal-size safety gate with a centered diagnostic screen before complex deck, station, help, or settings rendering runs.
+*   **Search-Aware Name Truncation**: Added adaptive station-name truncation that pivots around the active search term when long result names would otherwise hide the match.
+*   **Audio Output Recovery Retry**: Added a guarded one-shot recovery path for hardware-style sink failures by dropping stale output handles and retrying the current stream.
+
+### Improved
+*   **Theme-Safe Clear Styling**: Routed root and overlay clear blocks through the semantic theme palette so light and dark themes keep consistent contrast.
+*   **Buffer Status Backpressure**: Suppressed duplicate buffer-level status packets before they cross into the UI status queue.
+*   **Selection Context Preservation**: Preserved library selection across search mode and remembered cursor position per genre category.
+*   **Overlay Boundary Fallbacks**: Added compact fallback diagnostics for cramped help and settings overlays.
+
 ---
 
 ## [0.1.7] - 2026-06-01

@@ -3,6 +3,8 @@ use crate::audio::AudioCommand;
 
 impl App {
     pub(super) fn enter_search(&mut self) {
+        self.remember_current_genre_selection();
+        self.normal_selected_snapshot = self.selected;
         self.input_mode = InputMode::Search;
         self.search_query.clear();
         self.search_results.clear();
@@ -10,10 +12,11 @@ impl App {
         self.search_status = SearchStatus::WaitingForInput;
         self.searching_api = false;
         self.pending_api_search = None;
-        self.selected = 0;
+        self.selected = clamped_index(self.search_selected_snapshot, self.search_results.len());
     }
 
     pub(super) fn exit_search(&mut self) {
+        self.search_selected_snapshot = self.selected;
         self.input_mode = InputMode::Normal;
         self.search_query.clear();
         self.search_results.clear();
@@ -21,8 +24,7 @@ impl App {
         self.search_status = SearchStatus::WaitingForInput;
         self.searching_api = false;
         self.pending_api_search = None;
-        self.selected = 0;
-        self.select_playing();
+        self.restore_normal_selection_snapshot();
     }
 
     pub(super) fn search_input(&mut self, c: char) {
@@ -37,7 +39,7 @@ impl App {
 
     pub(super) fn confirm_search(&mut self) {
         // Add the selected search result to library and play it.
-        if let Some(station) = self.search_results.get(self.selected).cloned() {
+        let played = if let Some(station) = self.search_results.get(self.selected).cloned() {
             match self.library.add(station.clone()) {
                 Ok(true) => self.set_info_notice("Station saved to library"),
                 Ok(false) => {}
@@ -53,9 +55,15 @@ impl App {
 
             self.audio.send(AudioCommand::Play(station.url));
             self.sync_volume();
-        }
+            true
+        } else {
+            false
+        };
 
         self.exit_search();
+        if played {
+            self.select_playing();
+        }
     }
 
     pub(super) fn audition_search_result(&mut self) {
@@ -132,6 +140,7 @@ impl App {
         }
 
         self.searching_api = false;
+        self.search_selected_snapshot = 0;
         self.selected = 0;
 
         match result {
@@ -176,6 +185,7 @@ impl App {
 
         if query.chars().count() < types::SEARCH_MIN_CHARS {
             self.search_results.clear();
+            self.search_selected_snapshot = 0;
             self.selected = 0;
             self.searching_api = false;
             self.pending_api_search = None;
@@ -198,10 +208,28 @@ impl App {
         }
 
         self.search_results.clear();
+        self.search_selected_snapshot = 0;
         self.selected = 0;
         self.searching_api = false;
         self.pending_api_search = None;
         self.search_status = SearchStatus::Debouncing { query };
+    }
+
+    fn restore_normal_selection_snapshot(&mut self) {
+        let count = self.visible_count();
+        if count == 0 {
+            self.selected = 0;
+        } else {
+            self.selected = self.normal_selected_snapshot.min(count - 1);
+        }
+    }
+}
+
+fn clamped_index(index: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        index.min(len - 1)
     }
 }
 
@@ -514,5 +542,48 @@ mod tests {
         assert_eq!(app.input_mode, InputMode::Normal);
         assert_eq!(app.playing_url, None);
         assert!(app.search_results.is_empty());
+    }
+
+    #[test]
+    fn exit_search_restores_library_selection_snapshot() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Library A", "http://library-a"),
+            station("Library B", "http://library-b"),
+        ]));
+        app.selected = 1;
+
+        app.update(Action::EnterSearch);
+        app.search_results = vec![station("Search A", "http://search-a")];
+        app.selected = 0;
+        app.update(Action::ExitSearch);
+
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.visible_stations()[app.selected].url, "http://library-b");
+    }
+
+    #[test]
+    fn search_response_resets_search_selection_snapshot() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search_selected_snapshot = 4;
+        app.update(Action::SearchInput('l'));
+        app.update(Action::SearchInput('o'));
+        app.mark_search_started("lo");
+
+        assert!(app.apply_search_response(
+            "lo".to_string(),
+            Ok(vec![station("Lo-Fi Radio", "http://lofi")]),
+        ));
+
+        assert_eq!(app.selected, 0);
+        assert_eq!(app.search_selected_snapshot, 0);
+    }
+
+    #[test]
+    fn clamped_index_handles_empty_and_short_lists() {
+        assert_eq!(clamped_index(5, 0), 0);
+        assert_eq!(clamped_index(5, 2), 1);
+        assert_eq!(clamped_index(1, 2), 1);
     }
 }

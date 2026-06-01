@@ -236,6 +236,13 @@ fn active() -> ThemePalette {
 pub fn bg() -> Color {
     active().bg
 }
+
+/// Full-screen and overlay clear style routed through the active theme.
+pub fn clear() -> Style {
+    let p = active();
+    Style::default().bg(p.bg)
+}
+
 pub fn surface_color() -> Color {
     active().surface
 }
@@ -367,5 +374,12 @@ mod tests {
         for &theme in ThemeName::ALL {
             assert!(!theme.label().is_empty());
         }
+    }
+
+    #[test]
+    fn clear_style_uses_active_palette_background() {
+        set_active(ThemeName::CatppuccinLatte);
+
+        assert_eq!(clear().bg, Some(ThemeName::CatppuccinLatte.palette().bg));
     }
 }

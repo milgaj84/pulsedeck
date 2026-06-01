@@ -46,6 +46,8 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 💾 **Favorites & history** — your stations are remembered between sessions, the station list shows compact country/bitrate metadata, and the last-played station can auto-resume on launch
 - 🔔 **Desktop notifications** — a silent system notification shows the current track when a new song starts
 - 🎛️ **Resilient streaming** — a circular buffer absorbs network hiccups, with adaptive EWMA buffer timing that stays calmer on VBR streams and bursty networks
+- 🖥️ **Compact-screen protection** — terminal windows below 80x24 show a clean diagnostic instead of letting deck art and list borders collapse into visual static
+- 🔁 **Audio output recovery** — default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
 
 ---
 
@@ -126,7 +128,7 @@ While in search, plain printable characters continue to edit the query. Use the 
 4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
 5. Press `Esc` instead to leave search without adding anything.
 
-Search results show saved stations with a star and include compact genre/country/bitrate metadata. The search bar shows clear states while you work: `Type 2+ chars to search`, an animated query-initializing indicator, `searching ...`, result counts, stale-response discard notices, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query, and the discarded query is surfaced in the search bar.
+Search results show saved stations with a star and include compact genre/country/bitrate metadata. Long station names are truncated around the active search term when possible, so matching text stays visible even in narrow result rows. The search bar shows clear states while you work: `Type 2+ chars to search`, an animated query-initializing indicator, `searching ...`, result counts, stale-response discard notices, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query, and the discarded query is surfaced in the search bar.
 
 **Managing your library:**
 
@@ -134,7 +136,7 @@ Search results show saved stations with a star and include compact genre/country
 - Rows show the selected station, currently playing station, country, and bitrate without overflowing long names.
 - To remove a saved station, highlight it in the Library and press `f`.
 - After removal, press `u` to restore removed stations in reverse order. PulseDeck keeps a bounded history of the 10 most recent removals.
-- Switch between genre categories with `Tab` / `Shift+Tab`; when the currently playing station is visible in the new category, the cursor follows it instead of jumping to the top.
+- Switch between genre categories with `Tab` / `Shift+Tab`; PulseDeck remembers your last cursor position per category, falling back to the playing station when there is no saved position.
 
 **Using the cassette deck:**
 
@@ -178,7 +180,7 @@ Press `,` to open the settings panel. Current options:
 
 - **Desktop notifications** — show track info when a song changes. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup** — picks up where you left off.
-- **Audio Output** — choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
+- **Audio Output** — choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
 - **Tape capture folder** — cycle between preset recording directories.
 - **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted.
 - **Min song duration** — threshold for auto-discarding short recordings. `Space` cycles common presets including 45s and 300s; Left/Right or h/l/a/d nudge by 5 seconds within the 15s–600s range. Only active when **Keep partial snippets & ads** is OFF.

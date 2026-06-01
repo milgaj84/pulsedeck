@@ -91,8 +91,9 @@ impl App {
         if self.input_mode == InputMode::Normal {
             let count = self.library.available_genres.len();
             if count > 0 {
+                self.remember_current_genre_selection();
                 self.selected_genre_idx = (self.selected_genre_idx + 1) % count;
-                self.select_playing_station_or_first_visible();
+                self.select_remembered_genre_station_or_default();
             }
         }
     }
@@ -101,14 +102,50 @@ impl App {
         if self.input_mode == InputMode::Normal {
             let count = self.library.available_genres.len();
             if count > 0 {
+                self.remember_current_genre_selection();
                 self.selected_genre_idx = if self.selected_genre_idx == 0 {
                     count - 1
                 } else {
                     self.selected_genre_idx - 1
                 };
-                self.select_playing_station_or_first_visible();
+                self.select_remembered_genre_station_or_default();
             }
         }
+    }
+
+    pub(super) fn remember_current_genre_selection(&mut self) {
+        if self.input_mode != InputMode::Normal {
+            return;
+        }
+
+        if let Some(genre) = self.current_genre_key() {
+            self.genre_selection_memory.insert(genre, self.selected);
+        }
+    }
+
+    fn select_remembered_genre_station_or_default(&mut self) {
+        let count = self.visible_count();
+        if count == 0 {
+            self.selected = 0;
+            return;
+        }
+
+        if let Some(remembered) = self
+            .current_genre_key()
+            .and_then(|genre| self.genre_selection_memory.get(&genre).copied())
+        {
+            self.selected = remembered.min(count - 1);
+            return;
+        }
+
+        self.select_playing_station_or_first_visible();
+    }
+
+    fn current_genre_key(&self) -> Option<String> {
+        self.library
+            .available_genres
+            .get(self.selected_genre_idx)
+            .cloned()
     }
 
     fn select_playing_station_or_first_visible(&mut self) {
@@ -374,5 +411,50 @@ mod tests {
         );
         assert_eq!(app.selected, 0);
         assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-a");
+    }
+
+    #[test]
+    fn next_genre_restores_remembered_selection_when_returning() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Ambient B", "http://ambient-b", "Ambient"),
+            station("Synth A", "http://synth-a", "Synthwave"),
+            station("Synth B", "http://synth-b", "Synthwave"),
+        ]));
+        app.selected_genre_idx = genre_index(&app, "Ambient");
+        app.selected = 1;
+
+        app.update(Action::NextGenre);
+        app.selected = 1;
+        app.update(Action::PrevGenre);
+
+        assert_eq!(
+            app.library.available_genres[app.selected_genre_idx],
+            "Ambient"
+        );
+        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+    }
+
+    #[test]
+    fn remembered_genre_selection_clamps_after_station_removal() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Ambient A", "http://ambient-a", "Ambient"),
+            station("Ambient B", "http://ambient-b", "Ambient"),
+            station("Synth A", "http://synth-a", "Synthwave"),
+        ]));
+        app.selected_genre_idx = genre_index(&app, "Ambient");
+        app.selected = 1;
+        app.remember_current_genre_selection();
+        app.library.remove("http://ambient-b").unwrap();
+        app.library.rebuild_genres();
+
+        app.update(Action::NextGenre);
+        app.update(Action::PrevGenre);
+
+        assert_eq!(
+            app.library.available_genres[app.selected_genre_idx],
+            "Ambient"
+        );
+        assert_eq!(app.selected, 0);
     }
 }
