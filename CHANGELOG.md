@@ -7,9 +7,11 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+*   **Documentation Parity**: Updated README, help overlay, and testing strategy docs for Audio Output settings, 15s–600s Min Song Duration controls, search-mode audio shortcuts, and audio-output smoke coverage.
 *   **Quiet Audio Device Probing**: Suppressed native ALSA/JACK stderr diagnostics while enumerating or opening output devices so backend probe noise does not overwrite the terminal UI.
 
 ### Added
+*   **Search Audio Escape Rails**: Added Ctrl/Alt volume and mute shortcuts inside search mode so core playback controls remain reachable without abandoning the active query.
 *   **Selectable Audio Output Device**: Added a persisted settings row for choosing Default or a detected output device, allowing PipeWire/PulseAudio Bluetooth headphones to be targeted instead of always using Rodio's default sink.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 

@@ -114,11 +114,22 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         (_, KeyCode::Char('\u{3}')) => Some(Action::Quit),
 
+        // Modifier escape rails: keep core audio controls reachable while typing.
+        (mods, KeyCode::Char('-')) if has_search_escape_modifier(mods) => Some(Action::VolumeDown),
+        (mods, KeyCode::Char('+') | KeyCode::Char('=')) if has_search_escape_modifier(mods) => {
+            Some(Action::VolumeUp)
+        }
+        (mods, KeyCode::Char('m')) if has_search_escape_modifier(mods) => Some(Action::ToggleMute),
+
         // All other printable characters go to search input
         (_, KeyCode::Char(c)) => Some(Action::SearchInput(c)),
 
         _ => None,
     }
+}
+
+fn has_search_escape_modifier(modifiers: KeyModifiers) -> bool {
+    modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
 #[cfg(test)]
@@ -165,6 +176,83 @@ mod tests {
     #[test]
     fn search_mode_insert_does_not_add_selected_result() {
         assert_eq!(map_key(key(KeyCode::Insert), &InputMode::Search), None,);
+    }
+
+    #[test]
+    fn search_mode_plain_audio_keys_remain_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('m')), &InputMode::Search),
+            Some(Action::SearchInput('m')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('-')), &InputMode::Search),
+            Some(Action::SearchInput('-')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('=')), &InputMode::Search),
+            Some(Action::SearchInput('=')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('+')), &InputMode::Search),
+            Some(Action::SearchInput('+')),
+        );
+    }
+
+    #[test]
+    fn search_mode_ctrl_audio_keys_bypass_text_input() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('-'), KeyModifiers::CONTROL),
+                &InputMode::Search
+            ),
+            Some(Action::VolumeDown),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('='), KeyModifiers::CONTROL),
+                &InputMode::Search
+            ),
+            Some(Action::VolumeUp),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('+'), KeyModifiers::CONTROL),
+                &InputMode::Search
+            ),
+            Some(Action::VolumeUp),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('m'), KeyModifiers::CONTROL),
+                &InputMode::Search
+            ),
+            Some(Action::ToggleMute),
+        );
+    }
+
+    #[test]
+    fn search_mode_alt_audio_keys_bypass_text_input() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('-'), KeyModifiers::ALT),
+                &InputMode::Search
+            ),
+            Some(Action::VolumeDown),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('='), KeyModifiers::ALT),
+                &InputMode::Search
+            ),
+            Some(Action::VolumeUp),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('m'), KeyModifiers::ALT),
+                &InputMode::Search
+            ),
+            Some(Action::ToggleMute),
+        );
     }
 
     #[test]

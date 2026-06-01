@@ -26,10 +26,14 @@ cargo run
 
 Live Radio Browser and stream tests would make CI depend on external certificates, DNS, routing, and stream availability. Those failures are useful during manual diagnosis but too noisy for normal pull request gates.
 
-Use manual network smoke tests when touching:
+Use manual network or runtime smoke tests when touching:
 
 - `src/radio.rs`
 - `src/audio/session.rs`
 - `src/audio/stream_reader.rs`
+- `src/audio/output.rs`
 - stream retry/cancellation behavior
 - TLS or HTTP fallback behavior
+- selectable audio output behavior
+- PipeWire/PulseAudio/Bluetooth routing
+- TUI safety around native ALSA/JACK stderr diagnostics
