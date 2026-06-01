@@ -207,7 +207,7 @@ fn cassette_recording_status(
 
 fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, String) {
     match playback {
-        PlaybackState::Playing => {
+        PlaybackState::Playing | PlaybackState::FadingOut { .. } => {
             let transfer_step = ((tick_count / 6) % 8) as usize;
             let transfer = if transfer_step < 4 {
                 transfer_step
@@ -334,6 +334,12 @@ fn truncate_to_chars(text: &str, max_chars: usize) -> String {
 fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool) {
     let (status_text, status_style) = match app.playback {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
+        PlaybackState::FadingOut { .. } => (
+            "FADING...",
+            Style::default()
+                .fg(theme::warm())
+                .add_modifier(Modifier::BOLD),
+        ),
         PlaybackState::Connecting => (
             "TUNING...",
             Style::default()
@@ -430,7 +436,18 @@ fn visualizer_title(app: &App) -> &'static str {
 }
 
 fn should_render_spectrum_analyzer(playback: &PlaybackState, visualizer_mode: usize) -> bool {
-    visualizer_mode == 0 && matches!(playback, PlaybackState::Playing | PlaybackState::Connecting)
+    visualizer_mode == 0
+        && matches!(
+            playback,
+            PlaybackState::Playing | PlaybackState::Connecting | PlaybackState::FadingOut { .. }
+        )
+}
+
+fn visualizer_amplitude_gain(playback: &PlaybackState, volume: u8) -> f32 {
+    match playback {
+        PlaybackState::FadingOut { current_volume } => current_volume.clamp(0.0, 1.0),
+        _ => volume as f32 / 100.0,
+    }
 }
 
 fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
@@ -449,12 +466,13 @@ fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut canvas = BrailleCanvas::new(width, height);
     match app.playback {
-        PlaybackState::Playing => match app.visualizer_mode {
+        PlaybackState::Playing | PlaybackState::FadingOut { .. } => match app.visualizer_mode {
             1 => {
                 let pixel_width = width * 2;
                 let pixel_height = height * 4;
                 let center_y = pixel_height as f32 * 0.5;
-                let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.45);
+                let amplitude = visualizer_amplitude_gain(&app.playback, app.volume)
+                    * (pixel_height as f32 * 0.45);
 
                 let mut samples = Vec::with_capacity(pixel_width);
                 if let Ok(buf) = app.sample_buffer.lock() {
@@ -480,7 +498,8 @@ fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
                 let pixel_width = width * 2;
                 let pixel_height = height * 4;
                 let center_y = pixel_height as f32 * 0.5;
-                let amplitude = (app.volume as f32 / 100.0) * (pixel_height as f32 * 0.4);
+                let amplitude = visualizer_amplitude_gain(&app.playback, app.volume)
+                    * (pixel_height as f32 * 0.4);
 
                 for x in 0..pixel_width {
                     let t = app.tick_count as f32 * 0.15;
@@ -783,6 +802,31 @@ mod tests {
             &PlaybackState::Connecting,
             1
         ));
+    }
+
+    #[test]
+    fn spectrum_renderer_stays_active_while_fading_out() {
+        assert!(should_render_spectrum_analyzer(
+            &PlaybackState::FadingOut {
+                current_volume: 0.5,
+            },
+            0
+        ));
+    }
+
+    #[test]
+    fn fading_out_visualizer_gain_uses_audio_ramp_volume() {
+        assert!((visualizer_amplitude_gain(&PlaybackState::Playing, 80) - 0.8).abs() < 0.001);
+        assert!(
+            (visualizer_amplitude_gain(
+                &PlaybackState::FadingOut {
+                    current_volume: 0.35,
+                },
+                80
+            ) - 0.35)
+                .abs()
+                < 0.001
+        );
     }
 
     #[test]

@@ -60,8 +60,23 @@ impl App {
 
     pub(super) fn audition_search_result(&mut self) {
         if let Some(station) = self.search_results.get(self.selected).cloned() {
+            let next_playback = if matches!(
+                &self.playback,
+                PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
+            ) {
+                PlaybackState::FadingOut {
+                    current_volume: if self.muted {
+                        0.0
+                    } else {
+                        self.volume as f32 / 100.0
+                    },
+                }
+            } else {
+                PlaybackState::Connecting
+            };
+
             self.playing_url = Some(station.url.clone());
-            self.playback = PlaybackState::Connecting;
+            self.playback = next_playback;
             self.audio.send(AudioCommand::Play(station.url));
             self.sync_volume();
             self.set_info_notice("Auditioning stream (not saved to library)");

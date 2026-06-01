@@ -136,6 +136,7 @@ impl App {
                         AudioStatus::Playing => PlaybackState::Playing,
                         AudioStatus::Paused => PlaybackState::Paused,
                         AudioStatus::Stopped => {
+                            self.playing_url = None;
                             self.current_track = None;
                             self.recording_state = RecordingState::Off;
                             self.active_record_filepath = None;
@@ -151,6 +152,9 @@ impl App {
                             self.buffer_seconds = 0;
                             PlaybackState::Error(e)
                         }
+                        AudioStatus::FadingOut { current_volume } => PlaybackState::FadingOut {
+                            current_volume: current_volume.clamp(0.0, 1.0),
+                        },
                         AudioStatus::Connecting => {
                             self.current_track = None;
                             PlaybackState::Connecting

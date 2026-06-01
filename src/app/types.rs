@@ -24,6 +24,7 @@ pub enum PlaybackState {
     Stopped,
     Connecting,
     Playing,
+    FadingOut { current_volume: f32 },
     Paused,
     Error(String),
 }

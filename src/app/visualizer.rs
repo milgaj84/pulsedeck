@@ -14,7 +14,7 @@ impl App {
             return;
         }
 
-        if self.playback != PlaybackState::Playing {
+        if !playback_drives_sample_visualizer(&self.playback) {
             // Gradually decay peaks when stopped/paused.
             for peak in &mut self.visualizer_peaks {
                 *peak = (*peak * 0.82).max(0.0);
@@ -82,6 +82,13 @@ impl App {
             }
         }
     }
+}
+
+fn playback_drives_sample_visualizer(playback: &PlaybackState) -> bool {
+    matches!(
+        playback,
+        PlaybackState::Playing | PlaybackState::FadingOut { .. }
+    )
 }
 
 fn update_connecting_spectrum_peaks(peaks: &mut Vec<f32>, tick_count: u64) {
@@ -270,6 +277,18 @@ fn fft_rec(input: &[Complex], output: &mut [Complex]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fading_out_drives_sample_visualizer() {
+        assert!(playback_drives_sample_visualizer(&PlaybackState::Playing));
+        assert!(playback_drives_sample_visualizer(
+            &PlaybackState::FadingOut {
+                current_volume: 0.4,
+            }
+        ));
+        assert!(!playback_drives_sample_visualizer(&PlaybackState::Stopped));
+        assert!(!playback_drives_sample_visualizer(&PlaybackState::Paused));
+    }
 
     #[test]
     fn spectrum_gain_curve_tames_final_band() {

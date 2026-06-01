@@ -39,6 +39,7 @@ pub enum AudioStatus {
     Stopped,
     Error(String),
     Connecting,
+    FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
     RecordingStateChanged { state: u8, filepath: Option<String> }, // 0 = Off, 1 = Pending, 2 = Active
     BufferLevel { percent: u8, seconds: u32 },
@@ -217,7 +218,7 @@ fn audio_loop(
         if pending_action.is_some() {
             if let Some(ref sink) = current_sink {
                 let current_vol = sink.volume();
-                if current_vol <= 0.05 {
+                if fade_out_complete(current_vol) {
                     // Fade out completed! Execute pending command
                     sink.set_volume(0.0);
                     let cmd = pending_action.take().unwrap();
@@ -240,9 +241,12 @@ fn audio_loop(
                         _ => {}
                     }
                 } else {
-                    // Exponential step-down for beautiful natural dimming
-                    let step = current_vol * 0.15; // smooth 15% dimming step
-                    sink.set_volume((current_vol - step).max(0.0));
+                    // Exponential step-down for natural dimming.
+                    let next_vol = fade_out_next_volume(current_vol);
+                    sink.set_volume(next_vol);
+                    let _ = status_tx.send(AudioStatus::FadingOut {
+                        current_volume: clamp_status_volume(sink.volume()),
+                    });
                 }
             } else {
                 // No active sink, just execute pending immediately
@@ -311,6 +315,44 @@ fn audio_loop(
                 let _ = status_tx.send(AudioStatus::Stopped);
             }
         }
+    }
+}
+
+fn fade_out_complete(current_volume: f32) -> bool {
+    current_volume <= 0.05
+}
+
+fn fade_out_next_volume(current_volume: f32) -> f32 {
+    let step = current_volume * 0.15;
+    (current_volume - step).max(0.0)
+}
+
+fn clamp_status_volume(current_volume: f32) -> f32 {
+    current_volume.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fade_out_next_volume_uses_exponential_step() {
+        let next = fade_out_next_volume(1.0);
+
+        assert!((next - 0.85).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn fade_out_complete_triggers_at_low_volume() {
+        assert!(!fade_out_complete(0.051));
+        assert!(fade_out_complete(0.05));
+    }
+
+    #[test]
+    fn clamp_status_volume_keeps_ui_payload_normalized() {
+        assert_eq!(clamp_status_volume(-0.2), 0.0);
+        assert_eq!(clamp_status_volume(0.42), 0.42);
+        assert_eq!(clamp_status_volume(1.4), 1.0);
     }
 }
 

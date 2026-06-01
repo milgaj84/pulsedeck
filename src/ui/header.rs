@@ -40,6 +40,11 @@ fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(&station.name, theme::cyan()),
             Span::styled(" ◉ LIVE", theme::playing()),
         ]),
+        (PlaybackState::FadingOut { .. }, Some(station)) => Line::from(vec![
+            Span::styled("◒ ", Style::default().fg(theme::warm())),
+            Span::styled(&station.name, theme::dim()),
+            Span::styled(" fading...", Style::default().fg(theme::warm())),
+        ]),
         (PlaybackState::Paused, Some(station)) => Line::from(vec![
             Span::styled("⏸ ", theme::neon()),
             Span::styled(&station.name, theme::dim()),
