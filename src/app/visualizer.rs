@@ -3,10 +3,17 @@ use super::*;
 const SPECTRUM_ANALYSIS_BANDS: usize = 40;
 const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
 const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
+const SPECTRUM_CONNECTING_PEAK_MIN: f32 = 0.03;
+const SPECTRUM_CONNECTING_PEAK_MAX: f32 = 0.30;
 
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
     pub fn update_visualizer(&mut self) {
+        if self.playback == PlaybackState::Connecting && self.visualizer_mode == 0 {
+            update_connecting_spectrum_peaks(&mut self.visualizer_peaks, self.tick_count);
+            return;
+        }
+
         if self.playback != PlaybackState::Playing {
             // Gradually decay peaks when stopped/paused.
             for peak in &mut self.visualizer_peaks {
@@ -75,6 +82,30 @@ impl App {
             }
         }
     }
+}
+
+fn update_connecting_spectrum_peaks(peaks: &mut Vec<f32>, tick_count: u64) {
+    if peaks.len() != SPECTRUM_ANALYSIS_BANDS {
+        peaks.resize(SPECTRUM_ANALYSIS_BANDS, 0.0);
+    }
+
+    for (band, peak) in peaks.iter_mut().enumerate() {
+        *peak = connecting_spectrum_peak(band, tick_count, SPECTRUM_ANALYSIS_BANDS);
+    }
+}
+
+fn connecting_spectrum_peak(band: usize, tick_count: u64, total_bands: usize) -> f32 {
+    let denominator = total_bands.saturating_sub(1).max(1) as f32;
+    let band_t = band as f32 / denominator;
+    let t = tick_count as f32;
+
+    let sweep = ((band_t * 10.0 - t * 0.055).sin() + 1.0) * 0.5;
+    let shimmer = ((band_t * 27.0 + t * 0.037).sin() + 1.0) * 0.5;
+    let breathing = ((t * 0.045).sin() + 1.0) * 0.5;
+    let low_bias = (1.0 - band_t).powf(0.45) * 0.08;
+
+    let peak = low_bias + sweep.powf(2.0) * 0.15 + shimmer * 0.035 + breathing * 0.025;
+    peak.clamp(SPECTRUM_CONNECTING_PEAK_MIN, SPECTRUM_CONNECTING_PEAK_MAX)
 }
 
 fn average_log_band_energy(
@@ -263,6 +294,33 @@ mod tests {
         let smoothed = smooth_spectrum_targets(&targets);
 
         assert_eq!(smoothed, targets);
+    }
+
+    #[test]
+    fn connecting_spectrum_pattern_resizes_and_stays_subtle() {
+        let mut peaks = vec![0.99; 3];
+
+        update_connecting_spectrum_peaks(&mut peaks, 42);
+
+        assert_eq!(peaks.len(), SPECTRUM_ANALYSIS_BANDS);
+        assert!(peaks.iter().all(|peak| {
+            (SPECTRUM_CONNECTING_PEAK_MIN..=SPECTRUM_CONNECTING_PEAK_MAX).contains(peak)
+        }));
+        assert!(peaks
+            .iter()
+            .any(|peak| *peak > SPECTRUM_CONNECTING_PEAK_MIN));
+    }
+
+    #[test]
+    fn connecting_spectrum_pattern_moves_over_time() {
+        let changed = (0..SPECTRUM_ANALYSIS_BANDS).any(|band| {
+            let early = connecting_spectrum_peak(band, 0, SPECTRUM_ANALYSIS_BANDS);
+            let later = connecting_spectrum_peak(band, 24, SPECTRUM_ANALYSIS_BANDS);
+
+            (early - later).abs() > 0.01
+        });
+
+        assert!(changed);
     }
 
     #[test]
