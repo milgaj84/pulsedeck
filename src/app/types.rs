@@ -11,11 +11,26 @@ pub enum InputMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SearchStatus {
     WaitingForInput,
-    Debouncing { query: String },
-    Searching { query: String },
-    Ready { query: String },
-    Empty { query: String },
-    Error { query: String, message: String },
+    Debouncing {
+        query: String,
+    },
+    Searching {
+        query: String,
+    },
+    Ready {
+        query: String,
+    },
+    Empty {
+        query: String,
+    },
+    Error {
+        query: String,
+        message: String,
+    },
+    StaleResponseDiscarded {
+        query: String,
+        received_stale: String,
+    },
 }
 
 /// Playback state visible to the UI.

@@ -121,7 +121,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
 5. Press `Esc` instead to leave search without adding anything.
 
-Search results show saved stations with a star and include compact genre/country/bitrate metadata. The search bar shows clear states while you work: `Type 2+ chars to search`, an animated query-initializing indicator, `searching ...`, result counts, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query.
+Search results show saved stations with a star and include compact genre/country/bitrate metadata. The search bar shows clear states while you work: `Type 2+ chars to search`, an animated query-initializing indicator, `searching ...`, result counts, stale-response discard notices, `No results`, `★ Saved to library`, or a compact `Search failed: ...` error. Older search responses are ignored if you have already typed a newer query, and the discarded query is surfaced in the search bar.
 
 **Managing your library:**
 
