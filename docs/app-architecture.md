@@ -41,6 +41,14 @@ The audio thread sends high-level `AudioStatus` messages into the app. Buffer te
 
 `App::selected` remains the visible cursor index, while app state also tracks normal/search snapshots and per-genre library cursor memory. Entering search preserves the library cursor, leaving search restores it, and genre changes restore the last row visited in that category when possible.
 
+## Local tape archive
+
+`src/tape_archive.rs` owns the disk-backed model for recorded files. The scanner uses blocking filesystem APIs, so `src/main.rs` runs scans through `tokio::task::spawn_blocking` and applies results back into `App` through `apply_tape_archive_scan`.
+
+The archive page lives behind `active_deck_page == 1`. While focused, normal navigation actions are routed to tape rows instead of station rows. `Enter` plays a selected local tape, `Space` expands folders or controls local playback, `Ctrl+r` refreshes the archive, and deletion requires an explicit confirmation step.
+
+Local file playback is represented separately from live stream playback with `AudioCommand::PlayLocalFile` and `AudioStatus::LocalFilePlaying`. Recording remains live-stream-only.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

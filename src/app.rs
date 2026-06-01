@@ -8,6 +8,7 @@ mod recording;
 mod search;
 mod selectors;
 mod settings;
+mod tape_archive;
 mod types;
 mod ui_state;
 mod update;
@@ -16,7 +17,9 @@ mod visualizer;
 use crate::audio::AudioEngine;
 use crate::favorites::Library;
 use crate::radio::Station;
+use crate::tape_archive::TapeArchive;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub use types::{
@@ -69,6 +72,11 @@ pub struct App {
     pub show_help: bool,
     pub active_deck_page: usize,
     pub song_history: VecDeque<String>,
+    pub tape_archive: TapeArchive,
+    pub tape_archive_scan_requested: bool,
+    pub tape_archive_scan_inflight: bool,
+    pub local_playback_path: Option<PathBuf>,
+    pub pending_tape_delete: Option<PathBuf>,
 
     pub show_settings: bool,
     pub selected_setting_idx: usize,

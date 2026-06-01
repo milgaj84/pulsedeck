@@ -26,6 +26,10 @@ impl App {
 
     pub(super) fn next_deck_page(&mut self) {
         self.active_deck_page = (self.active_deck_page + 1) % 2;
+        self.pending_tape_delete = None;
+        if self.active_deck_page == 1 {
+            self.request_tape_archive_scan_if_needed();
+        }
     }
 
     pub(super) fn toggle_visualizer_mode(&mut self) {
@@ -83,6 +87,7 @@ mod tests {
 
         app.next_deck_page();
         assert_eq!(app.active_deck_page, 1);
+        assert!(app.tape_archive_scan_requested);
         app.next_deck_page();
         assert_eq!(app.active_deck_page, 0);
     }

@@ -145,7 +145,7 @@ Search results show saved stations with a star and include compact genre/country
 - In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
 - During stop or station changes, the deck stays visually active while the audio fade-out completes.
 - Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
-- Press `p` to switch between the live Tape Deck and Tape History page.
+- Press `p` to switch between the live Tape Deck and the Local Tape Library page.
 - Watch the footer chips for playback state, volume, layout, scope mode, and recording state.
 
 **Coming back tomorrow:**
@@ -171,6 +171,22 @@ Press `r` while a station is playing. PulseDeck will:
 If you press `r` before playback starts, PulseDeck shows `Start playback before recording` instead of failing silently.
 
 The minimum song duration and whether to keep short clips are configurable in the settings (`,`).
+
+---
+
+## Local Tape Library
+
+Press `p` to open the **Local Tape Library**, a disk-backed browser for recordings captured by PulseDeck.
+
+- Recordings are scanned from the configured tape capture folder.
+- Genre folders become expandable archive groups.
+- Use `↑` / `↓` or `j` / `k` to move through folders and tracks.
+- Use `Space` to expand or collapse folders.
+- Use `Enter` to play the selected local recording inside PulseDeck.
+- Use `Ctrl+r` to rescan the recording folder without restarting.
+- Use `f` or `Delete` on a selected track to request deletion, then `y` to confirm or `n` / `Esc` to cancel.
+
+Local tape playback uses the same audio output and volume controls as live streams. Recording remains limited to live streams, so pressing `r` while a local tape is active shows a friendly notice instead of trying to re-record a file.
 
 ---
 

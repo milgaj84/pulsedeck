@@ -7,6 +7,14 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+*   **Local Tape Library Browser**: Replaced the passive Tape History page with a disk-backed Local Tape Library for browsing captured recordings by folder.
+*   **Local Tape Playback**: Added audio-engine support for playing recorded files directly through PulseDeck.
+*   **Tape Archive Refresh and Delete Flow**: Added archive rescanning plus guarded `y`/`n` delete confirmation for selected local tape files.
+
+### Improved
+*   **Recording Workflow Continuity**: Captured tracks are now visible and playable from inside the TUI after restart instead of only existing as external files.
+
+### Added
 *   **Compact Terminal Boundary Guard**: Added a root 80x24 terminal-size safety gate with a centered diagnostic screen before complex deck, station, help, or settings rendering runs.
 *   **Search-Aware Name Truncation**: Added adaptive station-name truncation that pivots around the active search term when long result names would otherwise hide the match.
 *   **Audio Output Recovery Retry**: Added a guarded one-shot recovery path for hardware-style sink failures by dropping stale output handles and retrying the current stream.
