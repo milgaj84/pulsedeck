@@ -1,6 +1,6 @@
 [package]
 name = "pulsedeck"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "A cyber-synthwave internet radio player and smart tape recorder for your terminal"
 license = "MIT"

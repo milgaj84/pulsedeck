@@ -6,6 +6,10 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.1.7] - 2026-06-01
+
 ### Fixed
 *   **Documentation Parity**: Updated README, help overlay, and testing strategy docs for Audio Output settings, 15s–600s Min Song Duration controls, search-mode audio shortcuts, and audio-output smoke coverage.
 *   **Quiet Audio Device Probing**: Suppressed native ALSA/JACK stderr diagnostics while enumerating or opening output devices so backend probe noise does not overwrite the terminal UI.
