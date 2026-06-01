@@ -42,6 +42,10 @@ pub enum Action {
 
     /// Local tape archive
     RefreshTapeArchive,
+    EnterTapeFilter,
+    ExitTapeFilter,
+    TapeFilterInput(char),
+    TapeFilterBackspace,
     DeleteSelectedTape,
     ConfirmDeleteTape,
     CancelDeleteTape,

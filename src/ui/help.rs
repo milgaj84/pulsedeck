@@ -85,14 +85,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         shortcut("p", "Switch Tape Deck / Local Tape Library"),
         shortcut("v", "Cycle RTA Spectrum / Real Osc / Sim Osc"),
         section("Local Tape Library"),
-        shortcut(
-            "Enter",
-            "Play selected local tape, or open selected archive row",
-        ),
+        shortcut("Enter", "Play selected tape; open All Recordings"),
         shortcut(
             "Space",
             "Expand/collapse folders; pause/resume selected tape",
         ),
+        shortcut(
+            "/ or t",
+            "Filter local recordings by title, folder, artist, or file",
+        ),
+        shortcut("Esc", "Clear local tape filter"),
         shortcut("Ctrl+r", "Refresh recorded tape archive"),
         shortcut("f / Delete", "Request delete for selected local tape"),
         shortcut("y / n", "Confirm or cancel pending tape delete"),

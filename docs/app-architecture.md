@@ -49,6 +49,14 @@ The archive page lives behind `active_deck_page == 1`. While focused, normal nav
 
 Local file playback is represented separately from live stream playback with `AudioCommand::PlayLocalFile` and `AudioStatus::LocalFilePlaying`. Recording remains live-stream-only.
 
+## Local tape archive enhancements
+
+Local tape archive state now includes a filter query and an All Recordings flat-view flag. Filtering is owned by `src/tape_archive.rs` so UI, reducer, and tests share one row model. The archive can render the folder tree, a newest-first All Recordings view, or a filtered flat view without duplicating row selection logic.
+
+Duration labels are best-effort metadata hints gathered during the blocking archive scan. If a local decoder exposes total duration, the UI renders `FORMAT · MM:SS · SIZE`; otherwise it falls back to `FORMAT · SIZE`.
+
+The tape filter uses `InputMode::TapeFilter`, separate from global radio search. `/` opens local tape filtering when the tape archive is focused, while global station search remains available outside the tape page.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

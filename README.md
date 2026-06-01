@@ -181,8 +181,12 @@ Press `p` to open the **Local Tape Library**, a disk-backed browser for recordin
 - Recordings are scanned from the configured tape capture folder.
 - Genre folders become expandable archive groups.
 - Use `↑` / `↓` or `j` / `k` to move through folders and tracks.
+- Use `Enter` on `[All Recordings]` to switch into a newest-first flat view across every folder.
 - Use `Space` to expand or collapse folders.
-- Use `Enter` to play the selected local recording inside PulseDeck.
+- Use `Enter` on a track to play the selected local recording inside PulseDeck.
+- Duration appears as `03:48` when the file metadata exposes it; otherwise PulseDeck still shows format and size.
+- Use `/` or `t` on the tape page to filter recordings by title, folder, artist, extension, or filename.
+- Use `Esc` while filtering to clear the local tape filter and return to the folder view.
 - Use `Ctrl+r` to rescan the recording folder without restarting.
 - Use `f` or `Delete` on a selected track to request deletion, then `y` to confirm or `n` / `Esc` to cancel.
 

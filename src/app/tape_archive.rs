@@ -1,4 +1,5 @@
 use super::*;
+use crate::action::Action;
 use crate::audio::AudioCommand;
 use crate::tape_archive::{TapeArchive, TapeArchiveRow, TapeArchiveStatus};
 use std::path::PathBuf;
@@ -6,11 +7,12 @@ use std::path::PathBuf;
 const TAPE_ARCHIVE_PAGE: usize = 1;
 
 impl App {
+    pub fn is_tape_archive_page(&self) -> bool {
+        !self.show_help && !self.show_settings && self.active_deck_page == TAPE_ARCHIVE_PAGE
+    }
+
     pub fn is_tape_archive_focused(&self) -> bool {
-        self.input_mode == InputMode::Normal
-            && !self.show_help
-            && !self.show_settings
-            && self.active_deck_page == TAPE_ARCHIVE_PAGE
+        self.input_mode == InputMode::Normal && self.is_tape_archive_page()
     }
 
     pub fn take_tape_archive_scan_request(&mut self) -> Option<PathBuf> {
@@ -65,6 +67,53 @@ impl App {
             self.pending_tape_delete = None;
             self.tape_archive_scan_requested = true;
             self.set_info_notice("Refreshing Local Tape Library");
+        }
+    }
+
+    pub(super) fn enter_tape_filter(&mut self) {
+        if self.is_tape_archive_page() {
+            self.pending_tape_delete = None;
+            self.input_mode = InputMode::TapeFilter;
+            self.set_info_notice("Filtering Local Tape Library");
+        }
+    }
+
+    pub(super) fn exit_tape_filter(&mut self) {
+        if self.input_mode == InputMode::TapeFilter {
+            self.input_mode = InputMode::Normal;
+            self.tape_archive.clear_filter_query();
+            self.set_info_notice("Tape filter cleared");
+        }
+    }
+
+    pub(super) fn tape_filter_input(&mut self, ch: char) {
+        if self.input_mode == InputMode::TapeFilter && !ch.is_control() {
+            self.tape_archive.push_filter_char(ch);
+        }
+    }
+
+    pub(super) fn tape_filter_backspace(&mut self) {
+        if self.input_mode == InputMode::TapeFilter {
+            self.tape_archive.pop_filter_char();
+        }
+    }
+
+    pub(super) fn handle_tape_filter_action(&mut self, action: Action) {
+        match action {
+            Action::TapeFilterInput(ch) => self.tape_filter_input(ch),
+            Action::TapeFilterBackspace => self.tape_filter_backspace(),
+            Action::ExitTapeFilter => self.exit_tape_filter(),
+            Action::NextStation => self.next_tape_archive_row(),
+            Action::PrevStation => self.prev_tape_archive_row(),
+            Action::PlaySelected => self.play_selected_tape_or_toggle(),
+            Action::RefreshTapeArchive => {
+                self.pending_tape_delete = None;
+                self.tape_archive_scan_requested = true;
+                self.set_info_notice("Refreshing Local Tape Library");
+            }
+            Action::Tick => self.tick(),
+            Action::Quit => self.quit(),
+            _ => {}
         }
     }
 

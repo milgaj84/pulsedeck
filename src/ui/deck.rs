@@ -1,5 +1,5 @@
 use super::theme;
-use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
+use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
 use crate::tape_archive::{track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -700,7 +700,13 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(app.tape_archive.root.display().to_string(), theme::dim()),
     ]));
 
-    let mode_label = if app.tape_archive.is_filtering() {
+    let mode_label = if app.input_mode == InputMode::TapeFilter {
+        format!(
+            "   Filter: {}▌ · {} matches",
+            app.tape_archive.filter_query,
+            app.tape_archive.flattened.len().saturating_sub(1)
+        )
+    } else if app.tape_archive.is_filtering() {
         format!(
             "   Filter: {} · {} matches",
             app.tape_archive.filter_query,

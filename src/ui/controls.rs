@@ -202,6 +202,19 @@ fn recording_label(recording_state: RecordingState) -> &'static str {
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
+        InputMode::TapeFilter => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("type", theme::cyan()),
+            Span::styled("] Filter tapes  [", theme::dim()),
+            Span::styled("Backspace", theme::cyan()),
+            Span::styled("] Edit  [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Play/Open  [", theme::dim()),
+            Span::styled("Esc", theme::cyan()),
+            Span::styled("] Clear  [", theme::dim()),
+            Span::styled("Ctrl+r", theme::cyan()),
+            Span::styled("] Refresh", theme::dim()),
+        ]),
         InputMode::Search => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Space", theme::cyan()),

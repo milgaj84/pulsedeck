@@ -5,6 +5,7 @@ pub(super) const SEARCH_MIN_CHARS: usize = 2;
 pub enum InputMode {
     Normal,
     Search,
+    TapeFilter,
 }
 
 /// Explicit search state for UI messages and stale-response handling.
