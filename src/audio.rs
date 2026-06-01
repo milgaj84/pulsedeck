@@ -9,6 +9,9 @@ mod visualizer;
 
 use rodio::{OutputStream, Sink};
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 pub use output::{
@@ -30,6 +33,7 @@ pub(super) fn hardware_output_error(message: impl Into<String>) -> String {
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
     Play(String), // URL
+    PlayLocalFile(PathBuf),
     Pause,
     Resume,
     Stop,
@@ -48,6 +52,7 @@ pub enum AudioCommand {
 #[derive(Debug, Clone)]
 pub enum AudioStatus {
     Playing,
+    LocalFilePlaying { path: PathBuf, title: String },
     Paused,
     Stopped,
     Error(String),
@@ -188,6 +193,35 @@ fn audio_loop(
                         pending_action = Some(AudioCommand::Play(url));
                     } else {
                         spawn_connection_for!(url);
+                    }
+                }
+                AudioCommand::PlayLocalFile(path) => {
+                    pending_action = None;
+                    current_fade_volume = None;
+                    active_conn_id.store(0, Ordering::SeqCst);
+                    connect_thread = None;
+                    current_url = None;
+
+                    if let Some(old_sink) = current_sink.take() {
+                        old_sink.stop();
+                    }
+
+                    match play_local_file(
+                        &path,
+                        &mut output_stream,
+                        &mut output_handle,
+                        preferred_output_device_name.as_deref(),
+                        &status_tx,
+                        target_volume,
+                    ) {
+                        Ok(sink) => {
+                            let title = crate::tape_archive::display_track_title(&path);
+                            current_sink = Some(sink);
+                            let _ = status_tx.send(AudioStatus::LocalFilePlaying { path, title });
+                        }
+                        Err(err) => {
+                            let _ = status_tx.send(AudioStatus::Error(err));
+                        }
                     }
                 }
                 AudioCommand::Pause => {
@@ -413,6 +447,35 @@ fn is_hardware_output_error(error: &str) -> bool {
     error.starts_with(HARDWARE_OUTPUT_ERROR_PREFIX)
 }
 
+fn play_local_file(
+    path: &Path,
+    output_stream: &mut Option<OutputStream>,
+    output_handle: &mut Option<rodio::OutputStreamHandle>,
+    preferred_output_device_name: Option<&str>,
+    status_tx: &mpsc::Sender<AudioStatus>,
+    target_volume: f32,
+) -> Result<Sink, String> {
+    let Some(handle) = ensure_output_handle(
+        output_stream,
+        output_handle,
+        preferred_output_device_name,
+        status_tx,
+    ) else {
+        return Err("Soundcard unavailable for local tape playback".to_string());
+    };
+
+    let file = File::open(path)
+        .map_err(|err| format!("Could not open tape file '{}': {err}", path.display()))?;
+    let source = rodio::Decoder::new(BufReader::new(file))
+        .map_err(|err| format!("Could not decode tape file '{}': {err}", path.display()))?;
+    let sink = Sink::try_new(&handle)
+        .map_err(|err| hardware_output_error(format!("Sink error: {err}")))?;
+
+    sink.set_volume(target_volume);
+    sink.append(source);
+    Ok(sink)
+}
+
 fn ensure_output_handle(
     output_stream: &mut Option<OutputStream>,
     output_handle: &mut Option<rodio::OutputStreamHandle>,
@@ -519,6 +582,16 @@ mod tests {
     fn non_hardware_error_does_not_trigger_recovery() {
         assert!(!is_hardware_output_error("Connection failed: timeout"));
         assert!(!is_hardware_output_error("Decode error: unsupported"));
+    }
+
+    #[test]
+    fn local_file_title_comes_from_tape_archive_helper() {
+        assert_eq!(
+            crate::tape_archive::display_track_title(std::path::Path::new(
+                "recordings/Synthwave/Lazerhawk - King.mp3"
+            )),
+            "Lazerhawk - King"
+        );
     }
 
     #[test]

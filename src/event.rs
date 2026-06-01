@@ -80,6 +80,14 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Settings overlay
         (_, KeyCode::Char(',')) => Some(Action::ToggleSettings),
 
+        // Local tape archive
+        (mods, KeyCode::Char('r')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::RefreshTapeArchive)
+        }
+        (_, KeyCode::Delete) => Some(Action::DeleteSelectedTape),
+        (_, KeyCode::Char('y')) => Some(Action::ConfirmDeleteTape),
+        (_, KeyCode::Char('n')) => Some(Action::CancelDeleteTape),
+
         // Tape recording
         (_, KeyCode::Char('r')) => Some(Action::ToggleRecording),
 
@@ -304,6 +312,25 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('u')), &InputMode::Normal),
             Some(Action::UndoRemoveLibrarySelection),
+        );
+    }
+
+    #[test]
+    fn normal_mode_ctrl_r_refreshes_tape_archive() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            Some(Action::RefreshTapeArchive),
+        );
+    }
+
+    #[test]
+    fn normal_mode_delete_requests_tape_delete() {
+        assert_eq!(
+            map_key(key(KeyCode::Delete), &InputMode::Normal),
+            Some(Action::DeleteSelectedTape),
         );
     }
 

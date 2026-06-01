@@ -3,6 +3,11 @@ use crate::audio::AudioCommand;
 
 impl App {
     pub(super) fn toggle_recording(&mut self) {
+        if self.local_playback_path.is_some() && self.playing_url.is_none() {
+            self.set_info_notice("Recording is only available for live streams");
+            return;
+        }
+
         if self.playing_url.is_none() {
             self.set_info_notice("Start playback before recording");
             return;
@@ -72,6 +77,20 @@ mod tests {
 
         assert_eq!(app.recording_state, RecordingState::Off);
         assert_eq!(notice_text(&app), Some("Start playback before recording"));
+    }
+
+    #[test]
+    fn toggle_recording_while_local_tape_is_playing_shows_notice() {
+        let mut app = test_app();
+        app.local_playback_path = Some(std::path::PathBuf::from("recordings/tape.mp3"));
+
+        app.toggle_recording();
+
+        assert_eq!(app.recording_state, RecordingState::Off);
+        assert_eq!(
+            notice_text(&app),
+            Some("Recording is only available for live streams")
+        );
     }
 
     #[test]

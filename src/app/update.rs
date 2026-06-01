@@ -4,17 +4,50 @@ use crate::action::Action;
 impl App {
     /// Process an action and update state accordingly.
     pub fn update(&mut self, action: Action) {
+        if self.pending_tape_delete.is_some() {
+            match action {
+                Action::ConfirmDeleteTape => self.confirm_tape_delete(),
+                Action::CancelDeleteTape | Action::Quit => self.cancel_tape_delete(),
+                _ => {}
+            }
+            return;
+        }
+
         if self.show_settings {
             self.handle_settings_action(action);
             return;
         }
 
         match action {
-            Action::NextStation => self.next_station(),
-            Action::PrevStation => self.prev_station(),
+            Action::NextStation => {
+                if self.is_tape_archive_focused() {
+                    self.next_tape_archive_row();
+                } else {
+                    self.next_station();
+                }
+            }
+            Action::PrevStation => {
+                if self.is_tape_archive_focused() {
+                    self.prev_tape_archive_row();
+                } else {
+                    self.prev_station();
+                }
+            }
 
-            Action::PlaySelected => self.play_selected(),
-            Action::TogglePause => self.toggle_pause(),
+            Action::PlaySelected => {
+                if self.is_tape_archive_focused() {
+                    self.play_selected_tape_or_toggle();
+                } else {
+                    self.play_selected();
+                }
+            }
+            Action::TogglePause => {
+                if self.is_tape_archive_focused() {
+                    self.toggle_tape_archive_folder_or_pause();
+                } else {
+                    self.toggle_pause();
+                }
+            }
             Action::Stop => self.stop_playback(),
 
             Action::VolumeUp => self.volume_up(),
@@ -28,7 +61,13 @@ impl App {
             Action::SearchConfirm => self.confirm_search(),
             Action::SearchAudition => self.audition_search_result(),
 
-            Action::RemoveLibrarySelection => self.remove_library_selection(),
+            Action::RemoveLibrarySelection | Action::DeleteSelectedTape => {
+                if self.is_tape_archive_focused() {
+                    self.request_delete_selected_tape();
+                } else {
+                    self.remove_library_selection();
+                }
+            }
             Action::UndoRemoveLibrarySelection => self.undo_remove_library_selection(),
             Action::NextGenre => self.next_genre(),
             Action::PrevGenre => self.prev_genre(),
@@ -40,6 +79,9 @@ impl App {
             Action::CycleLayout => self.cycle_layout(),
             Action::NextDeckPage => self.next_deck_page(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
+            Action::RefreshTapeArchive => self.refresh_tape_archive(),
+            Action::ConfirmDeleteTape => self.confirm_tape_delete(),
+            Action::CancelDeleteTape => self.cancel_tape_delete(),
 
             Action::Tick => self.tick(),
             Action::Quit => self.quit(),

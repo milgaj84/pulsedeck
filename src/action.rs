@@ -40,6 +40,12 @@ pub enum Action {
     ToggleRecording,
     ToggleVisualizerMode,
 
+    /// Local tape archive
+    RefreshTapeArchive,
+    DeleteSelectedTape,
+    ConfirmDeleteTape,
+    CancelDeleteTape,
+
     /// App lifecycle
     Tick,
     Quit,

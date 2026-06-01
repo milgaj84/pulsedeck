@@ -1,5 +1,6 @@
 use super::theme;
 use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
+use crate::tape_archive::{format_file_size, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -12,7 +13,7 @@ const CASSETTE_HEIGHT: u16 = 9;
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let title_text = match app.active_deck_page {
         0 => " 📼 Tape Deck ",
-        _ => " 📼 Tape History ",
+        _ => " 📼 Local Tape Library ",
     };
 
     // Outer block with desaturated deep purple border and custom retro neon title
@@ -44,7 +45,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             render_oscilloscope(frame, chunks[2], app);
         }
         _ => {
-            render_history(frame, inner_area, app);
+            render_tape_library(frame, inner_area, app);
         }
     }
 }
@@ -690,57 +691,201 @@ impl BrailleCanvas {
     }
 }
 
-fn render_history(frame: &mut Frame, area: Rect, app: &App) {
+fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
 
-    lines.push(Line::from(vec![Span::styled(
-        "   📼 Captured Session Mixtape ",
-        Style::default()
-            .fg(theme::accent_secondary())
-            .add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::from(vec![Span::styled(
-        "   ════════════════════════════",
-        theme::dim(),
-    )]));
+    lines.push(Line::from(vec![
+        Span::styled("   📼 LOCAL TAPE LIBRARY", theme::title()),
+        Span::styled("   ", theme::dim()),
+        Span::styled(app.tape_archive.root.display().to_string(), theme::dim()),
+    ]));
+
+    if let Some(path) = app.pending_tape_delete.as_ref() {
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("selected tape");
+
+        lines.push(Line::from(vec![
+            Span::styled("   DELETE? ", theme::error().add_modifier(Modifier::BOLD)),
+            Span::styled(filename.to_string(), theme::text()),
+            Span::styled("   y confirm / n cancel", theme::dim()),
+        ]));
+    } else {
+        let key_style = Style::default()
+            .fg(theme::highlight())
+            .add_modifier(Modifier::BOLD);
+
+        lines.push(Line::from(vec![
+            Span::styled("   Enter", key_style),
+            Span::styled(" play/open  ", theme::dim()),
+            Span::styled("Space", key_style),
+            Span::styled(" expand/pause  ", theme::dim()),
+            Span::styled("f/Delete", key_style),
+            Span::styled(" delete  ", theme::dim()),
+            Span::styled("Ctrl+r", key_style),
+            Span::styled(" refresh", theme::dim()),
+        ]));
+    }
+
     lines.push(Line::from(""));
 
-    if app.song_history.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "   [ No tracks captured yet ]",
-            theme::dim(),
-        )]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "   Music playback will record",
-            theme::dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "   inline ICY metadata here...",
-            theme::dim(),
-        )]));
-    } else {
-        // Render song history in reverse (newest on top)
-        let visible_rows = (area.height as usize).saturating_sub(4);
-
-        for (idx, song) in app.song_history.iter().enumerate().rev().take(visible_rows) {
-            let track_num = idx + 1;
-            let track_tag = format!("   Track {:02}: ", track_num);
-
+    match &app.tape_archive.status {
+        TapeArchiveStatus::NotLoaded => {
+            lines.push(status_line(
+                "   Opened for the first time. Scanning will begin shortly...",
+            ));
+        }
+        TapeArchiveStatus::Scanning => {
+            lines.push(status_line("   Scanning tape archive..."));
+        }
+        TapeArchiveStatus::Empty => {
+            lines.push(status_line("   No recordings found yet."));
+            lines.push(status_line(
+                "   Press r while playing a live stream to capture tracks.",
+            ));
+        }
+        TapeArchiveStatus::Error(message) => {
             lines.push(Line::from(vec![
-                Span::styled(
-                    track_tag,
-                    Style::default()
-                        .fg(theme::highlight())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(song.as_str(), theme::text()),
+                Span::styled("   Archive scan failed: ", theme::error()),
+                Span::styled(message.clone(), theme::dim()),
             ]));
+        }
+        TapeArchiveStatus::Ready => {
+            render_tape_archive_rows(&mut lines, area, app);
         }
     }
 
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_tape_archive_rows(lines: &mut Vec<Line<'static>>, area: Rect, app: &App) {
+    let row_count = app.tape_archive.flattened.len();
+    if row_count == 0 {
+        lines.push(status_line("   No tape rows available."));
+        return;
+    }
+
+    let visible_rows = (area.height as usize).saturating_sub(5).max(1);
+    let selected = app.tape_archive.selected.min(row_count.saturating_sub(1));
+    let start = if selected >= visible_rows {
+        selected + 1 - visible_rows
+    } else {
+        0
+    };
+
+    for (row_index, row) in app
+        .tape_archive
+        .flattened
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible_rows)
+    {
+        let is_selected = row_index == selected;
+        lines.push(render_tape_archive_row(row, is_selected, app));
+    }
+}
+
+fn render_tape_archive_row(row: &TapeArchiveRow, is_selected: bool, app: &App) -> Line<'static> {
+    let cursor = if is_selected { " ▸ " } else { "   " };
+    let cursor_style = if is_selected {
+        theme::selected()
+    } else {
+        theme::dim()
+    };
+
+    match row {
+        TapeArchiveRow::AllRecordings => Line::from(vec![
+            Span::styled(cursor, cursor_style),
+            Span::styled(
+                format!(
+                    "[All Recordings] {} tracks",
+                    app.tape_archive.total_tracks()
+                ),
+                if is_selected {
+                    theme::selected()
+                } else {
+                    theme::text()
+                },
+            ),
+        ]),
+        TapeArchiveRow::Folder { folder_index } => {
+            let Some(folder) = app.tape_archive.folders.get(*folder_index) else {
+                return status_line("   [missing folder]");
+            };
+
+            let marker = if folder.expanded { "▼" } else { "▸" };
+            Line::from(vec![
+                Span::styled(cursor, cursor_style),
+                Span::styled(
+                    format!("{marker} 📁 {} ", folder.name),
+                    if is_selected {
+                        theme::selected()
+                    } else {
+                        theme::title()
+                    },
+                ),
+                Span::styled(format!("({} tracks)", folder.tracks.len()), theme::dim()),
+            ])
+        }
+        TapeArchiveRow::Track {
+            folder_index,
+            track_index,
+        } => {
+            let Some(track) = app
+                .tape_archive
+                .folders
+                .get(*folder_index)
+                .and_then(|folder| folder.tracks.get(*track_index))
+            else {
+                return status_line("   [missing track]");
+            };
+
+            let is_playing = app.local_playback_path.as_ref() == Some(&track.path);
+            let icon = if is_playing { "🔊" } else { "📄" };
+            let title = compact_track_title(track, 42);
+            let meta = format!(
+                "{} · {}",
+                track.extension.to_uppercase(),
+                format_file_size(track.size_bytes)
+            );
+
+            Line::from(vec![
+                Span::styled(cursor, cursor_style),
+                Span::styled("  ", theme::dim()),
+                Span::styled(
+                    format!("{icon} {title}"),
+                    if is_playing {
+                        theme::playing()
+                    } else if is_selected {
+                        theme::selected()
+                    } else {
+                        theme::text()
+                    },
+                ),
+                Span::styled(format!("   {meta}"), theme::dim()),
+            ])
+        }
+    }
+}
+
+fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {
+    let value = track.title.as_str();
+
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else if max_chars <= 1 {
+        "…".to_string()
+    } else {
+        let mut truncated = value.chars().take(max_chars - 1).collect::<String>();
+        truncated.push('…');
+        truncated
+    }
+}
+
+fn status_line(message: impl Into<String>) -> Line<'static> {
+    Line::from(vec![Span::styled(message.into(), theme::dim())])
 }
 
 #[cfg(test)]
@@ -788,6 +933,22 @@ mod tests {
                 CASSETTE_TAPE_WIDTH
             );
         }
+    }
+
+    #[test]
+    fn compact_track_title_truncates_long_titles() {
+        let track = TapeTrack {
+            title: "A very long local tape recording title".to_string(),
+            artist: None,
+            filename: "track.mp3".to_string(),
+            path: std::path::PathBuf::from("track.mp3"),
+            extension: "mp3".to_string(),
+            size_bytes: 42,
+            modified: None,
+            duration_hint: None,
+        };
+
+        assert_eq!(compact_track_title(&track, 12), "A very long…");
     }
 
     #[test]

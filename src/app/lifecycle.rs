@@ -4,6 +4,7 @@ use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 impl App {
     pub fn new(library: Library) -> Self {
         let ui_state = super::ui_state::UiState::load();
+        let recording_dir = library.settings.recording_dir.clone();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
 
@@ -34,6 +35,11 @@ impl App {
             show_help: false,
             active_deck_page: 0,
             song_history: VecDeque::new(),
+            tape_archive: TapeArchive::new(recording_dir),
+            tape_archive_scan_requested: false,
+            tape_archive_scan_inflight: false,
+            local_playback_path: None,
+            pending_tape_delete: None,
             show_settings: false,
             selected_setting_idx: 0,
             recording_state: RecordingState::Off,
@@ -88,6 +94,16 @@ impl App {
     pub fn poll_audio_status(&mut self) {
         while let Ok(status) = self.audio.status_rx.try_recv() {
             match status {
+                AudioStatus::LocalFilePlaying { path, title } => {
+                    self.playing_url = None;
+                    self.local_playback_path = Some(path);
+                    self.current_track = Some(title);
+                    self.recording_state = RecordingState::Off;
+                    self.active_record_filepath = None;
+                    self.buffer_percent = 0;
+                    self.buffer_seconds = 0;
+                    self.playback = PlaybackState::Playing;
+                }
                 AudioStatus::TrackChanged { url, title } => {
                     // Safety check: discard track updates that do not match the current playing URL.
                     if Some(&url) == self.playing_url.as_ref() {
@@ -141,6 +157,7 @@ impl App {
                         AudioStatus::Paused => PlaybackState::Paused,
                         AudioStatus::Stopped => {
                             self.playing_url = None;
+                            self.local_playback_path = None;
                             self.current_track = None;
                             self.recording_state = RecordingState::Off;
                             self.active_record_filepath = None;
@@ -149,6 +166,7 @@ impl App {
                             PlaybackState::Stopped
                         }
                         AudioStatus::Error(e) => {
+                            self.local_playback_path = None;
                             self.current_track = None;
                             self.recording_state = RecordingState::Off;
                             self.active_record_filepath = None;
