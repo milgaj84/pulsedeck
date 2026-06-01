@@ -4,6 +4,8 @@ use ratatui::widgets::Paragraph;
 use super::theme;
 use crate::app::{App, SearchStatus};
 
+const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 /// Render the search input bar.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let result_count = app.search_results.len();
@@ -16,7 +18,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let api_indicator = match &app.search_status {
         SearchStatus::WaitingForInput => Span::styled("  Type 2+ chars to search", theme::dim()),
         SearchStatus::Debouncing { query } => {
-            Span::styled(format!("  Searching soon: {}", query), theme::dim())
+            Span::styled(debounce_indicator_text(query, app.tick_count), theme::dim())
         }
         SearchStatus::Searching { query } => Span::styled(
             format!("  ◌ searching {}...", query),
@@ -55,4 +57,37 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let search_bar = Paragraph::new(vec![line]).style(Style::default().bg(theme::surface_color()));
 
     frame.render_widget(search_bar, area);
+}
+
+fn debounce_indicator_text(query: &str, tick_count: u64) -> String {
+    format!(
+        "  {} initializing query for {}...",
+        search_debounce_frame(tick_count),
+        query
+    )
+}
+
+fn search_debounce_frame(tick_count: u64) -> &'static str {
+    SEARCH_DEBOUNCE_FRAMES[tick_count as usize % SEARCH_DEBOUNCE_FRAMES.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_debounce_frame_wraps_through_spinner_frames() {
+        assert_eq!(search_debounce_frame(0), "⠋");
+        assert_eq!(search_debounce_frame(1), "⠙");
+        assert_eq!(search_debounce_frame(9), "⠏");
+        assert_eq!(search_debounce_frame(10), "⠋");
+    }
+
+    #[test]
+    fn debounce_indicator_text_feels_active_without_saying_soon() {
+        let text = debounce_indicator_text("lofi", 2);
+
+        assert_eq!(text, "  ⠹ initializing query for lofi...");
+        assert!(!text.contains("soon"));
+    }
 }
