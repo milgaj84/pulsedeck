@@ -10,6 +10,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Search Audition Shortcut**: Added `Space` / `Ctrl+Enter` in search mode to stream the highlighted global result without saving it to the Library.
 
 ### Improved
+*   **Treble Texture Spectrum Response**: Replaced the hard high-frequency gain shelf with a soft-knee curve and variance-aware treble expansion so crisp hats and synth arpeggios keep visual texture without reviving noisy final-band spikes.
 *   **Audio Fade Visual Continuity**: Added an explicit fading-out status from the audio engine so deck status, reels, and visualizers remain active while the sink volume ramps down.
 *   **Bounded Library Undo History**: Expanded station removal undo from a single volatile slot to a 10-entry history stack, letting repeated `u` restores roll back multiple recent deletions.
 *   **Search Debounce Indicator**: Replaced the static `Searching soon` debounce message with a fast animated initializing indicator so search feels responsive immediately while debounce still protects API calls.

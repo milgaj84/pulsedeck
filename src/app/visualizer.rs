@@ -5,6 +5,10 @@ const SPECTRUM_NOISE_FLOOR: f32 = 0.0008;
 const SPECTRUM_OUTPUT_GAIN: f32 = 1.70;
 const SPECTRUM_CONNECTING_PEAK_MIN: f32 = 0.03;
 const SPECTRUM_CONNECTING_PEAK_MAX: f32 = 0.30;
+const SPECTRUM_TREBLE_START: f32 = 0.82;
+const SPECTRUM_TREBLE_SOFT_KNEE_SLOPE: f32 = 0.15;
+const SPECTRUM_TREBLE_VARIANCE_EXPANSION: f32 = 0.22;
+const SPECTRUM_TREBLE_VARIANCE_SENSITIVITY: f32 = 8.0;
 
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
@@ -71,8 +75,12 @@ impl App {
         }
 
         let targets = smooth_spectrum_targets(&targets);
+        let treble_variance =
+            treble_delta_variance(&targets, &self.visualizer_peaks, SPECTRUM_ANALYSIS_BANDS);
 
         for (band, target) in targets.iter().copied().enumerate() {
+            let target =
+                preserve_treble_variance(target, band, SPECTRUM_ANALYSIS_BANDS, treble_variance);
             let current = self.visualizer_peaks[band];
             if target > current {
                 self.visualizer_peaks[band] = target; // Fast rise.
@@ -158,20 +166,84 @@ fn compress_spectrum_energy(avg: f32) -> f32 {
 }
 
 fn spectrum_gain_curve(band: usize, total_bands: usize) -> f32 {
-    let denominator = total_bands.saturating_sub(1).max(1) as f32;
-    let t = band as f32 / denominator;
+    let t = band_position(band, total_bands);
 
     // Gentle broad lift through mids/highs without the old final-bin rocket boost.
-    let broad_lift = 1.0 + 1.20 * t.powf(0.72);
+    spectrum_broad_lift(t) * high_treble_soft_knee(t)
+}
 
-    // Tame the last treble shelf so weak high-frequency bins do not dominate visually.
-    let high_tame = if t > 0.82 {
-        1.0 - ((t - 0.82) / 0.18).clamp(0.0, 1.0) * 0.35
+fn spectrum_broad_lift(t: f32) -> f32 {
+    1.0 + 1.20 * t.powf(0.72)
+}
+
+fn high_treble_soft_knee(t: f32) -> f32 {
+    if t > SPECTRUM_TREBLE_START {
+        1.0 - (t - SPECTRUM_TREBLE_START) * SPECTRUM_TREBLE_SOFT_KNEE_SLOPE
     } else {
         1.0
-    };
+    }
+}
 
-    broad_lift * high_tame
+fn preserve_treble_variance(target: f32, band: usize, total_bands: usize, variance: f32) -> f32 {
+    (target * treble_variance_expansion_factor(band, total_bands, variance)).clamp(0.0, 0.92)
+}
+
+fn treble_variance_expansion_factor(band: usize, total_bands: usize, variance: f32) -> f32 {
+    let t = band_position(band, total_bands);
+    if t <= SPECTRUM_TREBLE_START {
+        return 1.0;
+    }
+
+    let treble_t = ((t - SPECTRUM_TREBLE_START) / (1.0 - SPECTRUM_TREBLE_START)).clamp(0.0, 1.0);
+    let structured_motion =
+        (variance.sqrt() * SPECTRUM_TREBLE_VARIANCE_SENSITIVITY).clamp(0.0, 1.0);
+
+    1.0 + structured_motion * treble_t * SPECTRUM_TREBLE_VARIANCE_EXPANSION
+}
+
+fn treble_delta_variance(targets: &[f32], previous_peaks: &[f32], total_bands: usize) -> f32 {
+    let start = treble_start_band(total_bands);
+    let end = targets.len().min(previous_peaks.len());
+
+    if start >= end {
+        return 0.0;
+    }
+
+    let deltas = (start..end)
+        .map(|band| (targets[band] - previous_peaks[band]).abs())
+        .collect::<Vec<_>>();
+
+    variance(&deltas)
+}
+
+fn treble_start_band(total_bands: usize) -> usize {
+    if total_bands == 0 {
+        return 0;
+    }
+
+    let denominator = total_bands.saturating_sub(1).max(1) as f32;
+    ((denominator * SPECTRUM_TREBLE_START).floor() as usize + 1).min(total_bands)
+}
+
+fn band_position(band: usize, total_bands: usize) -> f32 {
+    let denominator = total_bands.saturating_sub(1).max(1) as f32;
+    band as f32 / denominator
+}
+
+fn variance(values: &[f32]) -> f32 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+
+    let mean = values.iter().sum::<f32>() / values.len() as f32;
+    values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f32>()
+        / values.len() as f32
 }
 
 fn smooth_spectrum_targets(targets: &[f32]) -> Vec<f32> {
@@ -291,12 +363,53 @@ mod tests {
     }
 
     #[test]
-    fn spectrum_gain_curve_tames_final_band() {
+    fn spectrum_gain_curve_softens_high_end_without_flattening_treble() {
         let mid_gain = spectrum_gain_curve(20, SPECTRUM_ANALYSIS_BANDS);
         let final_gain = spectrum_gain_curve(SPECTRUM_ANALYSIS_BANDS - 1, SPECTRUM_ANALYSIS_BANDS);
+        let full_final_lift = spectrum_broad_lift(1.0);
 
-        assert!(final_gain < mid_gain);
-        assert!(final_gain < 1.50);
+        assert!(final_gain > mid_gain);
+        assert!(final_gain < full_final_lift);
+        assert!(final_gain > full_final_lift * 0.95);
+    }
+
+    #[test]
+    fn treble_variance_expansion_boosts_structured_highs_only() {
+        let quiet_treble = preserve_treble_variance(
+            0.4,
+            SPECTRUM_ANALYSIS_BANDS - 1,
+            SPECTRUM_ANALYSIS_BANDS,
+            0.0,
+        );
+        let structured_treble = preserve_treble_variance(
+            0.4,
+            SPECTRUM_ANALYSIS_BANDS - 1,
+            SPECTRUM_ANALYSIS_BANDS,
+            0.04,
+        );
+        let mid_band = preserve_treble_variance(0.4, 20, SPECTRUM_ANALYSIS_BANDS, 0.04);
+
+        assert!(structured_treble > quiet_treble);
+        assert_eq!(mid_band, 0.4);
+        assert!(structured_treble <= 0.92);
+    }
+
+    #[test]
+    fn treble_delta_variance_detects_structured_motion() {
+        let previous = vec![0.10; SPECTRUM_ANALYSIS_BANDS];
+        let flat_targets = vec![0.20; SPECTRUM_ANALYSIS_BANDS];
+        let mut structured_targets = flat_targets.clone();
+
+        for band in treble_start_band(SPECTRUM_ANALYSIS_BANDS)..SPECTRUM_ANALYSIS_BANDS {
+            structured_targets[band] = if band.is_multiple_of(2) { 0.45 } else { 0.05 };
+        }
+
+        let flat_variance =
+            treble_delta_variance(&flat_targets, &previous, SPECTRUM_ANALYSIS_BANDS);
+        let structured_variance =
+            treble_delta_variance(&structured_targets, &previous, SPECTRUM_ANALYSIS_BANDS);
+
+        assert!(structured_variance > flat_variance);
     }
 
     #[test]
