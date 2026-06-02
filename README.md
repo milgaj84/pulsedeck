@@ -190,9 +190,54 @@ Press `p` to open the **Local Tape Library**, a disk-backed browser for recordin
 - Use `Ctrl+r` to rescan the recording folder without restarting.
 - Use `o` on a selected track to open its containing folder in the host file manager.
 - Use `f` or `Delete` on a selected track to request removal; confirmation moves it to the OS trash, then `y` to confirm or `n` / `Esc` to cancel.
-- When a local tape finishes, PulseDeck automatically hands off to the next recording in the same folder.
+- When a local tape finishes, PulseDeck follows the selected local tape playback mode.
+- Use `g` on the Local Tape Library page to cycle playback modes.
+
+
+Local tape file management:
+
+- Use `i` to show or hide details for the selected local tape.
+- Use `Shift+R` to rename the selected tape without changing its extension.
+- Use `Shift+M` to move the selected tape into another folder under the recording directory.
+- Rename and move operations stop the selected local tape first if it is currently playing, then refresh the archive.
+
+Playing local tapes show elapsed progress directly on the active row. When PulseDeck can read duration metadata, the row shows elapsed and total duration with a compact progress bar; otherwise it falls back to elapsed time only.
+
+Local tape playback modes:
+
+- `Stop`: stop at the end of the current local tape.
+- `Folder`: continue through the current folder.
+- `All`: continue through all recordings newest-first.
+- `Repeat`: repeat the current local tape.
+- `Shuffle`: pick another recording from the archive.
 
 Local tape playback uses the same audio output and volume controls as live streams. Recording remains limited to live streams, so pressing `r` while a local tape is active shows a friendly notice instead of trying to re-record a file.
+
+
+## Recording Session Dashboard
+
+When recording is armed or active, the Tape Deck shows a live recording dashboard:
+
+- Station currently being captured.
+- Pending or active recording state.
+- Elapsed recording time.
+- Current capture filename and size when available.
+- Minimum song duration and snippet policy.
+
+PulseDeck also writes a small hidden recovery journal in the recording directory while a session is pending or active. If the app exits unexpectedly, the next launch surfaces a recovery notice so unfinished captures are not silent ghosts on disk.
+
+
+Recording intelligence:
+
+- PulseDeck avoids overwriting an existing recording with the same artist/title filename.
+- Duplicate recordings are skipped with a visible notice instead of silently replacing files.
+- Completed MP3 captures receive PulseDeck ID3 metadata with artist, title, genre/category, and source stream context when available.
+
+Recovery actions are available from the Tape Deck when a journal is detected:
+
+- `Shift+K` keeps the partial recording on disk and clears the journal.
+- `Shift+T` moves the partial recording to the OS trash and clears the journal.
+- `Shift+D` dismisses the journal without touching the partial recording.
 
 ---
 

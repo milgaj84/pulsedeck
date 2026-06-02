@@ -4,6 +4,7 @@ mod audio;
 mod event;
 mod favorites;
 mod radio;
+mod recording_journal;
 mod system_open;
 mod system_trash;
 mod tape_archive;

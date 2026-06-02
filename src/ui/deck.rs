@@ -1,8 +1,12 @@
 use super::theme;
 use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
-use crate::tape_archive::{track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
+use crate::tape_archive::{
+    format_duration, format_file_size, track_metadata_label, TapeArchiveRow, TapeArchiveStatus,
+    TapeTrack,
+};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
+use std::time::Duration;
 
 const CASSETTE_INNER_WIDTH: usize = 44;
 #[cfg(test)]
@@ -353,8 +357,12 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
     };
 
     let station = app.now_playing();
-    let genre = station.map(|s| s.genre.as_str()).unwrap_or("N/A");
-    let country = station.map(|s| s.country.as_str()).unwrap_or("N/A");
+    let genre = station
+        .map(|s| s.genre.clone())
+        .unwrap_or_else(|| "N/A".to_string());
+    let country = station
+        .map(|s| s.country.clone())
+        .unwrap_or_else(|| "N/A".to_string());
 
     let filled = (app.buffer_percent / 10) as usize;
     let empty = 10 - filled;
@@ -381,21 +389,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
 
-    if app.recording_state == RecordingState::Active {
-        if let Some(ref filepath) = app.active_record_filepath {
-            let filename = std::path::Path::new(filepath)
-                .file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or(filepath);
-            lines.push(Line::from(vec![
-                Span::styled(
-                    " ● REC ACTIVE ",
-                    theme::error().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("capture -> {}", filename), theme::dim()),
-            ]));
-        }
-    }
+    append_recording_dashboard(&mut lines, app);
 
     let title = if full_deck {
         " SIGNAL / TAPE STATUS "
@@ -410,6 +404,115 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
+}
+
+fn append_recording_dashboard(lines: &mut Vec<Line<'static>>, app: &App) {
+    match app.recording_state {
+        RecordingState::Off => {
+            if let Some(notice) = app.recording_recovery_notice.as_ref() {
+                let target = app
+                    .recording_recovery
+                    .as_ref()
+                    .and_then(|recovery| recovery.active_file.as_deref())
+                    .and_then(|path| {
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                    })
+                    .unwrap_or("recovery journal");
+
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        " RECOVERY ",
+                        Style::default()
+                            .fg(theme::warm())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(notice.clone(), theme::dim()),
+                ]));
+
+                lines.push(Line::from(vec![
+                    Span::styled(" TARGET ", theme::dim()),
+                    Span::styled(target.to_string(), theme::cyan()),
+                    Span::styled("   Shift+K ", theme::dim()),
+                    Span::styled("keep", theme::cyan()),
+                    Span::styled("   Shift+T ", theme::dim()),
+                    Span::styled("trash", theme::cyan()),
+                    Span::styled("   Shift+D ", theme::dim()),
+                    Span::styled("dismiss", theme::cyan()),
+                ]));
+            }
+        }
+        RecordingState::Pending | RecordingState::Active => {
+            let (label, style) = match app.recording_state {
+                RecordingState::Pending => (
+                    " REC ARMED ",
+                    Style::default()
+                        .fg(theme::warm())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                RecordingState::Active => {
+                    (" REC ACTIVE ", theme::error().add_modifier(Modifier::BOLD))
+                }
+                RecordingState::Off => unreachable!(),
+            };
+
+            let station = app
+                .recording_station_name
+                .as_deref()
+                .or_else(|| app.now_playing().map(|station| station.name.as_str()))
+                .unwrap_or("Radio Stream");
+
+            lines.push(Line::from(vec![
+                Span::styled(label, style),
+                Span::styled(station.to_string(), theme::cyan()),
+                Span::styled("   elapsed ", theme::dim()),
+                Span::styled(
+                    crate::recording_journal::format_elapsed(app.recording_started_at),
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            let capture = recording_capture_label(app);
+            lines.push(Line::from(vec![
+                Span::styled(" CAPTURE ", theme::dim()),
+                Span::styled(capture, theme::dim()),
+                Span::styled("   min ", theme::dim()),
+                Span::styled(
+                    format!("{}s", app.library.settings.min_song_duration_secs),
+                    theme::cyan(),
+                ),
+                Span::styled("   snippets ", theme::dim()),
+                Span::styled(
+                    if app.library.settings.keep_snippets {
+                        "keep"
+                    } else {
+                        "drop"
+                    },
+                    theme::cyan(),
+                ),
+            ]));
+        }
+    }
+}
+
+fn recording_capture_label(app: &App) -> String {
+    let Some(filepath) = app.active_record_filepath.as_ref() else {
+        return "waiting for next track boundary".to_string();
+    };
+
+    let path = std::path::Path::new(filepath);
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(filepath);
+
+    match std::fs::metadata(path) {
+        Ok(metadata) => format!("{filename} · {}", format_file_size(metadata.len())),
+        Err(_) => filename.to_string(),
+    }
 }
 
 fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
@@ -722,6 +825,7 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     lines.push(Line::from(vec![Span::styled(mode_label, theme::dim())]));
+    append_tape_manager_panel(&mut lines, app);
 
     if let Some(path) = app.pending_tape_delete.as_ref() {
         let filename = path
@@ -785,6 +889,69 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn append_tape_manager_panel(lines: &mut Vec<Line<'static>>, app: &App) {
+    match app.input_mode {
+        InputMode::TapeRename => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "   Rename: ",
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
+                Span::styled("   Enter save / Esc cancel", theme::dim()),
+            ]));
+        }
+        InputMode::TapeMove => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "   Move to folder: ",
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
+                Span::styled("   Enter move / Esc cancel", theme::dim()),
+            ]));
+        }
+        _ => {}
+    }
+
+    if !app.tape_details_visible {
+        return;
+    }
+
+    let Some(track) = app.tape_archive.selected_track() else {
+        return;
+    };
+
+    let folder = app
+        .tape_archive
+        .selected_track_folder_name()
+        .unwrap_or("Unknown");
+    lines.push(Line::from(vec![
+        Span::styled("   DETAILS ", theme::title()),
+        Span::styled(track.title.clone(), theme::cyan()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Folder ", theme::dim()),
+        Span::styled(folder.to_string(), theme::text()),
+        Span::styled("   File ", theme::dim()),
+        Span::styled(track.filename.clone(), theme::text()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Format ", theme::dim()),
+        Span::styled(track.extension.to_uppercase(), theme::text()),
+        Span::styled("   Size ", theme::dim()),
+        Span::styled(format_file_size(track.size_bytes), theme::text()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Path ", theme::dim()),
+        Span::styled(track.path.display().to_string(), theme::dim()),
+    ]));
 }
 
 fn render_tape_archive_rows(lines: &mut Vec<Line<'static>>, area: Rect, app: &App) {
@@ -917,7 +1084,7 @@ fn render_track_row(
     };
     let meta = track_metadata_label(track);
 
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(cursor, cursor_style),
         Span::styled("  ", theme::dim()),
         Span::styled(
@@ -931,7 +1098,45 @@ fn render_track_row(
             },
         ),
         Span::styled(format!("   {meta}"), theme::dim()),
-    ])
+    ];
+
+    if is_playing {
+        if let Some(progress) = local_tape_progress_label(app, track) {
+            spans.push(Span::styled(format!("   {progress}"), theme::cyan()));
+        }
+    }
+
+    Line::from(spans)
+}
+
+fn local_tape_progress_label(app: &App, track: &TapeTrack) -> Option<String> {
+    if app.local_playback_path.as_ref() != Some(&track.path) {
+        return None;
+    }
+
+    let elapsed = app.local_tape_elapsed();
+
+    match track.duration_hint {
+        Some(duration) if duration > Duration::ZERO => {
+            let clamped = elapsed.min(duration);
+            let ratio = clamped.as_secs_f64() / duration.as_secs_f64();
+            Some(format!(
+                "{} {} / {}",
+                local_tape_progress_bar(ratio, 10),
+                format_duration(clamped),
+                format_duration(duration)
+            ))
+        }
+        _ => Some(format!("{} elapsed", format_duration(elapsed))),
+    }
+}
+
+fn local_tape_progress_bar(ratio: f64, width: usize) -> String {
+    let ratio = ratio.clamp(0.0, 1.0);
+    let filled = (ratio * width as f64).round() as usize;
+    let filled = filled.min(width);
+
+    format!("{}{}", "▰".repeat(filled), "▱".repeat(width - filled))
 }
 
 fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {

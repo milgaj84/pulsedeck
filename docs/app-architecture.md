@@ -65,6 +65,44 @@ Trash deletion goes through `src/system_trash.rs`. PulseDeck attempts platform t
 
 Local playback completion is surfaced as `AudioStatus::LocalFileFinished`. The app reducer uses the tape archive model to find the next recording in the same folder and starts it automatically. At the end of a folder, playback stops and the footer reports the end of the tape folder.
 
+## Recording session dashboard
+
+Recording session visibility lives in app state rather than the audio thread. `src/app/recording.rs` starts, updates, and clears the session fields, while `src/app/lifecycle.rs` delegates `AudioStatus::RecordingStateChanged` into that reducer.
+
+`src/recording_journal.rs` owns the lightweight recovery journal. The app writes it when recording is pending or active and removes it when recording stops cleanly. On startup, `App::new` checks the configured recording directory for an abandoned journal and exposes a recovery notice to the Tape Deck.
+
+The Tape Deck renders the session dashboard from app state: station, elapsed time, active capture path, file size, minimum duration, and snippet policy. The dashboard intentionally reads file size from the filesystem at render time so the audio thread does not need to send high-frequency byte counters.
+
+## Recording recovery actions
+
+When startup detects a recovery journal, app state stores both the full `RecordingRecovery` payload and a user-facing recovery notice. The Tape Deck and footer expose three explicit actions: keep the partial file and remove the journal, move the partial file to OS trash, or dismiss the journal only.
+
+Recovery actions are handled in `src/app/recording.rs` so the reducer owns the lifecycle: journal removal, trash attempts through `src/system_trash.rs`, archive refresh requests, and notice updates. Failed trash moves keep recovery state intact so the user can retry or choose a non-destructive action.
+
+## Recording intelligence
+
+The stream reader owns track-boundary recording decisions because it sees Icecast metadata changes before decoded samples reach the sink. It now refuses to overwrite an existing target file for the same sanitized artist/title path, reporting a duplicate-skip notice rather than replacing a user's archive.
+
+Completed MP3 captures receive richer ID3 metadata through `src/audio/recording.rs`: artist/title splitting, PulseDeck album context, genre/category, and source stream URL when available. This keeps portable local recordings useful outside the TUI without adding transcoding complexity.
+
+## Local tape playback modes
+
+Local tape playback continuation is controlled by `TapePlaybackMode`, owned by app state. The audio thread only reports `AudioStatus::LocalFileFinished`; the app reducer decides whether to stop, continue through the current folder, continue through all recordings, repeat the current file, or choose a deterministic shuffle target.
+
+The archive model owns track lookup and next-track helpers so playback modes do not duplicate folder traversal logic in UI code. Shuffle mode intentionally uses deterministic path hashing with the app tick counter as salt, avoiding an additional runtime RNG dependency.
+
+## Local tape file manager
+
+The Local Tape Library now owns lightweight file-management workflows in `src/app/tape_archive.rs`. Rename and move actions use dedicated input modes so global search and tape filtering remain separate. The reducer sanitizes path components, prevents accidental overwrite, stops active local playback before mutating the current file, and requests an archive rescan after successful filesystem changes.
+
+The UI keeps the details inspector read-only. It presents title, folder, filename, format, size, and full path while mutations stay behind explicit `Shift+R` and `Shift+M` commands.
+
+## Local tape playback progress
+
+Local tape progress is tracked in app state from audio lifecycle events. `AudioStatus::LocalFilePlaying` starts a timer, `Paused` folds elapsed time into a paused accumulator, `Playing` resumes the timer, and `Stopped`/`Error`/`LocalFileFinished` clear progress state.
+
+The UI combines this app-state elapsed time with archive duration hints gathered during tape scanning. This avoids requiring decoder seeking or sink-position APIs for a first progress display and keeps the audio thread protocol simple.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

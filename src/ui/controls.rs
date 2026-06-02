@@ -202,6 +202,28 @@ fn recording_label(recording_state: RecordingState) -> &'static str {
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
+        InputMode::TapeRename => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("type", theme::cyan()),
+            Span::styled("] Rename tape  [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Save  [", theme::dim()),
+            Span::styled("Backspace", theme::cyan()),
+            Span::styled("] Edit  [", theme::dim()),
+            Span::styled("Esc", theme::cyan()),
+            Span::styled("] Cancel", theme::dim()),
+        ]),
+        InputMode::TapeMove => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("type", theme::cyan()),
+            Span::styled("] Target folder  [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Move  [", theme::dim()),
+            Span::styled("Backspace", theme::cyan()),
+            Span::styled("] Edit  [", theme::dim()),
+            Span::styled("Esc", theme::cyan()),
+            Span::styled("] Cancel", theme::dim()),
+        ]),
         InputMode::TapeFilter => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("type", theme::cyan()),
@@ -232,6 +254,24 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::ITALIC),
             ),
         ]),
+        InputMode::Normal
+            if app.recording_recovery_notice.is_some()
+                && app.recording_state == RecordingState::Off =>
+        {
+            Line::from(vec![
+                Span::styled(" [", theme::dim()),
+                Span::styled("Shift+K", theme::cyan()),
+                Span::styled("] Keep partial  [", theme::dim()),
+                Span::styled("Shift+T", theme::cyan()),
+                Span::styled("] Trash partial  [", theme::dim()),
+                Span::styled("Shift+D", theme::cyan()),
+                Span::styled("] Dismiss journal  [", theme::dim()),
+                Span::styled("r", theme::cyan()),
+                Span::styled("] New recording  [", theme::dim()),
+                Span::styled("h", theme::cyan()),
+                Span::styled("] Help", theme::dim()),
+            ])
+        }
         InputMode::Normal if app.is_tape_archive_focused() => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
@@ -242,6 +282,12 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Refresh  [", theme::dim()),
             Span::styled("o", theme::cyan()),
             Span::styled("] Folder  [", theme::dim()),
+            Span::styled("g", theme::cyan()),
+            Span::styled("] Mode  [", theme::dim()),
+            Span::styled("i", theme::cyan()),
+            Span::styled("] Info  [", theme::dim()),
+            Span::styled("R/M", theme::cyan()),
+            Span::styled("] Rename/Move  [", theme::dim()),
             Span::styled("f/Del", theme::cyan()),
             Span::styled("] Trash  [", theme::dim()),
             Span::styled("p", theme::cyan()),

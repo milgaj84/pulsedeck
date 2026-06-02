@@ -4,7 +4,8 @@ use crate::audio::AudioCommand;
 use crate::system_open;
 use crate::system_trash;
 use crate::tape_archive::{TapeArchive, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const TAPE_ARCHIVE_PAGE: usize = 1;
 
@@ -62,6 +63,255 @@ impl App {
         {
             self.tape_archive_scan_requested = true;
         }
+    }
+
+    pub(super) fn cycle_tape_playback_mode(&mut self) {
+        self.tape_playback_mode = self.tape_playback_mode.next();
+        self.set_info_notice(format!(
+            "Tape playback mode: {} — {}",
+            self.tape_playback_mode.label(),
+            self.tape_playback_mode.description()
+        ));
+    }
+
+    pub(super) fn handle_local_tape_finished(&mut self, path: PathBuf) {
+        self.local_playback_started_at = None;
+        self.local_playback_elapsed_before_pause = Duration::ZERO;
+
+        let next = match self.tape_playback_mode {
+            TapePlaybackMode::StopAtEnd => None,
+            TapePlaybackMode::Folder => self.tape_archive.next_track_after(&path),
+            TapePlaybackMode::AllRecordings => self.tape_archive.next_track_after_any_folder(&path),
+            TapePlaybackMode::RepeatOne => self.tape_archive.track_by_path(&path),
+            TapePlaybackMode::ShuffleAll => self
+                .tape_archive
+                .deterministic_shuffle_track_after(&path, self.tick_count),
+        };
+
+        if let Some(next) = next {
+            let title = next.title.clone();
+            let mode = self.tape_playback_mode.label();
+            self.play_tape_track(next);
+            self.set_info_notice(format!("Tape {mode}: {title}"));
+        } else {
+            self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
+            self.current_track = None;
+            self.playback = PlaybackState::Stopped;
+            self.set_info_notice(match self.tape_playback_mode {
+                TapePlaybackMode::StopAtEnd => "Tape playback stopped at end",
+                TapePlaybackMode::Folder => "End of tape folder",
+                TapePlaybackMode::AllRecordings => "End of all recordings",
+                TapePlaybackMode::RepeatOne => "Tape repeat ended",
+                TapePlaybackMode::ShuffleAll => "No other tapes to shuffle",
+            });
+        }
+    }
+
+    pub(super) fn toggle_tape_details(&mut self) {
+        if !self.is_tape_archive_page() {
+            return;
+        }
+
+        if self.tape_archive.selected_track().is_none() {
+            self.set_info_notice("Select a tape file to inspect details");
+            return;
+        }
+
+        self.tape_details_visible = !self.tape_details_visible;
+        self.set_info_notice(if self.tape_details_visible {
+            "Tape details visible"
+        } else {
+            "Tape details hidden"
+        });
+    }
+
+    pub(super) fn enter_tape_rename(&mut self) {
+        if !self.is_tape_archive_focused() {
+            return;
+        }
+
+        let Some(track) = self.tape_archive.selected_track() else {
+            self.set_info_notice("Select a tape file to rename");
+            return;
+        };
+
+        self.pending_tape_delete = None;
+        self.tape_edit_buffer = track
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(track.title.as_str())
+            .to_string();
+        self.input_mode = InputMode::TapeRename;
+        self.set_info_notice("Rename tape: edit name and press Enter");
+    }
+
+    pub(super) fn enter_tape_move(&mut self) {
+        if !self.is_tape_archive_focused() {
+            return;
+        }
+
+        if self.tape_archive.selected_track().is_none() {
+            self.set_info_notice("Select a tape file to move");
+            return;
+        }
+
+        self.pending_tape_delete = None;
+        self.tape_edit_buffer = self
+            .tape_archive
+            .selected_track_folder_name()
+            .unwrap_or("")
+            .to_string();
+        self.input_mode = InputMode::TapeMove;
+        self.set_info_notice("Move tape: type target folder and press Enter");
+    }
+
+    pub(super) fn handle_tape_manager_action(&mut self, action: Action) {
+        match action {
+            Action::TapeManagerInput(ch) => self.tape_manager_input(ch),
+            Action::TapeManagerBackspace => self.tape_manager_backspace(),
+            Action::ConfirmTapeRename => self.confirm_tape_rename(),
+            Action::ConfirmTapeMove => self.confirm_tape_move(),
+            Action::CancelTapeManager => self.cancel_tape_manager(),
+            Action::Tick => self.tick(),
+            Action::Quit => self.quit(),
+            _ => {}
+        }
+    }
+
+    pub(super) fn tape_manager_input(&mut self, ch: char) {
+        if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove)
+            && !ch.is_control()
+        {
+            self.tape_edit_buffer.push(ch);
+        }
+    }
+
+    pub(super) fn tape_manager_backspace(&mut self) {
+        if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove) {
+            self.tape_edit_buffer.pop();
+        }
+    }
+
+    pub(super) fn cancel_tape_manager(&mut self) {
+        if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove) {
+            self.input_mode = InputMode::Normal;
+            self.tape_edit_buffer.clear();
+            self.set_info_notice("Tape file edit cancelled");
+        }
+    }
+
+    pub(super) fn confirm_tape_rename(&mut self) {
+        if self.input_mode != InputMode::TapeRename {
+            return;
+        }
+
+        let Some(track) = self.tape_archive.selected_track().cloned() else {
+            self.cancel_tape_manager();
+            return;
+        };
+
+        let Ok(new_stem) = sanitized_tape_component(self.tape_edit_buffer.as_str()) else {
+            self.set_error_notice("Tape name cannot be empty");
+            return;
+        };
+
+        let extension = track
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or(track.extension.as_str());
+
+        let filename = if extension.trim().is_empty() {
+            new_stem
+        } else {
+            format!("{new_stem}.{extension}")
+        };
+
+        let Some(parent) = track.path.parent() else {
+            self.set_error_notice("Selected tape has no containing folder");
+            return;
+        };
+
+        let target = parent.join(filename);
+        self.apply_tape_file_move(track.path.as_path(), target.as_path(), "Tape renamed");
+    }
+
+    pub(super) fn confirm_tape_move(&mut self) {
+        if self.input_mode != InputMode::TapeMove {
+            return;
+        }
+
+        let Some(track) = self.tape_archive.selected_track().cloned() else {
+            self.cancel_tape_manager();
+            return;
+        };
+
+        let Ok(folder_name) = sanitized_tape_component(self.tape_edit_buffer.as_str()) else {
+            self.set_error_notice("Target folder cannot be empty");
+            return;
+        };
+
+        let target_dir = self.current_tape_archive_root().join(folder_name);
+        let target = target_dir.join(track.filename.as_str());
+        self.apply_tape_file_move(track.path.as_path(), target.as_path(), "Tape moved");
+    }
+
+    fn apply_tape_file_move(&mut self, source: &Path, target: &Path, success_notice: &'static str) {
+        if source == target {
+            self.input_mode = InputMode::Normal;
+            self.tape_edit_buffer.clear();
+            self.set_info_notice("No tape file change needed");
+            return;
+        }
+
+        if target.exists() {
+            self.set_error_notice(format!("Target already exists: {}", target.display()));
+            return;
+        }
+
+        if let Some(parent) = target.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                self.set_error_notice(format!("Could not create target folder: {err}"));
+                return;
+            }
+        }
+
+        if self.local_playback_path.as_deref() == Some(source) {
+            self.audio.send(AudioCommand::Stop);
+            self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
+            self.current_track = None;
+            self.playback = PlaybackState::Stopped;
+        }
+
+        match std::fs::rename(source, target) {
+            Ok(()) => {
+                self.input_mode = InputMode::Normal;
+                self.tape_edit_buffer.clear();
+                self.pending_tape_delete = None;
+                self.tape_archive_scan_requested = true;
+                self.set_info_notice(success_notice);
+            }
+            Err(err) => {
+                self.set_error_notice(format!("Could not update tape file: {err}"));
+            }
+        }
+    }
+
+    pub fn local_tape_elapsed(&self) -> Duration {
+        let mut elapsed = self.local_playback_elapsed_before_pause;
+
+        if self.local_playback_path.is_some() {
+            if let Some(started_at) = self.local_playback_started_at {
+                elapsed += started_at.elapsed().unwrap_or_default();
+            }
+        }
+
+        elapsed
     }
 
     pub(super) fn refresh_tape_archive(&mut self) {
@@ -211,6 +461,8 @@ impl App {
         if self.local_playback_path.as_ref() == Some(&path) {
             self.audio.send(AudioCommand::Stop);
             self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
             self.current_track = None;
             self.playback = PlaybackState::Stopped;
         }
@@ -250,6 +502,8 @@ impl App {
     pub(super) fn play_tape_track(&mut self, track: TapeTrack) {
         self.playing_url = None;
         self.local_playback_path = Some(track.path.clone());
+        self.local_playback_started_at = None;
+        self.local_playback_elapsed_before_pause = Duration::ZERO;
         self.current_track = Some(track.title.clone());
         self.playback = PlaybackState::Connecting;
         self.buffer_percent = 0;
@@ -262,6 +516,25 @@ impl App {
 
     fn current_tape_archive_root(&self) -> PathBuf {
         PathBuf::from(self.library.settings.recording_dir.clone())
+    }
+}
+
+fn sanitized_tape_component(value: &str) -> Result<String, ()> {
+    let cleaned = value
+        .chars()
+        .map(|ch| match ch {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            other => other,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+
+    if cleaned.is_empty() {
+        Err(())
+    } else {
+        Ok(cleaned)
     }
 }
 

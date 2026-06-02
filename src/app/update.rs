@@ -13,6 +13,11 @@ impl App {
             return;
         }
 
+        if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove) {
+            self.handle_tape_manager_action(action);
+            return;
+        }
+
         if self.input_mode == InputMode::TapeFilter {
             self.handle_tape_filter_action(action);
             return;
@@ -91,11 +96,23 @@ impl App {
             Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::KeepRecordingRecovery => self.keep_recording_recovery(),
+            Action::TrashRecordingRecovery => self.trash_recording_recovery(),
+            Action::DismissRecordingRecovery => self.dismiss_recording_recovery(),
             Action::CycleLayout => self.cycle_layout(),
             Action::NextDeckPage => self.next_deck_page(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::RefreshTapeArchive => self.refresh_tape_archive(),
             Action::OpenSelectedTapeFolder => self.open_selected_tape_folder(),
+            Action::CycleTapePlaybackMode => self.cycle_tape_playback_mode(),
+            Action::ToggleTapeDetails => self.toggle_tape_details(),
+            Action::EnterTapeRename => self.enter_tape_rename(),
+            Action::EnterTapeMove => self.enter_tape_move(),
+            Action::TapeManagerInput(ch) => self.tape_manager_input(ch),
+            Action::TapeManagerBackspace => self.tape_manager_backspace(),
+            Action::ConfirmTapeRename => self.confirm_tape_rename(),
+            Action::ConfirmTapeMove => self.confirm_tape_move(),
+            Action::CancelTapeManager => self.cancel_tape_manager(),
             Action::ConfirmDeleteTape => self.confirm_tape_delete(),
             Action::CancelDeleteTape => self.cancel_tape_delete(),
 

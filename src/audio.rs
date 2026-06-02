@@ -189,121 +189,129 @@ fn audio_loop(
     loop {
         // Non-blocking check for commands (10ms poll)
         match cmd_rx.recv_timeout(Duration::from_millis(10)) {
-            Ok(cmd) => match cmd {
-                AudioCommand::Play(url) => {
-                    current_local_path = None;
-                    if current_sink.is_some() {
-                        pending_action = Some(AudioCommand::Play(url));
-                    } else {
-                        spawn_connection_for!(url);
-                    }
+            Ok(cmd) => {
+                if cfg!(test) {
+                    handle_test_audio_command(cmd, &status_tx);
+                    continue;
                 }
-                AudioCommand::PlayLocalFile(path) => {
-                    pending_action = None;
-                    current_local_path = None;
-                    current_fade_volume = None;
-                    active_conn_id.store(0, Ordering::SeqCst);
-                    connect_thread = None;
-                    current_url = None;
 
-                    if let Some(old_sink) = current_sink.take() {
-                        old_sink.stop();
-                    }
-
-                    match play_local_file(
-                        &path,
-                        &mut output_stream,
-                        &mut output_handle,
-                        preferred_output_device_name.as_deref(),
-                        &status_tx,
-                        target_volume,
-                    ) {
-                        Ok(sink) => {
-                            let title = crate::tape_archive::display_track_title(&path);
-                            current_sink = Some(sink);
-                            current_local_path = Some(path.clone());
-                            let _ = status_tx.send(AudioStatus::LocalFilePlaying { path, title });
-                        }
-                        Err(err) => {
-                            let _ = status_tx.send(AudioStatus::Error(err));
+                match cmd {
+                    AudioCommand::Play(url) => {
+                        current_local_path = None;
+                        if current_sink.is_some() {
+                            pending_action = Some(AudioCommand::Play(url));
+                        } else {
+                            spawn_connection_for!(url);
                         }
                     }
-                }
-                AudioCommand::Pause => {
-                    if let Some(ref sink) = current_sink {
+                    AudioCommand::PlayLocalFile(path) => {
                         pending_action = None;
+                        current_local_path = None;
                         current_fade_volume = None;
-                        sink.pause();
-                        let _ = status_tx.send(AudioStatus::Paused);
-                    }
-                }
-                AudioCommand::Resume => {
-                    if let Some(ref sink) = current_sink {
-                        pending_action = None;
-                        sink.play();
-                        let _ = status_tx.send(AudioStatus::Playing);
-                        // Smooth fade-in
-                        current_fade_volume = Some(0.0);
-                    }
-                }
-                AudioCommand::Stop => {
-                    current_local_path = None;
-                    if current_sink.is_some() {
-                        pending_action = Some(AudioCommand::Stop);
-                    } else {
-                        active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
+                        active_conn_id.store(0, Ordering::SeqCst);
                         connect_thread = None;
-                        let _ = status_tx.send(AudioStatus::Stopped);
-                    }
-                }
-                AudioCommand::SetVolume(vol) => {
-                    target_volume = vol;
-                    if current_fade_volume.is_none() && pending_action.is_none() {
-                        if let Some(ref sink) = current_sink {
-                            sink.set_volume(vol);
+                        current_url = None;
+
+                        if let Some(old_sink) = current_sink.take() {
+                            old_sink.stop();
+                        }
+
+                        match play_local_file(
+                            &path,
+                            &mut output_stream,
+                            &mut output_handle,
+                            preferred_output_device_name.as_deref(),
+                            &status_tx,
+                            target_volume,
+                        ) {
+                            Ok(sink) => {
+                                let title = crate::tape_archive::display_track_title(&path);
+                                current_sink = Some(sink);
+                                current_local_path = Some(path.clone());
+                                let _ =
+                                    status_tx.send(AudioStatus::LocalFilePlaying { path, title });
+                            }
+                            Err(err) => {
+                                let _ = status_tx.send(AudioStatus::Error(err));
+                            }
                         }
                     }
-                }
-                AudioCommand::SetOutputDevice(device_name) => {
-                    preferred_output_device_name =
-                        output::normalize_output_device_name(device_name.as_deref());
+                    AudioCommand::Pause => {
+                        if let Some(ref sink) = current_sink {
+                            pending_action = None;
+                            current_fade_volume = None;
+                            sink.pause();
+                            let _ = status_tx.send(AudioStatus::Paused);
+                        }
+                    }
+                    AudioCommand::Resume => {
+                        if let Some(ref sink) = current_sink {
+                            pending_action = None;
+                            sink.play();
+                            let _ = status_tx.send(AudioStatus::Playing);
+                            // Smooth fade-in
+                            current_fade_volume = Some(0.0);
+                        }
+                    }
+                    AudioCommand::Stop => {
+                        current_local_path = None;
+                        if current_sink.is_some() {
+                            pending_action = Some(AudioCommand::Stop);
+                        } else {
+                            active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
+                            connect_thread = None;
+                            let _ = status_tx.send(AudioStatus::Stopped);
+                        }
+                    }
+                    AudioCommand::SetVolume(vol) => {
+                        target_volume = vol;
+                        if current_fade_volume.is_none() && pending_action.is_none() {
+                            if let Some(ref sink) = current_sink {
+                                sink.set_volume(vol);
+                            }
+                        }
+                    }
+                    AudioCommand::SetOutputDevice(device_name) => {
+                        preferred_output_device_name =
+                            output::normalize_output_device_name(device_name.as_deref());
 
-                    if current_sink.is_some() {
-                        reopen_output_on_next_connection = true;
-                    } else {
-                        output_stream = None;
-                        output_handle = None;
-                        reopen_output_on_next_connection = false;
+                        if current_sink.is_some() {
+                            reopen_output_on_next_connection = true;
+                        } else {
+                            output_stream = None;
+                            output_handle = None;
+                            reopen_output_on_next_connection = false;
+                        }
+                    }
+                    AudioCommand::StartRecording {
+                        recording_dir,
+                        category,
+                        keep_snippets,
+                        min_song_duration_secs,
+                    } => {
+                        *record_state.recording_dir.lock().unwrap() = recording_dir;
+                        *record_state.category.lock().unwrap() = category;
+                        record_state
+                            .keep_snippets
+                            .store(keep_snippets, Ordering::SeqCst);
+                        record_state
+                            .min_song_duration_secs
+                            .store(min_song_duration_secs, Ordering::SeqCst);
+                        record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
+                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                            state: 1,
+                            filepath: None,
+                        });
+                    }
+                    AudioCommand::StopRecording => {
+                        record_state.state.store(0, Ordering::SeqCst); // Transition to Off
+                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                            state: 0,
+                            filepath: None,
+                        });
                     }
                 }
-                AudioCommand::StartRecording {
-                    recording_dir,
-                    category,
-                    keep_snippets,
-                    min_song_duration_secs,
-                } => {
-                    *record_state.recording_dir.lock().unwrap() = recording_dir;
-                    *record_state.category.lock().unwrap() = category;
-                    record_state
-                        .keep_snippets
-                        .store(keep_snippets, Ordering::SeqCst);
-                    record_state
-                        .min_song_duration_secs
-                        .store(min_song_duration_secs, Ordering::SeqCst);
-                    record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
-                    let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                        state: 1,
-                        filepath: None,
-                    });
-                }
-                AudioCommand::StopRecording => {
-                    record_state.state.store(0, Ordering::SeqCst); // Transition to Off
-                    let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                        state: 0,
-                        filepath: None,
-                    });
-                }
-            },
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 break;
@@ -432,6 +440,40 @@ fn audio_loop(
                     let _ = status_tx.send(AudioStatus::Stopped);
                 }
             }
+        }
+    }
+}
+
+fn handle_test_audio_command(cmd: AudioCommand, status_tx: &mpsc::Sender<AudioStatus>) {
+    match cmd {
+        AudioCommand::Play(_) => {
+            let _ = status_tx.send(AudioStatus::Playing);
+        }
+        AudioCommand::PlayLocalFile(path) => {
+            let title = crate::tape_archive::display_track_title(&path);
+            let _ = status_tx.send(AudioStatus::LocalFilePlaying { path, title });
+        }
+        AudioCommand::Pause => {
+            let _ = status_tx.send(AudioStatus::Paused);
+        }
+        AudioCommand::Resume => {
+            let _ = status_tx.send(AudioStatus::Playing);
+        }
+        AudioCommand::Stop => {
+            let _ = status_tx.send(AudioStatus::Stopped);
+        }
+        AudioCommand::SetVolume(_) | AudioCommand::SetOutputDevice(_) => {}
+        AudioCommand::StartRecording { .. } => {
+            let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                state: 1,
+                filepath: None,
+            });
+        }
+        AudioCommand::StopRecording => {
+            let _ = status_tx.send(AudioStatus::RecordingStateChanged {
+                state: 0,
+                filepath: None,
+            });
         }
     }
 }

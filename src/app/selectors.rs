@@ -5,7 +5,10 @@ impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
     pub fn visible_stations(&self) -> Vec<&Station> {
         match self.input_mode {
-            InputMode::Normal | InputMode::TapeFilter => {
+            InputMode::Normal
+            | InputMode::TapeFilter
+            | InputMode::TapeRename
+            | InputMode::TapeMove => {
                 if let Some(genre) = self.library.available_genres.get(self.selected_genre_idx) {
                     if genre == "All" {
                         self.library.stations.iter().collect()
@@ -47,7 +50,10 @@ impl App {
     /// Count visible stations without allocating a Vec.
     pub fn visible_count(&self) -> usize {
         match self.input_mode {
-            InputMode::Normal | InputMode::TapeFilter => {
+            InputMode::Normal
+            | InputMode::TapeFilter
+            | InputMode::TapeRename
+            | InputMode::TapeMove => {
                 if let Some(genre) = self.library.available_genres.get(self.selected_genre_idx) {
                     if genre == "All" {
                         self.library.stations.len()
