@@ -5,6 +5,11 @@ impl App {
     pub fn new(library: Library) -> Self {
         let ui_state = super::ui_state::UiState::load();
         let recording_dir = library.settings.recording_dir.clone();
+        let recording_recovery_notice =
+            crate::recording_journal::detect_recovery_journal(&recording_dir)
+                .ok()
+                .flatten()
+                .map(|recovery| recovery.summary());
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
 
@@ -44,6 +49,11 @@ impl App {
             selected_setting_idx: 0,
             recording_state: RecordingState::Off,
             active_record_filepath: None,
+            recording_started_at: None,
+            recording_station_name: None,
+            recording_station_url: None,
+            recording_category: None,
+            recording_recovery_notice,
             buffer_percent: 0,
             buffer_seconds: 0,
             undo_history: VecDeque::new(),
@@ -152,12 +162,7 @@ impl App {
                     }
                 }
                 AudioStatus::RecordingStateChanged { state, filepath } => {
-                    self.recording_state = match state {
-                        1 => RecordingState::Pending,
-                        2 => RecordingState::Active,
-                        _ => RecordingState::Off,
-                    };
-                    self.active_record_filepath = filepath;
+                    self.sync_recording_status(state, filepath);
                 }
                 AudioStatus::BufferLevel { percent, seconds } => {
                     self.buffer_percent = percent;

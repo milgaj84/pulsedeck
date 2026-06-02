@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::AudioCommand;
+use std::time::SystemTime;
 
 impl App {
     pub(super) fn toggle_recording(&mut self) {
@@ -15,13 +16,21 @@ impl App {
 
         match self.recording_state {
             RecordingState::Off => {
-                let category = self
-                    .now_playing()
+                let station = self.now_playing().cloned();
+                let category = station
+                    .as_ref()
                     .map(|s| s.genre.clone())
                     .unwrap_or_else(|| "Unknown".to_string());
                 let rec_dir = self.library.settings.recording_dir.clone();
                 let keep_snippets = self.library.settings.keep_snippets;
                 let min_secs = self.library.settings.min_song_duration_secs;
+
+                self.recording_started_at = Some(SystemTime::now());
+                self.recording_station_name = station.as_ref().map(|s| s.name.clone());
+                self.recording_station_url = station.as_ref().map(|s| s.url.clone());
+                self.recording_category = Some(category.clone());
+                self.recording_recovery_notice = None;
+                self.write_recording_journal("pending");
 
                 self.audio.send(AudioCommand::StartRecording {
                     recording_dir: rec_dir,
@@ -34,10 +43,67 @@ impl App {
             }
             RecordingState::Pending | RecordingState::Active => {
                 self.audio.send(AudioCommand::StopRecording);
-                self.recording_state = RecordingState::Off;
-                self.active_record_filepath = None;
+                self.clear_recording_session();
                 self.set_info_notice("Recording stopped");
             }
+        }
+    }
+    pub(super) fn sync_recording_status(&mut self, state: u8, filepath: Option<String>) {
+        self.recording_state = match state {
+            1 => RecordingState::Pending,
+            2 => RecordingState::Active,
+            _ => RecordingState::Off,
+        };
+        self.active_record_filepath = filepath;
+
+        match self.recording_state {
+            RecordingState::Off => self.clear_recording_session(),
+            RecordingState::Pending => {
+                if self.recording_started_at.is_none() {
+                    self.recording_started_at = Some(SystemTime::now());
+                }
+                self.write_recording_journal("pending");
+            }
+            RecordingState::Active => {
+                if self.recording_started_at.is_none() {
+                    self.recording_started_at = Some(SystemTime::now());
+                }
+                self.write_recording_journal("active");
+            }
+        }
+    }
+
+    pub(super) fn clear_recording_session(&mut self) {
+        let recording_dir = self.library.settings.recording_dir.clone();
+        let _ = crate::recording_journal::remove_session_journal(&recording_dir);
+
+        self.recording_state = RecordingState::Off;
+        self.active_record_filepath = None;
+        self.recording_started_at = None;
+        self.recording_station_name = None;
+        self.recording_station_url = None;
+        self.recording_category = None;
+    }
+
+    fn write_recording_journal(&mut self, state: &str) {
+        let Some(started_at) = self.recording_started_at else {
+            return;
+        };
+
+        let recording_dir = self.library.settings.recording_dir.clone();
+        let result = crate::recording_journal::write_session_journal(
+            &recording_dir,
+            self.recording_station_name.as_deref(),
+            self.recording_station_url.as_deref(),
+            self.recording_category.as_deref(),
+            state,
+            started_at,
+            self.active_record_filepath.as_deref(),
+            self.current_track.as_deref(),
+        );
+
+        if let Err(err) = result {
+            self.set_error_notice(err);
         }
     }
 }
@@ -59,7 +125,16 @@ mod tests {
     }
 
     fn test_app() -> App {
-        App::new(Library::in_memory(vec![station("A", "http://a")]))
+        let mut library = Library::in_memory(vec![station("A", "http://a")]);
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        library.settings.recording_dir = std::env::temp_dir()
+            .join(format!("pulsedeck-recording-test-{unique}"))
+            .display()
+            .to_string();
+        App::new(library)
     }
 
     fn notice_text(app: &App) -> Option<&str> {
@@ -119,5 +194,35 @@ mod tests {
         assert_eq!(app.recording_state, RecordingState::Off);
         assert_eq!(app.active_record_filepath, None);
         assert_eq!(notice_text(&app), Some("Recording stopped"));
+    }
+
+    #[test]
+    fn recording_status_changed_active_updates_dashboard_fields() {
+        let mut app = test_app();
+
+        app.sync_recording_status(2, Some("recordings/Synthwave/capture.mp3".to_string()));
+
+        assert_eq!(app.recording_state, RecordingState::Active);
+        assert_eq!(
+            app.active_record_filepath.as_deref(),
+            Some("recordings/Synthwave/capture.mp3")
+        );
+        assert!(app.recording_started_at.is_some());
+    }
+
+    #[test]
+    fn clearing_recording_session_resets_dashboard_fields() {
+        let mut app = test_app();
+        app.recording_state = RecordingState::Active;
+        app.active_record_filepath = Some("capture.mp3".to_string());
+        app.recording_started_at = Some(std::time::SystemTime::now());
+        app.recording_station_name = Some("A".to_string());
+
+        app.clear_recording_session();
+
+        assert_eq!(app.recording_state, RecordingState::Off);
+        assert!(app.active_record_filepath.is_none());
+        assert!(app.recording_started_at.is_none());
+        assert!(app.recording_station_name.is_none());
     }
 }

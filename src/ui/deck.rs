@@ -1,6 +1,8 @@
 use super::theme;
 use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
-use crate::tape_archive::{track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
+use crate::tape_archive::{
+    format_file_size, track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack,
+};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -353,8 +355,12 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
     };
 
     let station = app.now_playing();
-    let genre = station.map(|s| s.genre.as_str()).unwrap_or("N/A");
-    let country = station.map(|s| s.country.as_str()).unwrap_or("N/A");
+    let genre = station
+        .map(|s| s.genre.clone())
+        .unwrap_or_else(|| "N/A".to_string());
+    let country = station
+        .map(|s| s.country.clone())
+        .unwrap_or_else(|| "N/A".to_string());
 
     let filled = (app.buffer_percent / 10) as usize;
     let empty = 10 - filled;
@@ -381,21 +387,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
 
-    if app.recording_state == RecordingState::Active {
-        if let Some(ref filepath) = app.active_record_filepath {
-            let filename = std::path::Path::new(filepath)
-                .file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or(filepath);
-            lines.push(Line::from(vec![
-                Span::styled(
-                    " ● REC ACTIVE ",
-                    theme::error().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("capture -> {}", filename), theme::dim()),
-            ]));
-        }
-    }
+    append_recording_dashboard(&mut lines, app);
 
     let title = if full_deck {
         " SIGNAL / TAPE STATUS "
@@ -410,6 +402,93 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
+}
+
+fn append_recording_dashboard(lines: &mut Vec<Line<'static>>, app: &App) {
+    match app.recording_state {
+        RecordingState::Off => {
+            if let Some(notice) = app.recording_recovery_notice.as_ref() {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        " RECOVERY ",
+                        Style::default()
+                            .fg(theme::warm())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(notice.clone(), theme::dim()),
+                ]));
+            }
+        }
+        RecordingState::Pending | RecordingState::Active => {
+            let (label, style) = match app.recording_state {
+                RecordingState::Pending => (
+                    " REC ARMED ",
+                    Style::default()
+                        .fg(theme::warm())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                RecordingState::Active => {
+                    (" REC ACTIVE ", theme::error().add_modifier(Modifier::BOLD))
+                }
+                RecordingState::Off => unreachable!(),
+            };
+
+            let station = app
+                .recording_station_name
+                .as_deref()
+                .or_else(|| app.now_playing().map(|station| station.name.as_str()))
+                .unwrap_or("Radio Stream");
+
+            lines.push(Line::from(vec![
+                Span::styled(label, style),
+                Span::styled(station.to_string(), theme::cyan()),
+                Span::styled("   elapsed ", theme::dim()),
+                Span::styled(
+                    crate::recording_journal::format_elapsed(app.recording_started_at),
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            let capture = recording_capture_label(app);
+            lines.push(Line::from(vec![
+                Span::styled(" CAPTURE ", theme::dim()),
+                Span::styled(capture, theme::dim()),
+                Span::styled("   min ", theme::dim()),
+                Span::styled(
+                    format!("{}s", app.library.settings.min_song_duration_secs),
+                    theme::cyan(),
+                ),
+                Span::styled("   snippets ", theme::dim()),
+                Span::styled(
+                    if app.library.settings.keep_snippets {
+                        "keep"
+                    } else {
+                        "drop"
+                    },
+                    theme::cyan(),
+                ),
+            ]));
+        }
+    }
+}
+
+fn recording_capture_label(app: &App) -> String {
+    let Some(filepath) = app.active_record_filepath.as_ref() else {
+        return "waiting for next track boundary".to_string();
+    };
+
+    let path = std::path::Path::new(filepath);
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(filepath);
+
+    match std::fs::metadata(path) {
+        Ok(metadata) => format!("{filename} · {}", format_file_size(metadata.len())),
+        Err(_) => filename.to_string(),
+    }
 }
 
 fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {

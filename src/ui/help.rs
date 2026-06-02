@@ -66,7 +66,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         shortcut("s", "Stop playback"),
         shortcut("+ / -", "Volume up / down"),
         shortcut("m", "Mute / unmute"),
-        shortcut("r", "Arm / stop tape recording"),
+        shortcut("r", "Arm / stop recording; dashboard tracks active capture"),
         section("Library"),
         shortcut("↑↓ / j k", "Move selection"),
         shortcut("Tab / Shift+Tab", "Change genre category"),

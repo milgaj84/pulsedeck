@@ -21,6 +21,7 @@ use crate::tape_archive::TapeArchive;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 pub use types::{
     AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus, SettingRow,
@@ -83,6 +84,11 @@ pub struct App {
 
     pub recording_state: RecordingState,
     pub active_record_filepath: Option<String>,
+    pub recording_started_at: Option<SystemTime>,
+    pub recording_station_name: Option<String>,
+    pub recording_station_url: Option<String>,
+    pub recording_category: Option<String>,
+    pub recording_recovery_notice: Option<String>,
     pub buffer_percent: u8,
     pub buffer_seconds: u32,
 

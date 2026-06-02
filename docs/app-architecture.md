@@ -65,6 +65,14 @@ Trash deletion goes through `src/system_trash.rs`. PulseDeck attempts platform t
 
 Local playback completion is surfaced as `AudioStatus::LocalFileFinished`. The app reducer uses the tape archive model to find the next recording in the same folder and starts it automatically. At the end of a folder, playback stops and the footer reports the end of the tape folder.
 
+## Recording session dashboard
+
+Recording session visibility lives in app state rather than the audio thread. `src/app/recording.rs` starts, updates, and clears the session fields, while `src/app/lifecycle.rs` delegates `AudioStatus::RecordingStateChanged` into that reducer.
+
+`src/recording_journal.rs` owns the lightweight recovery journal. The app writes it when recording is pending or active and removes it when recording stops cleanly. On startup, `App::new` checks the configured recording directory for an abandoned journal and exposes a recovery notice to the Tape Deck.
+
+The Tape Deck renders the session dashboard from app state: station, elapsed time, active capture path, file size, minimum duration, and snippet policy. The dashboard intentionally reads file size from the filesystem at render time so the audio thread does not need to send high-frequency byte counters.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

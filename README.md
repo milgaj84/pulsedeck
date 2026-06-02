@@ -194,6 +194,19 @@ Press `p` to open the **Local Tape Library**, a disk-backed browser for recordin
 
 Local tape playback uses the same audio output and volume controls as live streams. Recording remains limited to live streams, so pressing `r` while a local tape is active shows a friendly notice instead of trying to re-record a file.
 
+
+## Recording Session Dashboard
+
+When recording is armed or active, the Tape Deck shows a live recording dashboard:
+
+- Station currently being captured.
+- Pending or active recording state.
+- Elapsed recording time.
+- Current capture filename and size when available.
+- Minimum song duration and snippet policy.
+
+PulseDeck also writes a small hidden recovery journal in the recording directory while a session is pending or active. If the app exits unexpectedly, the next launch surfaces a recovery notice so unfinished captures are not silent ghosts on disk.
+
 ---
 
 ## Settings
