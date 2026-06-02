@@ -47,6 +47,8 @@ impl App {
             local_playback_path: None,
             pending_tape_delete: None,
             tape_playback_mode: TapePlaybackMode::Folder,
+            tape_details_visible: false,
+            tape_edit_buffer: String::new(),
             show_settings: false,
             selected_setting_idx: 0,
             recording_state: RecordingState::Off,

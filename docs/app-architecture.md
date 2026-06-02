@@ -91,6 +91,12 @@ Local tape playback continuation is controlled by `TapePlaybackMode`, owned by a
 
 The archive model owns track lookup and next-track helpers so playback modes do not duplicate folder traversal logic in UI code. Shuffle mode intentionally uses deterministic path hashing with the app tick counter as salt, avoiding an additional runtime RNG dependency.
 
+## Local tape file manager
+
+The Local Tape Library now owns lightweight file-management workflows in `src/app/tape_archive.rs`. Rename and move actions use dedicated input modes so global search and tape filtering remain separate. The reducer sanitizes path components, prevents accidental overwrite, stops active local playback before mutating the current file, and requests an archive rescan after successful filesystem changes.
+
+The UI keeps the details inspector read-only. It presents title, folder, filename, format, size, and full path while mutations stay behind explicit `Shift+R` and `Shift+M` commands.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

@@ -13,6 +13,11 @@ impl App {
             return;
         }
 
+        if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove) {
+            self.handle_tape_manager_action(action);
+            return;
+        }
+
         if self.input_mode == InputMode::TapeFilter {
             self.handle_tape_filter_action(action);
             return;
@@ -100,6 +105,14 @@ impl App {
             Action::RefreshTapeArchive => self.refresh_tape_archive(),
             Action::OpenSelectedTapeFolder => self.open_selected_tape_folder(),
             Action::CycleTapePlaybackMode => self.cycle_tape_playback_mode(),
+            Action::ToggleTapeDetails => self.toggle_tape_details(),
+            Action::EnterTapeRename => self.enter_tape_rename(),
+            Action::EnterTapeMove => self.enter_tape_move(),
+            Action::TapeManagerInput(ch) => self.tape_manager_input(ch),
+            Action::TapeManagerBackspace => self.tape_manager_backspace(),
+            Action::ConfirmTapeRename => self.confirm_tape_rename(),
+            Action::ConfirmTapeMove => self.confirm_tape_move(),
+            Action::CancelTapeManager => self.cancel_tape_manager(),
             Action::ConfirmDeleteTape => self.confirm_tape_delete(),
             Action::CancelDeleteTape => self.cancel_tape_delete(),
 

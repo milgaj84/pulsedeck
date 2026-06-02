@@ -6,6 +6,8 @@ pub enum InputMode {
     Normal,
     Search,
     TapeFilter,
+    TapeRename,
+    TapeMove,
 }
 
 /// Explicit search state for UI messages and stale-response handling.

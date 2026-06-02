@@ -823,6 +823,7 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     lines.push(Line::from(vec![Span::styled(mode_label, theme::dim())]));
+    append_tape_manager_panel(&mut lines, app);
 
     if let Some(path) = app.pending_tape_delete.as_ref() {
         let filename = path
@@ -886,6 +887,69 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn append_tape_manager_panel(lines: &mut Vec<Line<'static>>, app: &App) {
+    match app.input_mode {
+        InputMode::TapeRename => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "   Rename: ",
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
+                Span::styled("   Enter save / Esc cancel", theme::dim()),
+            ]));
+        }
+        InputMode::TapeMove => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "   Move to folder: ",
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
+                Span::styled("   Enter move / Esc cancel", theme::dim()),
+            ]));
+        }
+        _ => {}
+    }
+
+    if !app.tape_details_visible {
+        return;
+    }
+
+    let Some(track) = app.tape_archive.selected_track() else {
+        return;
+    };
+
+    let folder = app
+        .tape_archive
+        .selected_track_folder_name()
+        .unwrap_or("Unknown");
+    lines.push(Line::from(vec![
+        Span::styled("   DETAILS ", theme::title()),
+        Span::styled(track.title.clone(), theme::cyan()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Folder ", theme::dim()),
+        Span::styled(folder.to_string(), theme::text()),
+        Span::styled("   File ", theme::dim()),
+        Span::styled(track.filename.clone(), theme::text()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Format ", theme::dim()),
+        Span::styled(track.extension.to_uppercase(), theme::text()),
+        Span::styled("   Size ", theme::dim()),
+        Span::styled(format_file_size(track.size_bytes), theme::text()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("   Path ", theme::dim()),
+        Span::styled(track.path.display().to_string(), theme::dim()),
+    ]));
 }
 
 fn render_tape_archive_rows(lines: &mut Vec<Line<'static>>, area: Rect, app: &App) {

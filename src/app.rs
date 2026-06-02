@@ -80,6 +80,8 @@ pub struct App {
     pub local_playback_path: Option<PathBuf>,
     pub pending_tape_delete: Option<PathBuf>,
     pub tape_playback_mode: TapePlaybackMode,
+    pub tape_details_visible: bool,
+    pub tape_edit_buffer: String,
 
     pub show_settings: bool,
     pub selected_setting_idx: usize,

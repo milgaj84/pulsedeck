@@ -166,7 +166,9 @@ fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrat
 
     match input_mode {
         InputMode::Search => format!("{} · {} · {}k", genre, country, bitrate),
-        InputMode::Normal | InputMode::TapeFilter => format!("{} · {}k", country, bitrate),
+        InputMode::Normal | InputMode::TapeFilter | InputMode::TapeRename | InputMode::TapeMove => {
+            format!("{} · {}k", country, bitrate)
+        }
     }
 }
 
@@ -183,7 +185,7 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
                 format!(" 🔍 Search Results ({}) ", visible_count)
             }
         }
-        InputMode::Normal | InputMode::TapeFilter => {
+        InputMode::Normal | InputMode::TapeFilter | InputMode::TapeRename | InputMode::TapeMove => {
             if visible_count == 0 {
                 " ◇ Empty Library — press / to search ".to_string()
             } else {

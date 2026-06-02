@@ -25,6 +25,8 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
         InputMode::TapeFilter => map_tape_filter(key),
+        InputMode::TapeRename => map_tape_rename(key),
+        InputMode::TapeMove => map_tape_move(key),
     }
 }
 
@@ -89,6 +91,9 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Delete) => Some(Action::DeleteSelectedTape),
         (_, KeyCode::Char('o')) => Some(Action::OpenSelectedTapeFolder),
         (_, KeyCode::Char('g')) => Some(Action::CycleTapePlaybackMode),
+        (_, KeyCode::Char('i')) => Some(Action::ToggleTapeDetails),
+        (_, KeyCode::Char('R')) => Some(Action::EnterTapeRename),
+        (_, KeyCode::Char('M')) => Some(Action::EnterTapeMove),
         (_, KeyCode::Char('y')) => Some(Action::ConfirmDeleteTape),
         (_, KeyCode::Char('n')) => Some(Action::CancelDeleteTape),
 
@@ -155,6 +160,28 @@ fn map_tape_filter(key: KeyEvent) -> Option<Action> {
         }
         (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeFilterInput(c)),
+        _ => None,
+    }
+}
+
+fn map_tape_rename(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        (_, KeyCode::Esc) => Some(Action::CancelTapeManager),
+        (_, KeyCode::Enter) => Some(Action::ConfirmTapeRename),
+        (_, KeyCode::Backspace) => Some(Action::TapeManagerBackspace),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeManagerInput(c)),
+        _ => None,
+    }
+}
+
+fn map_tape_move(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        (_, KeyCode::Esc) => Some(Action::CancelTapeManager),
+        (_, KeyCode::Enter) => Some(Action::ConfirmTapeMove),
+        (_, KeyCode::Backspace) => Some(Action::TapeManagerBackspace),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeManagerInput(c)),
         _ => None,
     }
 }

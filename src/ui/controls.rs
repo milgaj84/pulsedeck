@@ -202,6 +202,28 @@ fn recording_label(recording_state: RecordingState) -> &'static str {
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
+        InputMode::TapeRename => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("type", theme::cyan()),
+            Span::styled("] Rename tape  [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Save  [", theme::dim()),
+            Span::styled("Backspace", theme::cyan()),
+            Span::styled("] Edit  [", theme::dim()),
+            Span::styled("Esc", theme::cyan()),
+            Span::styled("] Cancel", theme::dim()),
+        ]),
+        InputMode::TapeMove => Line::from(vec![
+            Span::styled(" [", theme::dim()),
+            Span::styled("type", theme::cyan()),
+            Span::styled("] Target folder  [", theme::dim()),
+            Span::styled("Enter", theme::cyan()),
+            Span::styled("] Move  [", theme::dim()),
+            Span::styled("Backspace", theme::cyan()),
+            Span::styled("] Edit  [", theme::dim()),
+            Span::styled("Esc", theme::cyan()),
+            Span::styled("] Cancel", theme::dim()),
+        ]),
         InputMode::TapeFilter => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("type", theme::cyan()),
@@ -262,6 +284,10 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Folder  [", theme::dim()),
             Span::styled("g", theme::cyan()),
             Span::styled("] Mode  [", theme::dim()),
+            Span::styled("i", theme::cyan()),
+            Span::styled("] Info  [", theme::dim()),
+            Span::styled("R/M", theme::cyan()),
+            Span::styled("] Rename/Move  [", theme::dim()),
             Span::styled("f/Del", theme::cyan()),
             Span::styled("] Trash  [", theme::dim()),
             Span::styled("p", theme::cyan()),

@@ -193,6 +193,14 @@ Press `p` to open the **Local Tape Library**, a disk-backed browser for recordin
 - When a local tape finishes, PulseDeck follows the selected local tape playback mode.
 - Use `g` on the Local Tape Library page to cycle playback modes.
 
+
+Local tape file management:
+
+- Use `i` to show or hide details for the selected local tape.
+- Use `Shift+R` to rename the selected tape without changing its extension.
+- Use `Shift+M` to move the selected tape into another folder under the recording directory.
+- Rename and move operations stop the selected local tape first if it is currently playing, then refresh the archive.
+
 Local tape playback modes:
 
 - `Stop`: stop at the end of the current local tape.
