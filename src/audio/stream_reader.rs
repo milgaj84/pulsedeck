@@ -1,7 +1,10 @@
 use super::buffer::BufferQueue;
 use super::buffer_meter::BufferStatusMeter;
 use super::metadata::parse_stream_title;
-use super::recording::{inject_id3_tags, sanitize_filename};
+use super::recording::{
+    duplicate_skip_message, inject_id3_tags_with_context, recording_target_exists,
+    sanitize_filename, RecordingTagContext,
+};
 use super::{AudioStatus, RecordStateShared};
 
 use std::fs::File;
@@ -147,6 +150,21 @@ impl StreamReader {
 
         path.push(format!("{}.{}", clean_title, ext));
 
+        if recording_target_exists(&path) {
+            let _ = self
+                .status_tx
+                .send(AudioStatus::Error(duplicate_skip_message(title)));
+            let _ = self.status_tx.send(AudioStatus::RecordingStateChanged {
+                state: 2,
+                filepath: None,
+            });
+            self.active_writer = None;
+            self.active_file_path = None;
+            self.active_track_title = None;
+            self.active_track_start_time = None;
+            return;
+        }
+
         match File::create(&path) {
             Ok(file) => {
                 self.active_writer = Some(file);
@@ -233,10 +251,18 @@ impl StreamReader {
                         )));
                     }
                 } else {
-                    // Inject high-fidelity metadata tags into completed MP3 tracks
+                    // Inject high-fidelity metadata tags into completed MP3 tracks.
                     if filepath.ends_with(".mp3") {
                         if let Some(ref title) = self.active_track_title {
-                            let _ = inject_id3_tags(filepath, title);
+                            let category = self.record_state.category.lock().unwrap().clone();
+                            let _ = inject_id3_tags_with_context(
+                                filepath,
+                                title,
+                                RecordingTagContext {
+                                    category: Some(category.as_str()),
+                                    source_url: Some(self.url.as_str()),
+                                },
+                            );
                         }
                     }
                 }

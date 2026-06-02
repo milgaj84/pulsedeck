@@ -79,6 +79,12 @@ When startup detects a recovery journal, app state stores both the full `Recordi
 
 Recovery actions are handled in `src/app/recording.rs` so the reducer owns the lifecycle: journal removal, trash attempts through `src/system_trash.rs`, archive refresh requests, and notice updates. Failed trash moves keep recovery state intact so the user can retry or choose a non-destructive action.
 
+## Recording intelligence
+
+The stream reader owns track-boundary recording decisions because it sees Icecast metadata changes before decoded samples reach the sink. It now refuses to overwrite an existing target file for the same sanitized artist/title path, reporting a duplicate-skip notice rather than replacing a user's archive.
+
+Completed MP3 captures receive richer ID3 metadata through `src/audio/recording.rs`: artist/title splitting, PulseDeck album context, genre/category, and source stream URL when available. This keeps portable local recordings useful outside the TUI without adding transcoding complexity.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

@@ -10,6 +10,8 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Recording Session Dashboard**: Added a live Tape Deck recording dashboard with station, elapsed time, capture path, file size, minimum duration, and snippet policy.
 *   **Recording Recovery Journal**: Added a hidden session journal so pending or active recording sessions can be surfaced after an unexpected exit.
 *   **Recording Recovery Actions**: Added keep, trash, and dismiss controls for abandoned recording recovery journals.
+*   **Recording Duplicate Protection**: Added duplicate recording detection so existing artist/title captures are not overwritten.
+*   **Richer Recording Metadata**: Added genre/category and source-stream context to completed MP3 ID3 tags when available.
 *   **Local Tape Library Browser**: Replaced the passive Tape History page with a disk-backed Local Tape Library for browsing captured recordings by folder.
 *   **Local Tape Playback**: Added audio-engine support for playing recorded files directly through PulseDeck.
 *   **Tape Archive Refresh and Delete Flow**: Added archive rescanning plus guarded `y`/`n` delete confirmation for selected local tape files.
@@ -25,6 +27,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Improved
 *   **Recording Visibility**: Improved tape capture feedback so recording state is visible in the deck instead of only as transient footer notices.
 *   **Recording Recovery Safety**: Failed recovery trash moves now keep the journal available for retry or a non-destructive keep/dismiss action.
+*   **Recording Archive Safety**: Duplicate captures now produce a visible skip notice instead of silently replacing existing files.
 *   **Recording Workflow Continuity**: Captured tracks are now visible and playable from inside the TUI after restart instead of only existing as external files.
 *   **Local Tape Metadata Rows**: Improved local recording rows with format, duration when available, size, and folder context in All Recordings mode.
 *   **Local Tape Help and Footer Hints**: Updated help and footer controls for local filtering, All Recordings mode, folder opening, refresh, and trash confirmation.
