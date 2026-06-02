@@ -7,6 +7,16 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+*   _Nothing yet._
+
+### Improved
+*   _Nothing yet._
+
+---
+
+## [0.1.8] - 2026-06-02
+
+### Added
 *   **Recording Session Dashboard**: Added a live Tape Deck recording dashboard with station, elapsed time, capture path, file size, minimum duration, and snippet policy.
 *   **Recording Recovery Journal**: Added a hidden session journal so pending or active recording sessions can be surfaced after an unexpected exit.
 *   **Recording Recovery Actions**: Added keep, trash, and dismiss controls for abandoned recording recovery journals.
