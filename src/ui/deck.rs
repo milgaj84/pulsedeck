@@ -1,6 +1,6 @@
 use super::theme;
-use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
-use crate::tape_archive::{format_file_size, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
+use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
+use crate::tape_archive::{track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -700,6 +700,29 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(app.tape_archive.root.display().to_string(), theme::dim()),
     ]));
 
+    let mode_label = if app.input_mode == InputMode::TapeFilter {
+        format!(
+            "   Filter: {}▌ · {} matches",
+            app.tape_archive.filter_query,
+            app.tape_archive.flattened.len().saturating_sub(1)
+        )
+    } else if app.tape_archive.is_filtering() {
+        format!(
+            "   Filter: {} · {} matches",
+            app.tape_archive.filter_query,
+            app.tape_archive.flattened.len().saturating_sub(1)
+        )
+    } else if app.tape_archive.all_recordings_flattened {
+        format!(
+            "   Mode: All Recordings · {} tracks · newest first",
+            app.tape_archive.total_tracks()
+        )
+    } else {
+        "   Mode: Folder Tree".to_string()
+    };
+
+    lines.push(Line::from(vec![Span::styled(mode_label, theme::dim())]));
+
     if let Some(path) = app.pending_tape_delete.as_ref() {
         let filename = path
             .file_name()
@@ -707,7 +730,10 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
             .unwrap_or("selected tape");
 
         lines.push(Line::from(vec![
-            Span::styled("   DELETE? ", theme::error().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "   MOVE TO TRASH? ",
+                theme::error().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(filename.to_string(), theme::text()),
             Span::styled("   y confirm / n cancel", theme::dim()),
         ]));
@@ -721,6 +747,8 @@ fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" play/open  ", theme::dim()),
             Span::styled("Space", key_style),
             Span::styled(" expand/pause  ", theme::dim()),
+            Span::styled("/", key_style),
+            Span::styled(" filter  ", theme::dim()),
             Span::styled("f/Delete", key_style),
             Span::styled(" delete  ", theme::dim()),
             Span::styled("Ctrl+r", key_style),
@@ -766,7 +794,7 @@ fn render_tape_archive_rows(lines: &mut Vec<Line<'static>>, area: Rect, app: &Ap
         return;
     }
 
-    let visible_rows = (area.height as usize).saturating_sub(5).max(1);
+    let visible_rows = (area.height as usize).saturating_sub(6).max(1);
     let selected = app.tape_archive.selected.min(row_count.saturating_sub(1));
     let start = if selected >= visible_rows {
         selected + 1 - visible_rows
@@ -796,20 +824,27 @@ fn render_tape_archive_row(row: &TapeArchiveRow, is_selected: bool, app: &App) -
     };
 
     match row {
-        TapeArchiveRow::AllRecordings => Line::from(vec![
-            Span::styled(cursor, cursor_style),
-            Span::styled(
-                format!(
-                    "[All Recordings] {} tracks",
-                    app.tape_archive.total_tracks()
+        TapeArchiveRow::AllRecordings => {
+            let marker = if app.tape_archive.all_recordings_flattened {
+                "▼"
+            } else {
+                "▸"
+            };
+            Line::from(vec![
+                Span::styled(cursor, cursor_style),
+                Span::styled(
+                    format!(
+                        "{marker} [All Recordings] {} tracks",
+                        app.tape_archive.total_tracks()
+                    ),
+                    if is_selected {
+                        theme::selected()
+                    } else {
+                        theme::text()
+                    },
                 ),
-                if is_selected {
-                    theme::selected()
-                } else {
-                    theme::text()
-                },
-            ),
-        ]),
+            ])
+        }
         TapeArchiveRow::Folder { folder_index } => {
             let Some(folder) = app.tape_archive.folders.get(*folder_index) else {
                 return status_line("   [missing folder]");
@@ -832,49 +867,80 @@ fn render_tape_archive_row(row: &TapeArchiveRow, is_selected: bool, app: &App) -
         TapeArchiveRow::Track {
             folder_index,
             track_index,
-        } => {
-            let Some(track) = app
-                .tape_archive
-                .folders
-                .get(*folder_index)
-                .and_then(|folder| folder.tracks.get(*track_index))
-            else {
-                return status_line("   [missing track]");
-            };
-
-            let is_playing = app.local_playback_path.as_ref() == Some(&track.path);
-            let icon = if is_playing { "🔊" } else { "📄" };
-            let title = compact_track_title(track, 42);
-            let meta = format!(
-                "{} · {}",
-                track.extension.to_uppercase(),
-                format_file_size(track.size_bytes)
-            );
-
-            Line::from(vec![
-                Span::styled(cursor, cursor_style),
-                Span::styled("  ", theme::dim()),
-                Span::styled(
-                    format!("{icon} {title}"),
-                    if is_playing {
-                        theme::playing()
-                    } else if is_selected {
-                        theme::selected()
-                    } else {
-                        theme::text()
-                    },
-                ),
-                Span::styled(format!("   {meta}"), theme::dim()),
-            ])
-        }
+        } => render_track_row(
+            cursor,
+            cursor_style,
+            *folder_index,
+            *track_index,
+            false,
+            is_selected,
+            app,
+        ),
+        TapeArchiveRow::AllRecordingTrack {
+            folder_index,
+            track_index,
+        } => render_track_row(
+            cursor,
+            cursor_style,
+            *folder_index,
+            *track_index,
+            true,
+            is_selected,
+            app,
+        ),
     }
 }
 
-fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {
-    let value = track.title.as_str();
+fn render_track_row(
+    cursor: &'static str,
+    cursor_style: Style,
+    folder_index: usize,
+    track_index: usize,
+    show_folder: bool,
+    is_selected: bool,
+    app: &App,
+) -> Line<'static> {
+    let Some(folder) = app.tape_archive.folders.get(folder_index) else {
+        return status_line("   [missing folder]");
+    };
 
+    let Some(track) = folder.tracks.get(track_index) else {
+        return status_line("   [missing track]");
+    };
+
+    let is_playing = app.local_playback_path.as_ref() == Some(&track.path);
+    let icon = if is_playing { "🔊" } else { "📄" };
+    let title = if show_folder {
+        compact_track_label(format!("{} / {}", folder.name, track.title), 46)
+    } else {
+        compact_track_title(track, 46)
+    };
+    let meta = track_metadata_label(track);
+
+    Line::from(vec![
+        Span::styled(cursor, cursor_style),
+        Span::styled("  ", theme::dim()),
+        Span::styled(
+            format!("{icon} {title}"),
+            if is_playing {
+                theme::playing()
+            } else if is_selected {
+                theme::selected()
+            } else {
+                theme::text()
+            },
+        ),
+        Span::styled(format!("   {meta}"), theme::dim()),
+    ])
+}
+
+fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {
+    compact_track_label(track.title.clone(), max_chars)
+}
+
+fn compact_track_label(value: String, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
-        value.to_string()
+        value
     } else if max_chars <= 1 {
         "…".to_string()
     } else {

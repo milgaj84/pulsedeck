@@ -4,6 +4,8 @@ mod audio;
 mod event;
 mod favorites;
 mod radio;
+mod system_open;
+mod system_trash;
 mod tape_archive;
 mod ui;
 

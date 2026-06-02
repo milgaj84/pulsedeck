@@ -10,16 +10,20 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Local Tape Library Browser**: Replaced the passive Tape History page with a disk-backed Local Tape Library for browsing captured recordings by folder.
 *   **Local Tape Playback**: Added audio-engine support for playing recorded files directly through PulseDeck.
 *   **Tape Archive Refresh and Delete Flow**: Added archive rescanning plus guarded `y`/`n` delete confirmation for selected local tape files.
-
-### Improved
-*   **Recording Workflow Continuity**: Captured tracks are now visible and playable from inside the TUI after restart instead of only existing as external files.
-
-### Added
+*   **All Recordings Flat View**: Added a newest-first flat mode for browsing every local recording across folders.
+*   **Local Tape Filtering**: Added tape-page filtering by title, folder, artist, extension, and filename.
+*   **Local Tape Duration Labels**: Added best-effort `MM:SS` duration metadata for local recordings when decoders expose it.
+*   **Local Tape Folder Opener**: Added an `o` shortcut for opening a selected recording's containing folder.
+*   **Local Tape Playback Handoff**: Added automatic handoff to the next local recording in the same folder when a tape finishes.
 *   **Compact Terminal Boundary Guard**: Added a root 80x24 terminal-size safety gate with a centered diagnostic screen before complex deck, station, help, or settings rendering runs.
 *   **Search-Aware Name Truncation**: Added adaptive station-name truncation that pivots around the active search term when long result names would otherwise hide the match.
 *   **Audio Output Recovery Retry**: Added a guarded one-shot recovery path for hardware-style sink failures by dropping stale output handles and retrying the current stream.
 
 ### Improved
+*   **Recording Workflow Continuity**: Captured tracks are now visible and playable from inside the TUI after restart instead of only existing as external files.
+*   **Local Tape Metadata Rows**: Improved local recording rows with format, duration when available, size, and folder context in All Recordings mode.
+*   **Local Tape Help and Footer Hints**: Updated help and footer controls for local filtering, All Recordings mode, folder opening, refresh, and trash confirmation.
+*   **Trash-Backed Tape Removal**: Local tape removal now moves files to the OS trash instead of permanently deleting them.
 *   **Theme-Safe Clear Styling**: Routed root and overlay clear blocks through the semantic theme palette so light and dark themes keep consistent contrast.
 *   **Buffer Status Backpressure**: Suppressed duplicate buffer-level status packets before they cross into the UI status queue.
 *   **Selection Context Preservation**: Preserved library selection across search mode and remembered cursor position per genre category.

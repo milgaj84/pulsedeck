@@ -94,6 +94,18 @@ impl App {
     pub fn poll_audio_status(&mut self) {
         while let Ok(status) = self.audio.status_rx.try_recv() {
             match status {
+                AudioStatus::LocalFileFinished { path } => {
+                    if let Some(next) = self.tape_archive.next_track_after(&path) {
+                        let title = next.title.clone();
+                        self.play_tape_track(next);
+                        self.set_info_notice(format!("Playing next tape: {title}"));
+                    } else {
+                        self.local_playback_path = None;
+                        self.current_track = None;
+                        self.playback = PlaybackState::Stopped;
+                        self.set_info_notice("End of tape folder");
+                    }
+                }
                 AudioStatus::LocalFilePlaying { path, title } => {
                     self.playing_url = None;
                     self.local_playback_path = Some(path);

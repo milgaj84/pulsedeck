@@ -13,6 +13,11 @@ impl App {
             return;
         }
 
+        if self.input_mode == InputMode::TapeFilter {
+            self.handle_tape_filter_action(action);
+            return;
+        }
+
         if self.show_settings {
             self.handle_settings_action(action);
             return;
@@ -54,7 +59,17 @@ impl App {
             Action::VolumeDown => self.volume_down(),
             Action::ToggleMute => self.toggle_mute(),
 
-            Action::EnterSearch => self.enter_search(),
+            Action::EnterSearch => {
+                if self.is_tape_archive_focused() {
+                    self.enter_tape_filter();
+                } else {
+                    self.enter_search();
+                }
+            }
+            Action::EnterTapeFilter => self.enter_tape_filter(),
+            Action::ExitTapeFilter => self.exit_tape_filter(),
+            Action::TapeFilterInput(ch) => self.tape_filter_input(ch),
+            Action::TapeFilterBackspace => self.tape_filter_backspace(),
             Action::ExitSearch => self.exit_search(),
             Action::SearchInput(c) => self.search_input(c),
             Action::SearchBackspace => self.search_backspace(),
@@ -80,6 +95,7 @@ impl App {
             Action::NextDeckPage => self.next_deck_page(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::RefreshTapeArchive => self.refresh_tape_archive(),
+            Action::OpenSelectedTapeFolder => self.open_selected_tape_folder(),
             Action::ConfirmDeleteTape => self.confirm_tape_delete(),
             Action::CancelDeleteTape => self.cancel_tape_delete(),
 

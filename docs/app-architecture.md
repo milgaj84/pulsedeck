@@ -49,6 +49,22 @@ The archive page lives behind `active_deck_page == 1`. While focused, normal nav
 
 Local file playback is represented separately from live stream playback with `AudioCommand::PlayLocalFile` and `AudioStatus::LocalFilePlaying`. Recording remains live-stream-only.
 
+## Local tape archive enhancements
+
+Local tape archive state now includes a filter query and an All Recordings flat-view flag. Filtering is owned by `src/tape_archive.rs` so UI, reducer, and tests share one row model. The archive can render the folder tree, a newest-first All Recordings view, or a filtered flat view without duplicating row selection logic.
+
+Duration labels are best-effort metadata hints gathered during the blocking archive scan. If a local decoder exposes total duration, the UI renders `FORMAT · MM:SS · SIZE`; otherwise it falls back to `FORMAT · SIZE`.
+
+The tape filter uses `InputMode::TapeFilter`, separate from global radio search. `/` opens local tape filtering when the tape archive is focused, while global station search remains available outside the tape page.
+
+## Local tape file management
+
+Local tape file management is intentionally conservative. Opening a containing folder goes through `src/system_open.rs`, which builds platform-specific command specs and launches the host file manager without mutating the archive.
+
+Trash deletion goes through `src/system_trash.rs`. PulseDeck attempts platform trash commands and does not fall back to permanent deletion if trash is unavailable. This keeps the guarded `y` confirmation flow recoverable by the user's OS.
+
+Local playback completion is surfaced as `AudioStatus::LocalFileFinished`. The app reducer uses the tape archive model to find the next recording in the same folder and starts it automatically. At the end of a folder, playback stops and the footer reports the end of the tape folder.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.
