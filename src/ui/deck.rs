@@ -408,6 +408,17 @@ fn append_recording_dashboard(lines: &mut Vec<Line<'static>>, app: &App) {
     match app.recording_state {
         RecordingState::Off => {
             if let Some(notice) = app.recording_recovery_notice.as_ref() {
+                let target = app
+                    .recording_recovery
+                    .as_ref()
+                    .and_then(|recovery| recovery.active_file.as_deref())
+                    .and_then(|path| {
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                    })
+                    .unwrap_or("recovery journal");
+
                 lines.push(Line::from(vec![
                     Span::styled(
                         " RECOVERY ",
@@ -416,6 +427,17 @@ fn append_recording_dashboard(lines: &mut Vec<Line<'static>>, app: &App) {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(notice.clone(), theme::dim()),
+                ]));
+
+                lines.push(Line::from(vec![
+                    Span::styled(" TARGET ", theme::dim()),
+                    Span::styled(target.to_string(), theme::cyan()),
+                    Span::styled("   Shift+K ", theme::dim()),
+                    Span::styled("keep", theme::cyan()),
+                    Span::styled("   Shift+T ", theme::dim()),
+                    Span::styled("trash", theme::cyan()),
+                    Span::styled("   Shift+D ", theme::dim()),
+                    Span::styled("dismiss", theme::cyan()),
                 ]));
             }
         }

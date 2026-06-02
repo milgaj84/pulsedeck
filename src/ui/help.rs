@@ -67,6 +67,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         shortcut("+ / -", "Volume up / down"),
         shortcut("m", "Mute / unmute"),
         shortcut("r", "Arm / stop recording; dashboard tracks active capture"),
+        shortcut(
+            "Shift+K",
+            "Keep recovered partial recording and clear journal",
+        ),
+        shortcut("Shift+T", "Move recovered partial recording to trash"),
+        shortcut("Shift+D", "Dismiss recording recovery journal"),
         section("Library"),
         shortcut("↑↓ / j k", "Move selection"),
         shortcut("Tab / Shift+Tab", "Change genre category"),

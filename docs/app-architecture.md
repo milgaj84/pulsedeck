@@ -73,6 +73,12 @@ Recording session visibility lives in app state rather than the audio thread. `s
 
 The Tape Deck renders the session dashboard from app state: station, elapsed time, active capture path, file size, minimum duration, and snippet policy. The dashboard intentionally reads file size from the filesystem at render time so the audio thread does not need to send high-frequency byte counters.
 
+## Recording recovery actions
+
+When startup detects a recovery journal, app state stores both the full `RecordingRecovery` payload and a user-facing recovery notice. The Tape Deck and footer expose three explicit actions: keep the partial file and remove the journal, move the partial file to OS trash, or dismiss the journal only.
+
+Recovery actions are handled in `src/app/recording.rs` so the reducer owns the lifecycle: journal removal, trash attempts through `src/system_trash.rs`, archive refresh requests, and notice updates. Failed trash moves keep recovery state intact so the user can retry or choose a non-destructive action.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

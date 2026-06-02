@@ -39,6 +39,9 @@ pub enum Action {
     ToggleSettings,
     ToggleRecording,
     ToggleVisualizerMode,
+    KeepRecordingRecovery,
+    TrashRecordingRecovery,
+    DismissRecordingRecovery,
 
     /// Local tape archive
     RefreshTapeArchive,

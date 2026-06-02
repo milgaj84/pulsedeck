@@ -5,11 +5,12 @@ impl App {
     pub fn new(library: Library) -> Self {
         let ui_state = super::ui_state::UiState::load();
         let recording_dir = library.settings.recording_dir.clone();
-        let recording_recovery_notice =
-            crate::recording_journal::detect_recovery_journal(&recording_dir)
-                .ok()
-                .flatten()
-                .map(|recovery| recovery.summary());
+        let recording_recovery = crate::recording_journal::detect_recovery_journal(&recording_dir)
+            .ok()
+            .flatten();
+        let recording_recovery_notice = recording_recovery
+            .as_ref()
+            .map(|recovery| recovery.summary());
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
 
@@ -53,6 +54,7 @@ impl App {
             recording_station_name: None,
             recording_station_url: None,
             recording_category: None,
+            recording_recovery,
             recording_recovery_notice,
             buffer_percent: 0,
             buffer_seconds: 0,

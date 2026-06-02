@@ -207,6 +207,12 @@ When recording is armed or active, the Tape Deck shows a live recording dashboar
 
 PulseDeck also writes a small hidden recovery journal in the recording directory while a session is pending or active. If the app exits unexpectedly, the next launch surfaces a recovery notice so unfinished captures are not silent ghosts on disk.
 
+Recovery actions are available from the Tape Deck when a journal is detected:
+
+- `Shift+K` keeps the partial recording on disk and clears the journal.
+- `Shift+T` moves the partial recording to the OS trash and clears the journal.
+- `Shift+D` dismisses the journal without touching the partial recording.
+
 ---
 
 ## Settings

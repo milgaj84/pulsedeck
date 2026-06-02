@@ -93,6 +93,9 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Tape recording
         (_, KeyCode::Char('r')) => Some(Action::ToggleRecording),
+        (_, KeyCode::Char('K')) => Some(Action::KeepRecordingRecovery),
+        (_, KeyCode::Char('T')) => Some(Action::TrashRecordingRecovery),
+        (_, KeyCode::Char('D')) => Some(Action::DismissRecordingRecovery),
 
         _ => None,
     }
@@ -417,6 +420,30 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Enter), &InputMode::Search),
             Some(Action::SearchConfirm),
+        );
+    }
+
+    #[test]
+    fn normal_mode_shift_k_keeps_recording_recovery() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('K')), &InputMode::Normal),
+            Some(Action::KeepRecordingRecovery),
+        );
+    }
+
+    #[test]
+    fn normal_mode_shift_t_trashes_recording_recovery() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('T')), &InputMode::Normal),
+            Some(Action::TrashRecordingRecovery),
+        );
+    }
+
+    #[test]
+    fn normal_mode_shift_d_dismisses_recording_recovery() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('D')), &InputMode::Normal),
+            Some(Action::DismissRecordingRecovery),
         );
     }
 }

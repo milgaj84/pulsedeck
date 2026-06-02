@@ -91,6 +91,9 @@ impl App {
             Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
             Action::ToggleRecording => self.toggle_recording(),
+            Action::KeepRecordingRecovery => self.keep_recording_recovery(),
+            Action::TrashRecordingRecovery => self.trash_recording_recovery(),
+            Action::DismissRecordingRecovery => self.dismiss_recording_recovery(),
             Action::CycleLayout => self.cycle_layout(),
             Action::NextDeckPage => self.next_deck_page(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),

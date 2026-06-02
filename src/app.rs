@@ -88,6 +88,7 @@ pub struct App {
     pub recording_station_name: Option<String>,
     pub recording_station_url: Option<String>,
     pub recording_category: Option<String>,
+    pub recording_recovery: Option<crate::recording_journal::RecordingRecovery>,
     pub recording_recovery_notice: Option<String>,
     pub buffer_percent: u8,
     pub buffer_seconds: u32,

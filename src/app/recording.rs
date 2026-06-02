@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::AudioCommand;
+use crate::system_trash;
 use std::time::SystemTime;
 
 impl App {
@@ -29,6 +30,7 @@ impl App {
                 self.recording_station_name = station.as_ref().map(|s| s.name.clone());
                 self.recording_station_url = station.as_ref().map(|s| s.url.clone());
                 self.recording_category = Some(category.clone());
+                self.recording_recovery = None;
                 self.recording_recovery_notice = None;
                 self.write_recording_journal("pending");
 
@@ -83,6 +85,8 @@ impl App {
         self.recording_station_name = None;
         self.recording_station_url = None;
         self.recording_category = None;
+        self.recording_recovery = None;
+        self.recording_recovery_notice = None;
     }
 
     fn write_recording_journal(&mut self, state: &str) {
@@ -105,6 +109,85 @@ impl App {
         if let Err(err) = result {
             self.set_error_notice(err);
         }
+    }
+    pub(super) fn keep_recording_recovery(&mut self) {
+        let Some(recovery) = self.recording_recovery.clone() else {
+            self.set_info_notice("No recording recovery journal is pending");
+            return;
+        };
+
+        match crate::recording_journal::remove_journal_file(&recovery.journal_path) {
+            Ok(()) => {
+                self.clear_recording_recovery_state();
+                self.set_info_notice("Recovered recording kept on disk");
+            }
+            Err(err) => self.set_error_notice(err),
+        }
+    }
+
+    pub(super) fn dismiss_recording_recovery(&mut self) {
+        let Some(recovery) = self.recording_recovery.clone() else {
+            self.set_info_notice("No recording recovery journal is pending");
+            return;
+        };
+
+        match crate::recording_journal::remove_journal_file(&recovery.journal_path) {
+            Ok(()) => {
+                self.clear_recording_recovery_state();
+                self.set_info_notice("Recording recovery dismissed");
+            }
+            Err(err) => self.set_error_notice(err),
+        }
+    }
+
+    pub(super) fn trash_recording_recovery(&mut self) {
+        let Some(recovery) = self.recording_recovery.clone() else {
+            self.set_info_notice("No recording recovery journal is pending");
+            return;
+        };
+
+        let Some(active_file) = recovery.active_file_path() else {
+            match crate::recording_journal::remove_journal_file(&recovery.journal_path) {
+                Ok(()) => {
+                    self.clear_recording_recovery_state();
+                    self.set_info_notice(
+                        "Recording recovery dismissed; no partial file was listed",
+                    );
+                }
+                Err(err) => self.set_error_notice(err),
+            }
+            return;
+        };
+
+        if !active_file.exists() {
+            match crate::recording_journal::remove_journal_file(&recovery.journal_path) {
+                Ok(()) => {
+                    self.clear_recording_recovery_state();
+                    self.set_info_notice("Recovery journal cleared; partial file was not found");
+                }
+                Err(err) => self.set_error_notice(err),
+            }
+            return;
+        }
+
+        match system_trash::move_to_trash(&active_file) {
+            Ok(()) => match crate::recording_journal::remove_journal_file(&recovery.journal_path) {
+                Ok(()) => {
+                    self.clear_recording_recovery_state();
+                    self.tape_archive_scan_requested = true;
+                    self.set_info_notice("Recovered partial recording moved to trash");
+                }
+                Err(err) => self.set_error_notice(err),
+            },
+            Err(err) => self.set_error_notice(format!(
+                "Could not move recovered recording to trash: {err}"
+            )),
+        }
+    }
+
+    fn clear_recording_recovery_state(&mut self) {
+        self.recording_recovery = None;
+        self.recording_recovery_notice = None;
     }
 }
 

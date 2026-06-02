@@ -13,6 +13,13 @@ pub struct RecordingRecovery {
 }
 
 impl RecordingRecovery {
+    pub fn active_file_path(&self) -> Option<PathBuf> {
+        self.active_file
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+    }
+
     pub fn summary(&self) -> String {
         let station = self
             .station_name
@@ -75,9 +82,11 @@ pub fn write_session_journal(
 }
 
 pub fn remove_session_journal(recording_dir: &str) -> Result<(), String> {
-    let path = journal_path(recording_dir);
+    remove_journal_file(&journal_path(recording_dir))
+}
 
-    match fs::remove_file(&path) {
+pub fn remove_journal_file(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(format!(
@@ -238,5 +247,20 @@ mod tests {
             Some("Night \"Drive\"".to_string())
         );
         assert_eq!(extract_json_string(text, "active_file"), None);
+    }
+
+    #[test]
+    fn active_file_path_returns_pathbuf_when_present() {
+        let recovery = RecordingRecovery {
+            journal_path: PathBuf::from("recordings/.pulsedeck-recording-session.json"),
+            station_name: None,
+            active_file: Some("recordings/Synthwave/capture.mp3".to_string()),
+            state: Some("active".to_string()),
+        };
+
+        assert_eq!(
+            recovery.active_file_path(),
+            Some(PathBuf::from("recordings/Synthwave/capture.mp3"))
+        );
     }
 }

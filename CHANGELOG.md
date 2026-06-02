@@ -9,6 +9,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Added
 *   **Recording Session Dashboard**: Added a live Tape Deck recording dashboard with station, elapsed time, capture path, file size, minimum duration, and snippet policy.
 *   **Recording Recovery Journal**: Added a hidden session journal so pending or active recording sessions can be surfaced after an unexpected exit.
+*   **Recording Recovery Actions**: Added keep, trash, and dismiss controls for abandoned recording recovery journals.
 *   **Local Tape Library Browser**: Replaced the passive Tape History page with a disk-backed Local Tape Library for browsing captured recordings by folder.
 *   **Local Tape Playback**: Added audio-engine support for playing recorded files directly through PulseDeck.
 *   **Tape Archive Refresh and Delete Flow**: Added archive rescanning plus guarded `y`/`n` delete confirmation for selected local tape files.
@@ -23,6 +24,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ### Improved
 *   **Recording Visibility**: Improved tape capture feedback so recording state is visible in the deck instead of only as transient footer notices.
+*   **Recording Recovery Safety**: Failed recovery trash moves now keep the journal available for retry or a non-destructive keep/dismiss action.
 *   **Recording Workflow Continuity**: Captured tracks are now visible and playable from inside the TUI after restart instead of only existing as external files.
 *   **Local Tape Metadata Rows**: Improved local recording rows with format, duration when available, size, and folder context in All Recordings mode.
 *   **Local Tape Help and Footer Hints**: Updated help and footer controls for local filtering, All Recordings mode, folder opening, refresh, and trash confirmation.

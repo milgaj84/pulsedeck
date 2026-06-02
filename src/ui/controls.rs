@@ -232,6 +232,24 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::ITALIC),
             ),
         ]),
+        InputMode::Normal
+            if app.recording_recovery_notice.is_some()
+                && app.recording_state == RecordingState::Off =>
+        {
+            Line::from(vec![
+                Span::styled(" [", theme::dim()),
+                Span::styled("Shift+K", theme::cyan()),
+                Span::styled("] Keep partial  [", theme::dim()),
+                Span::styled("Shift+T", theme::cyan()),
+                Span::styled("] Trash partial  [", theme::dim()),
+                Span::styled("Shift+D", theme::cyan()),
+                Span::styled("] Dismiss journal  [", theme::dim()),
+                Span::styled("r", theme::cyan()),
+                Span::styled("] New recording  [", theme::dim()),
+                Span::styled("h", theme::cyan()),
+                Span::styled("] Help", theme::dim()),
+            ])
+        }
         InputMode::Normal if app.is_tape_archive_focused() => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
