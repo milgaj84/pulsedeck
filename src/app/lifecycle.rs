@@ -46,6 +46,7 @@ impl App {
             tape_archive_scan_inflight: false,
             local_playback_path: None,
             pending_tape_delete: None,
+            tape_playback_mode: TapePlaybackMode::Folder,
             show_settings: false,
             selected_setting_idx: 0,
             recording_state: RecordingState::Off,
@@ -107,16 +108,7 @@ impl App {
         while let Ok(status) = self.audio.status_rx.try_recv() {
             match status {
                 AudioStatus::LocalFileFinished { path } => {
-                    if let Some(next) = self.tape_archive.next_track_after(&path) {
-                        let title = next.title.clone();
-                        self.play_tape_track(next);
-                        self.set_info_notice(format!("Playing next tape: {title}"));
-                    } else {
-                        self.local_playback_path = None;
-                        self.current_track = None;
-                        self.playback = PlaybackState::Stopped;
-                        self.set_info_notice("End of tape folder");
-                    }
+                    self.handle_local_tape_finished(path);
                 }
                 AudioStatus::LocalFilePlaying { path, title } => {
                     self.playing_url = None;

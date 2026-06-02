@@ -25,6 +25,7 @@ use std::time::SystemTime;
 
 pub use types::{
     AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus, SettingRow,
+    TapePlaybackMode,
 };
 
 /// Core application state.
@@ -78,6 +79,7 @@ pub struct App {
     pub tape_archive_scan_inflight: bool,
     pub local_playback_path: Option<PathBuf>,
     pub pending_tape_delete: Option<PathBuf>,
+    pub tape_playback_mode: TapePlaybackMode,
 
     pub show_settings: bool,
     pub selected_setting_idx: usize,

@@ -64,6 +64,45 @@ impl App {
         }
     }
 
+    pub(super) fn cycle_tape_playback_mode(&mut self) {
+        self.tape_playback_mode = self.tape_playback_mode.next();
+        self.set_info_notice(format!(
+            "Tape playback mode: {} — {}",
+            self.tape_playback_mode.label(),
+            self.tape_playback_mode.description()
+        ));
+    }
+
+    pub(super) fn handle_local_tape_finished(&mut self, path: PathBuf) {
+        let next = match self.tape_playback_mode {
+            TapePlaybackMode::StopAtEnd => None,
+            TapePlaybackMode::Folder => self.tape_archive.next_track_after(&path),
+            TapePlaybackMode::AllRecordings => self.tape_archive.next_track_after_any_folder(&path),
+            TapePlaybackMode::RepeatOne => self.tape_archive.track_by_path(&path),
+            TapePlaybackMode::ShuffleAll => self
+                .tape_archive
+                .deterministic_shuffle_track_after(&path, self.tick_count),
+        };
+
+        if let Some(next) = next {
+            let title = next.title.clone();
+            let mode = self.tape_playback_mode.label();
+            self.play_tape_track(next);
+            self.set_info_notice(format!("Tape {mode}: {title}"));
+        } else {
+            self.local_playback_path = None;
+            self.current_track = None;
+            self.playback = PlaybackState::Stopped;
+            self.set_info_notice(match self.tape_playback_mode {
+                TapePlaybackMode::StopAtEnd => "Tape playback stopped at end",
+                TapePlaybackMode::Folder => "End of tape folder",
+                TapePlaybackMode::AllRecordings => "End of all recordings",
+                TapePlaybackMode::RepeatOne => "Tape repeat ended",
+                TapePlaybackMode::ShuffleAll => "No other tapes to shuffle",
+            });
+        }
+    }
+
     pub(super) fn refresh_tape_archive(&mut self) {
         if self.is_tape_archive_focused() {
             self.pending_tape_delete = None;

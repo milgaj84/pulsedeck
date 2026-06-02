@@ -53,6 +53,50 @@ pub enum RecordingState {
     Active,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapePlaybackMode {
+    StopAtEnd,
+    Folder,
+    AllRecordings,
+    RepeatOne,
+    ShuffleAll,
+}
+
+impl TapePlaybackMode {
+    pub const ALL: [Self; 5] = [
+        Self::StopAtEnd,
+        Self::Folder,
+        Self::AllRecordings,
+        Self::RepeatOne,
+        Self::ShuffleAll,
+    ];
+
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::StopAtEnd => "Stop",
+            Self::Folder => "Folder",
+            Self::AllRecordings => "All",
+            Self::RepeatOne => "Repeat",
+            Self::ShuffleAll => "Shuffle",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::StopAtEnd => "Stop after current local tape",
+            Self::Folder => "Continue through current folder",
+            Self::AllRecordings => "Continue through all recordings",
+            Self::RepeatOne => "Repeat current local tape",
+            Self::ShuffleAll => "Shuffle through all recordings",
+        }
+    }
+}
+
 /// TUI Dashboard layout configurations.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LayoutMode {

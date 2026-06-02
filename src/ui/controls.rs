@@ -260,6 +260,8 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("] Refresh  [", theme::dim()),
             Span::styled("o", theme::cyan()),
             Span::styled("] Folder  [", theme::dim()),
+            Span::styled("g", theme::cyan()),
+            Span::styled("] Mode  [", theme::dim()),
             Span::styled("f/Del", theme::cyan()),
             Span::styled("] Trash  [", theme::dim()),
             Span::styled("p", theme::cyan()),

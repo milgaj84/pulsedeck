@@ -101,6 +101,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             "Filter local recordings by title, folder, artist, or file",
         ),
         shortcut("o", "Open selected tape's containing folder"),
+        shortcut("g", "Cycle local tape playback mode"),
         shortcut("Esc", "Clear local tape filter"),
         shortcut("Ctrl+r", "Refresh recorded tape archive"),
         shortcut("f / Delete", "Move selected local tape to trash"),

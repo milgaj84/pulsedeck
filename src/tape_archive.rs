@@ -212,6 +212,43 @@ impl TapeArchive {
         None
     }
 
+    pub fn track_by_path(&self, path: &Path) -> Option<TapeTrack> {
+        self.folders
+            .iter()
+            .flat_map(|folder| folder.tracks.iter())
+            .find(|track| track.path == path)
+            .cloned()
+    }
+
+    pub fn next_track_after_any_folder(&self, path: &Path) -> Option<TapeTrack> {
+        let refs = self.all_track_refs_newest_first();
+        let position = refs.iter().position(|(folder_index, track_index)| {
+            self.folders[*folder_index].tracks[*track_index].path == path
+        })?;
+
+        let (next_folder, next_track) = refs.get(position + 1).copied()?;
+        self.folders
+            .get(next_folder)
+            .and_then(|folder| folder.tracks.get(next_track))
+            .cloned()
+    }
+
+    pub fn deterministic_shuffle_track_after(&self, path: &Path, salt: u64) -> Option<TapeTrack> {
+        let mut tracks: Vec<TapeTrack> = self
+            .folders
+            .iter()
+            .flat_map(|folder| folder.tracks.iter().cloned())
+            .collect();
+
+        if tracks.len() <= 1 {
+            return None;
+        }
+
+        tracks.sort_by_key(|track| shuffle_key(track, path, salt));
+
+        tracks.into_iter().find(|track| track.path != path)
+    }
+
     pub fn rebuild_flattened(&mut self) {
         let selected_before = self.selected;
         let filter = normalized_query(self.filter_query.as_str());
@@ -497,6 +534,22 @@ fn compare_tracks_newest_first(left: &TapeTrack, right: &TapeTrack) -> std::cmp:
                 .to_lowercase()
                 .cmp(&right.filename.to_lowercase())
         })
+}
+
+fn shuffle_key(track: &TapeTrack, current_path: &Path, salt: u64) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64 ^ salt;
+
+    for byte in track.path.to_string_lossy().bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    for byte in current_path.to_string_lossy().bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    hash
 }
 
 fn modified_sort_key(track: &TapeTrack) -> u64 {

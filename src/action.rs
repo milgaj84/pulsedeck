@@ -46,6 +46,7 @@ pub enum Action {
     /// Local tape archive
     RefreshTapeArchive,
     OpenSelectedTapeFolder,
+    CycleTapePlaybackMode,
     EnterTapeFilter,
     ExitTapeFilter,
     TapeFilterInput(char),

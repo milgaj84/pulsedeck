@@ -99,6 +99,7 @@ impl App {
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::RefreshTapeArchive => self.refresh_tape_archive(),
             Action::OpenSelectedTapeFolder => self.open_selected_tape_folder(),
+            Action::CycleTapePlaybackMode => self.cycle_tape_playback_mode(),
             Action::ConfirmDeleteTape => self.confirm_tape_delete(),
             Action::CancelDeleteTape => self.cancel_tape_delete(),
 

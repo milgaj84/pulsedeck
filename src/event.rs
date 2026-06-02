@@ -88,6 +88,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         }
         (_, KeyCode::Delete) => Some(Action::DeleteSelectedTape),
         (_, KeyCode::Char('o')) => Some(Action::OpenSelectedTapeFolder),
+        (_, KeyCode::Char('g')) => Some(Action::CycleTapePlaybackMode),
         (_, KeyCode::Char('y')) => Some(Action::ConfirmDeleteTape),
         (_, KeyCode::Char('n')) => Some(Action::CancelDeleteTape),
 
@@ -444,6 +445,14 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('D')), &InputMode::Normal),
             Some(Action::DismissRecordingRecovery),
+        );
+    }
+
+    #[test]
+    fn normal_mode_g_cycles_tape_playback_mode() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
+            Some(Action::CycleTapePlaybackMode),
         );
     }
 }

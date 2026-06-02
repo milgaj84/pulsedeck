@@ -85,6 +85,12 @@ The stream reader owns track-boundary recording decisions because it sees Icecas
 
 Completed MP3 captures receive richer ID3 metadata through `src/audio/recording.rs`: artist/title splitting, PulseDeck album context, genre/category, and source stream URL when available. This keeps portable local recordings useful outside the TUI without adding transcoding complexity.
 
+## Local tape playback modes
+
+Local tape playback continuation is controlled by `TapePlaybackMode`, owned by app state. The audio thread only reports `AudioStatus::LocalFileFinished`; the app reducer decides whether to stop, continue through the current folder, continue through all recordings, repeat the current file, or choose a deterministic shuffle target.
+
+The archive model owns track lookup and next-track helpers so playback modes do not duplicate folder traversal logic in UI code. Shuffle mode intentionally uses deterministic path hashing with the app tick counter as salt, avoiding an additional runtime RNG dependency.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.
