@@ -201,6 +201,8 @@ Local tape file management:
 - Use `Shift+M` to move the selected tape into another folder under the recording directory.
 - Rename and move operations stop the selected local tape first if it is currently playing, then refresh the archive.
 
+Playing local tapes show elapsed progress directly on the active row. When PulseDeck can read duration metadata, the row shows elapsed and total duration with a compact progress bar; otherwise it falls back to elapsed time only.
+
 Local tape playback modes:
 
 - `Stop`: stop at the end of the current local tape.

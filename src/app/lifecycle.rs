@@ -45,6 +45,8 @@ impl App {
             tape_archive_scan_requested: false,
             tape_archive_scan_inflight: false,
             local_playback_path: None,
+            local_playback_started_at: None,
+            local_playback_elapsed_before_pause: Duration::ZERO,
             pending_tape_delete: None,
             tape_playback_mode: TapePlaybackMode::Folder,
             tape_details_visible: false,
@@ -115,6 +117,8 @@ impl App {
                 AudioStatus::LocalFilePlaying { path, title } => {
                     self.playing_url = None;
                     self.local_playback_path = Some(path);
+                    self.local_playback_started_at = Some(SystemTime::now());
+                    self.local_playback_elapsed_before_pause = Duration::ZERO;
                     self.current_track = Some(title);
                     self.recording_state = RecordingState::Off;
                     self.active_record_filepath = None;
@@ -166,11 +170,28 @@ impl App {
                 }
                 other => {
                     self.playback = match other {
-                        AudioStatus::Playing => PlaybackState::Playing,
-                        AudioStatus::Paused => PlaybackState::Paused,
+                        AudioStatus::Playing => {
+                            if self.local_playback_path.is_some()
+                                && self.local_playback_started_at.is_none()
+                            {
+                                self.local_playback_started_at = Some(SystemTime::now());
+                            }
+                            PlaybackState::Playing
+                        }
+                        AudioStatus::Paused => {
+                            if self.local_playback_path.is_some() {
+                                if let Some(started_at) = self.local_playback_started_at.take() {
+                                    self.local_playback_elapsed_before_pause +=
+                                        started_at.elapsed().unwrap_or_default();
+                                }
+                            }
+                            PlaybackState::Paused
+                        }
                         AudioStatus::Stopped => {
                             self.playing_url = None;
                             self.local_playback_path = None;
+                            self.local_playback_started_at = None;
+                            self.local_playback_elapsed_before_pause = Duration::ZERO;
                             self.current_track = None;
                             self.recording_state = RecordingState::Off;
                             self.active_record_filepath = None;
@@ -180,6 +201,8 @@ impl App {
                         }
                         AudioStatus::Error(e) => {
                             self.local_playback_path = None;
+                            self.local_playback_started_at = None;
+                            self.local_playback_elapsed_before_pause = Duration::ZERO;
                             self.current_track = None;
                             self.recording_state = RecordingState::Off;
                             self.active_record_filepath = None;

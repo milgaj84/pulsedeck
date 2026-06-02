@@ -97,6 +97,12 @@ The Local Tape Library now owns lightweight file-management workflows in `src/ap
 
 The UI keeps the details inspector read-only. It presents title, folder, filename, format, size, and full path while mutations stay behind explicit `Shift+R` and `Shift+M` commands.
 
+## Local tape playback progress
+
+Local tape progress is tracked in app state from audio lifecycle events. `AudioStatus::LocalFilePlaying` starts a timer, `Paused` folds elapsed time into a paused accumulator, `Playing` resumes the timer, and `Stopped`/`Error`/`LocalFileFinished` clear progress state.
+
+The UI combines this app-state elapsed time with archive duration hints gathered during tape scanning. This avoids requiring decoder seeking or sink-position APIs for a first progress display and keeps the audio thread protocol simple.
+
 ## Refactor rules
 
 - Keep `crate::app::App` as the public UI-facing state root.

@@ -5,6 +5,7 @@ use crate::system_open;
 use crate::system_trash;
 use crate::tape_archive::{TapeArchive, TapeArchiveRow, TapeArchiveStatus, TapeTrack};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const TAPE_ARCHIVE_PAGE: usize = 1;
 
@@ -74,6 +75,9 @@ impl App {
     }
 
     pub(super) fn handle_local_tape_finished(&mut self, path: PathBuf) {
+        self.local_playback_started_at = None;
+        self.local_playback_elapsed_before_pause = Duration::ZERO;
+
         let next = match self.tape_playback_mode {
             TapePlaybackMode::StopAtEnd => None,
             TapePlaybackMode::Folder => self.tape_archive.next_track_after(&path),
@@ -91,6 +95,8 @@ impl App {
             self.set_info_notice(format!("Tape {mode}: {title}"));
         } else {
             self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
             self.current_track = None;
             self.playback = PlaybackState::Stopped;
             self.set_info_notice(match self.tape_playback_mode {
@@ -276,6 +282,8 @@ impl App {
         if self.local_playback_path.as_deref() == Some(source) {
             self.audio.send(AudioCommand::Stop);
             self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
             self.current_track = None;
             self.playback = PlaybackState::Stopped;
         }
@@ -292,6 +300,18 @@ impl App {
                 self.set_error_notice(format!("Could not update tape file: {err}"));
             }
         }
+    }
+
+    pub fn local_tape_elapsed(&self) -> Duration {
+        let mut elapsed = self.local_playback_elapsed_before_pause;
+
+        if self.local_playback_path.is_some() {
+            if let Some(started_at) = self.local_playback_started_at {
+                elapsed += started_at.elapsed().unwrap_or_default();
+            }
+        }
+
+        elapsed
     }
 
     pub(super) fn refresh_tape_archive(&mut self) {
@@ -441,6 +461,8 @@ impl App {
         if self.local_playback_path.as_ref() == Some(&path) {
             self.audio.send(AudioCommand::Stop);
             self.local_playback_path = None;
+            self.local_playback_started_at = None;
+            self.local_playback_elapsed_before_pause = Duration::ZERO;
             self.current_track = None;
             self.playback = PlaybackState::Stopped;
         }
@@ -480,6 +502,8 @@ impl App {
     pub(super) fn play_tape_track(&mut self, track: TapeTrack) {
         self.playing_url = None;
         self.local_playback_path = Some(track.path.clone());
+        self.local_playback_started_at = None;
+        self.local_playback_elapsed_before_pause = Duration::ZERO;
         self.current_track = Some(track.title.clone());
         self.playback = PlaybackState::Connecting;
         self.buffer_percent = 0;

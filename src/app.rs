@@ -21,7 +21,7 @@ use crate::tape_archive::TapeArchive;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 pub use types::{
     AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus, SettingRow,
@@ -78,6 +78,8 @@ pub struct App {
     pub tape_archive_scan_requested: bool,
     pub tape_archive_scan_inflight: bool,
     pub local_playback_path: Option<PathBuf>,
+    pub local_playback_started_at: Option<SystemTime>,
+    pub local_playback_elapsed_before_pause: Duration,
     pub pending_tape_delete: Option<PathBuf>,
     pub tape_playback_mode: TapePlaybackMode,
     pub tape_details_visible: bool,

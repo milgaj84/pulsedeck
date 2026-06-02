@@ -1,10 +1,12 @@
 use super::theme;
 use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
 use crate::tape_archive::{
-    format_file_size, track_metadata_label, TapeArchiveRow, TapeArchiveStatus, TapeTrack,
+    format_duration, format_file_size, track_metadata_label, TapeArchiveRow, TapeArchiveStatus,
+    TapeTrack,
 };
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
+use std::time::Duration;
 
 const CASSETTE_INNER_WIDTH: usize = 44;
 #[cfg(test)]
@@ -1082,7 +1084,7 @@ fn render_track_row(
     };
     let meta = track_metadata_label(track);
 
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(cursor, cursor_style),
         Span::styled("  ", theme::dim()),
         Span::styled(
@@ -1096,7 +1098,45 @@ fn render_track_row(
             },
         ),
         Span::styled(format!("   {meta}"), theme::dim()),
-    ])
+    ];
+
+    if is_playing {
+        if let Some(progress) = local_tape_progress_label(app, track) {
+            spans.push(Span::styled(format!("   {progress}"), theme::cyan()));
+        }
+    }
+
+    Line::from(spans)
+}
+
+fn local_tape_progress_label(app: &App, track: &TapeTrack) -> Option<String> {
+    if app.local_playback_path.as_ref() != Some(&track.path) {
+        return None;
+    }
+
+    let elapsed = app.local_tape_elapsed();
+
+    match track.duration_hint {
+        Some(duration) if duration > Duration::ZERO => {
+            let clamped = elapsed.min(duration);
+            let ratio = clamped.as_secs_f64() / duration.as_secs_f64();
+            Some(format!(
+                "{} {} / {}",
+                local_tape_progress_bar(ratio, 10),
+                format_duration(clamped),
+                format_duration(duration)
+            ))
+        }
+        _ => Some(format!("{} elapsed", format_duration(elapsed))),
+    }
+}
+
+fn local_tape_progress_bar(ratio: f64, width: usize) -> String {
+    let ratio = ratio.clamp(0.0, 1.0);
+    let filled = (ratio * width as f64).round() as usize;
+    let filled = filled.min(width);
+
+    format!("{}{}", "▰".repeat(filled), "▱".repeat(width - filled))
 }
 
 fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {
