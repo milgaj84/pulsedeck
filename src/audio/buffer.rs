@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 /// Bounded Producer-Consumer circular byte queue (Resiliency Buffer)
 pub(super) struct BufferQueue {
@@ -51,6 +52,28 @@ impl BufferQueue {
         }
         self.cv_write.notify_all();
         Ok(count)
+    }
+
+    pub(super) fn wait_until_at_least(&self, target_len: usize, max_wait: Duration) -> usize {
+        let deadline = Instant::now() + max_wait;
+        let mut queue = self.queue.lock().unwrap();
+
+        while queue.len() < target_len && !self.disconnected.load(Ordering::SeqCst) {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+
+            let remaining = deadline.saturating_duration_since(now);
+            let (next_queue, timeout) = self.cv_read.wait_timeout(queue, remaining).unwrap();
+            queue = next_queue;
+
+            if timeout.timed_out() {
+                break;
+            }
+        }
+
+        queue.len()
     }
 
     pub(super) fn len(&self) -> usize {

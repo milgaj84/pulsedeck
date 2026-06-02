@@ -45,6 +45,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Audio Output Recovery Retry**: Added a guarded one-shot recovery path for hardware-style sink failures by dropping stale output handles and retrying the current stream.
 
 ### Improved
+*   **Stream Playback Prebuffer**: Added a short startup prebuffer and larger stream queue to smooth regular internet radio playback before release.
 *   **Recording Visibility**: Improved tape capture feedback so recording state is visible in the deck instead of only as transient footer notices.
 *   **Recording Recovery Safety**: Failed recovery trash moves now keep the journal available for retry or a non-destructive keep/dismiss action.
 *   **Recording Archive Safety**: Duplicate captures now produce a visible skip notice instead of silently replacing existing files.
