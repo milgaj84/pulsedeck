@@ -1,5 +1,4 @@
 use super::*;
-use crate::action::Action;
 use crate::audio::AudioCommand;
 use crate::system_open;
 use crate::system_trash;
@@ -168,19 +167,6 @@ impl App {
         self.set_info_notice("Move tape: type target folder and press Enter");
     }
 
-    pub(super) fn handle_tape_manager_action(&mut self, action: Action) {
-        match action {
-            Action::TapeManagerInput(ch) => self.tape_manager_input(ch),
-            Action::TapeManagerBackspace => self.tape_manager_backspace(),
-            Action::ConfirmTapeRename => self.confirm_tape_rename(),
-            Action::ConfirmTapeMove => self.confirm_tape_move(),
-            Action::CancelTapeManager => self.cancel_tape_manager(),
-            Action::Tick => self.tick(),
-            Action::Quit => self.quit(),
-            _ => {}
-        }
-    }
-
     pub(super) fn tape_manager_input(&mut self, ch: char) {
         if matches!(self.input_mode, InputMode::TapeRename | InputMode::TapeMove)
             && !ch.is_control()
@@ -347,25 +333,6 @@ impl App {
     pub(super) fn tape_filter_backspace(&mut self) {
         if self.input_mode == InputMode::TapeFilter {
             self.tape_archive.pop_filter_char();
-        }
-    }
-
-    pub(super) fn handle_tape_filter_action(&mut self, action: Action) {
-        match action {
-            Action::TapeFilterInput(ch) => self.tape_filter_input(ch),
-            Action::TapeFilterBackspace => self.tape_filter_backspace(),
-            Action::ExitTapeFilter => self.exit_tape_filter(),
-            Action::NextStation => self.next_tape_archive_row(),
-            Action::PrevStation => self.prev_tape_archive_row(),
-            Action::PlaySelected => self.play_selected_tape_or_toggle(),
-            Action::RefreshTapeArchive => {
-                self.pending_tape_delete = None;
-                self.tape_archive_scan_requested = true;
-                self.set_info_notice("Refreshing Local Tape Library");
-            }
-            Action::Tick => self.tick(),
-            Action::Quit => self.quit(),
-            _ => {}
         }
     }
 
