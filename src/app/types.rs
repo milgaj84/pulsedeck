@@ -58,20 +58,14 @@ pub enum SettingRow {
     Notifications,
     AutoplayLast,
     OutputDevice,
-    RecordingDir,
-    KeepSnippets,
-    MinSongDuration,
     Theme,
 }
 
 impl SettingRow {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 4] = [
         Self::Notifications,
         Self::AutoplayLast,
         Self::OutputDevice,
-        Self::RecordingDir,
-        Self::KeepSnippets,
-        Self::MinSongDuration,
         Self::Theme,
     ];
 
@@ -86,10 +80,7 @@ impl SettingRow {
             Self::Notifications => 0,
             Self::AutoplayLast => 1,
             Self::OutputDevice => 2,
-            Self::RecordingDir => 3,
-            Self::KeepSnippets => 4,
-            Self::MinSongDuration => 5,
-            Self::Theme => 6,
+            Self::Theme => 3,
         }
     }
 }
