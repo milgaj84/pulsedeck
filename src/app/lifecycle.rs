@@ -4,13 +4,6 @@ use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 impl App {
     pub fn new(library: Library) -> Self {
         let ui_state = super::ui_state::UiState::load();
-        let recording_dir = library.settings.recording_dir.clone();
-        let recording_recovery = crate::recording_journal::detect_recovery_journal(&recording_dir)
-            .ok()
-            .flatten();
-        let recording_recovery_notice = recording_recovery
-            .as_ref()
-            .map(|recovery| recovery.summary());
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
 
@@ -40,19 +33,8 @@ impl App {
             layout_mode: ui_state.layout_mode(),
             show_help: false,
             song_history: VecDeque::new(),
-            local_playback_path: None,
-            local_playback_started_at: None,
-            local_playback_elapsed_before_pause: Duration::ZERO,
             show_settings: false,
             selected_setting_idx: 0,
-            recording_state: RecordingState::Off,
-            active_record_filepath: None,
-            recording_started_at: None,
-            recording_station_name: None,
-            recording_station_url: None,
-            recording_category: None,
-            recording_recovery,
-            recording_recovery_notice,
             buffer_percent: 0,
             buffer_seconds: 0,
             undo_history: VecDeque::new(),
@@ -65,7 +47,6 @@ impl App {
         app.sync_output_device();
         app.sync_volume();
 
-        // Autoplay last played station on boot if enabled.
         if app.library.settings.autoplay_last {
             if let Some(ref url) = app.library.settings.last_played_url {
                 if let Some(pos) = app.library.stations.iter().position(|s| s.url == *url) {
@@ -99,31 +80,10 @@ impl App {
         }
     }
 
-    /// Poll for audio status updates (non-blocking).
     pub fn poll_audio_status(&mut self) {
         while let Ok(status) = self.audio.status_rx.try_recv() {
             match status {
-                AudioStatus::LocalFileFinished { .. } => {
-                    self.local_playback_path = None;
-                    self.local_playback_started_at = None;
-                    self.local_playback_elapsed_before_pause = Duration::ZERO;
-                    self.current_track = None;
-                    self.playback = PlaybackState::Stopped;
-                }
-                AudioStatus::LocalFilePlaying { path, title } => {
-                    self.playing_url = None;
-                    self.local_playback_path = Some(path);
-                    self.local_playback_started_at = Some(SystemTime::now());
-                    self.local_playback_elapsed_before_pause = Duration::ZERO;
-                    self.current_track = Some(title);
-                    self.recording_state = RecordingState::Off;
-                    self.active_record_filepath = None;
-                    self.buffer_percent = 0;
-                    self.buffer_seconds = 0;
-                    self.playback = PlaybackState::Playing;
-                }
                 AudioStatus::TrackChanged { url, title } => {
-                    // Safety check: discard track updates that do not match the current playing URL.
                     if Some(&url) == self.playing_url.as_ref() {
                         let is_new =
                             !title.is_empty() && self.current_track.as_ref() != Some(&title);
@@ -136,12 +96,10 @@ impl App {
                             }
                         }
 
-                        // Fire native OS system notifications if enabled and this is a new title.
                         if is_new && self.library.settings.notifications_enabled {
                             let mut should_notify = true;
                             if let Some(idle_ms) = super::idle::get_user_idle_ms() {
                                 if idle_ms > 120_000 {
-                                    // 2 minutes of system idle suppresses toast popups.
                                     should_notify = false;
                                 }
                             }
@@ -157,51 +115,23 @@ impl App {
                         }
                     }
                 }
-                AudioStatus::RecordingStateChanged { state, filepath } => {
-                    self.sync_recording_status(state, filepath);
-                }
                 AudioStatus::BufferLevel { percent, seconds } => {
                     self.buffer_percent = percent;
                     self.buffer_seconds = seconds;
                 }
                 other => {
                     self.playback = match other {
-                        AudioStatus::Playing => {
-                            if self.local_playback_path.is_some()
-                                && self.local_playback_started_at.is_none()
-                            {
-                                self.local_playback_started_at = Some(SystemTime::now());
-                            }
-                            PlaybackState::Playing
-                        }
-                        AudioStatus::Paused => {
-                            if self.local_playback_path.is_some() {
-                                if let Some(started_at) = self.local_playback_started_at.take() {
-                                    self.local_playback_elapsed_before_pause +=
-                                        started_at.elapsed().unwrap_or_default();
-                                }
-                            }
-                            PlaybackState::Paused
-                        }
+                        AudioStatus::Playing => PlaybackState::Playing,
+                        AudioStatus::Paused => PlaybackState::Paused,
                         AudioStatus::Stopped => {
                             self.playing_url = None;
-                            self.local_playback_path = None;
-                            self.local_playback_started_at = None;
-                            self.local_playback_elapsed_before_pause = Duration::ZERO;
                             self.current_track = None;
-                            self.recording_state = RecordingState::Off;
-                            self.active_record_filepath = None;
                             self.buffer_percent = 0;
                             self.buffer_seconds = 0;
                             PlaybackState::Stopped
                         }
                         AudioStatus::Error(e) => {
-                            self.local_playback_path = None;
-                            self.local_playback_started_at = None;
-                            self.local_playback_elapsed_before_pause = Duration::ZERO;
                             self.current_track = None;
-                            self.recording_state = RecordingState::Off;
-                            self.active_record_filepath = None;
                             self.buffer_percent = 0;
                             self.buffer_seconds = 0;
                             PlaybackState::Error(e)
@@ -213,7 +143,9 @@ impl App {
                             self.current_track = None;
                             PlaybackState::Connecting
                         }
-                        _ => self.playback.clone(),
+                        AudioStatus::TrackChanged { .. } | AudioStatus::BufferLevel { .. } => {
+                            self.playback.clone()
+                        }
                     };
                 }
             }

@@ -4,7 +4,6 @@ mod lifecycle;
 mod notifier;
 mod overlays;
 mod playback;
-mod recording;
 mod search;
 mod selectors;
 mod settings;
@@ -17,13 +16,9 @@ use crate::audio::AudioEngine;
 use crate::favorites::Library;
 use crate::radio::Station;
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
 
-pub use types::{
-    AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState, SearchStatus, SettingRow,
-};
+pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
 
 /// Core application state.
 ///
@@ -70,21 +65,10 @@ pub struct App {
     pub layout_mode: LayoutMode,
     pub show_help: bool,
     pub song_history: VecDeque<String>,
-    pub local_playback_path: Option<PathBuf>,
-    pub local_playback_started_at: Option<SystemTime>,
-    pub local_playback_elapsed_before_pause: Duration,
 
     pub show_settings: bool,
     pub selected_setting_idx: usize,
 
-    pub recording_state: RecordingState,
-    pub active_record_filepath: Option<String>,
-    pub recording_started_at: Option<SystemTime>,
-    pub recording_station_name: Option<String>,
-    pub recording_station_url: Option<String>,
-    pub recording_category: Option<String>,
-    pub recording_recovery: Option<crate::recording_journal::RecordingRecovery>,
-    pub recording_recovery_notice: Option<String>,
     pub buffer_percent: u8,
     pub buffer_seconds: u32,
 

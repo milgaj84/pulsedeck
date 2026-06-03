@@ -1,5 +1,5 @@
 use super::theme;
-use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
+use crate::app::{App, LayoutMode, PlaybackState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -36,12 +36,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
-    let lines = build_cassette_lines(
-        CASSETTE_INNER_WIDTH,
-        app.tick_count,
-        &app.playback,
-        app.recording_state,
-    );
+    let lines = build_cassette_lines(CASSETTE_INNER_WIDTH, app.tick_count, &app.playback);
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
@@ -57,7 +52,6 @@ fn build_cassette_lines(
     inner_width: usize,
     tick_count: u64,
     playback: &PlaybackState,
-    recording_state: RecordingState,
 ) -> Vec<Line<'static>> {
     let shell_style = theme::dim();
     let reel_style = Style::default()
@@ -67,12 +61,7 @@ fn build_cassette_lines(
 
     let mut lines = Vec::with_capacity(CASSETTE_HEIGHT as usize);
     lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
-    lines.push(cassette_label_line(
-        inner_width,
-        tick_count,
-        recording_state,
-        shell_style,
-    ));
+    lines.push(cassette_label_line(inner_width, shell_style));
     lines.push(shell_text_line(
         "        ────────────────────────────        ",
         inner_width,
@@ -122,19 +111,18 @@ fn build_cassette_lines(
     lines
 }
 
-fn cassette_label_line(
-    inner_width: usize,
-    tick_count: u64,
-    recording_state: RecordingState,
-    shell_style: Style,
-) -> Line<'static> {
+fn cassette_label_line(inner_width: usize, shell_style: Style) -> Line<'static> {
     let brand = "P U L S E  D E C K";
     let label_style = Style::default()
         .fg(theme::accent_secondary())
         .bg(theme::bg())
         .add_modifier(Modifier::BOLD);
+    let status = "A-SIDE";
+    let status_style = Style::default()
+        .fg(theme::highlight())
+        .bg(theme::bg())
+        .add_modifier(Modifier::BOLD);
 
-    let (status, status_style) = cassette_recording_status(tick_count, recording_state);
     let fixed_padding = 4;
     let spacer_width = inner_width
         .saturating_sub(visible_len(brand))
@@ -152,43 +140,6 @@ fn cassette_label_line(
             segment("  ", shell_style),
         ],
     )
-}
-
-fn cassette_recording_status(
-    tick_count: u64,
-    recording_state: RecordingState,
-) -> (&'static str, Style) {
-    match recording_state {
-        RecordingState::Active => {
-            let status = if tick_count.is_multiple_of(2) {
-                "● REC ACTIVE"
-            } else {
-                "  REC ACTIVE"
-            };
-            (status, theme::error().add_modifier(Modifier::BOLD))
-        }
-        RecordingState::Pending => {
-            let status = if tick_count.is_multiple_of(2) {
-                "● REC PENDING"
-            } else {
-                "  REC PENDING"
-            };
-            (
-                status,
-                Style::default()
-                    .fg(theme::warm())
-                    .bg(theme::bg())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-        RecordingState::Off => (
-            "A-SIDE",
-            Style::default()
-                .fg(theme::highlight())
-                .bg(theme::bg())
-                .add_modifier(Modifier::BOLD),
-        ),
-    }
 }
 
 fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, String) {
@@ -370,8 +321,6 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
         Span::styled(format!("({}s)", app.buffer_seconds), theme::dim()),
     ]));
 
-    append_recording_dashboard(&mut lines, app);
-
     let title = if full_deck {
         " SIGNAL / TAPE STATUS "
     } else {
@@ -385,115 +334,6 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
-}
-
-fn append_recording_dashboard(lines: &mut Vec<Line<'static>>, app: &App) {
-    match app.recording_state {
-        RecordingState::Off => {
-            if let Some(notice) = app.recording_recovery_notice.as_ref() {
-                let target = app
-                    .recording_recovery
-                    .as_ref()
-                    .and_then(|recovery| recovery.active_file.as_deref())
-                    .and_then(|path| {
-                        std::path::Path::new(path)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                    })
-                    .unwrap_or("recovery journal");
-
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        " RECOVERY ",
-                        Style::default()
-                            .fg(theme::warm())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(notice.clone(), theme::dim()),
-                ]));
-
-                lines.push(Line::from(vec![
-                    Span::styled(" TARGET ", theme::dim()),
-                    Span::styled(target.to_string(), theme::cyan()),
-                    Span::styled("   Shift+K ", theme::dim()),
-                    Span::styled("keep", theme::cyan()),
-                    Span::styled("   Shift+T ", theme::dim()),
-                    Span::styled("trash", theme::cyan()),
-                    Span::styled("   Shift+D ", theme::dim()),
-                    Span::styled("dismiss", theme::cyan()),
-                ]));
-            }
-        }
-        RecordingState::Pending | RecordingState::Active => {
-            let (label, style) = match app.recording_state {
-                RecordingState::Pending => (
-                    " REC ARMED ",
-                    Style::default()
-                        .fg(theme::warm())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                RecordingState::Active => {
-                    (" REC ACTIVE ", theme::error().add_modifier(Modifier::BOLD))
-                }
-                RecordingState::Off => unreachable!(),
-            };
-
-            let station = app
-                .recording_station_name
-                .as_deref()
-                .or_else(|| app.now_playing().map(|station| station.name.as_str()))
-                .unwrap_or("Radio Stream");
-
-            lines.push(Line::from(vec![
-                Span::styled(label, style),
-                Span::styled(station.to_string(), theme::cyan()),
-                Span::styled("   elapsed ", theme::dim()),
-                Span::styled(
-                    crate::recording_journal::format_elapsed(app.recording_started_at),
-                    Style::default()
-                        .fg(theme::highlight())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-
-            let capture = recording_capture_label(app);
-            lines.push(Line::from(vec![
-                Span::styled(" CAPTURE ", theme::dim()),
-                Span::styled(capture, theme::dim()),
-                Span::styled("   min ", theme::dim()),
-                Span::styled(
-                    format!("{}s", app.library.settings.min_song_duration_secs),
-                    theme::cyan(),
-                ),
-                Span::styled("   snippets ", theme::dim()),
-                Span::styled(
-                    if app.library.settings.keep_snippets {
-                        "keep"
-                    } else {
-                        "drop"
-                    },
-                    theme::cyan(),
-                ),
-            ]));
-        }
-    }
-}
-
-fn recording_capture_label(app: &App) -> String {
-    let Some(filepath) = app.active_record_filepath.as_ref() else {
-        return "waiting for next track boundary".to_string();
-    };
-
-    let path = std::path::Path::new(filepath);
-    let filename = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(filepath);
-
-    match std::fs::metadata(path) {
-        Ok(metadata) => format!("{filename} · {}", format_file_size(metadata.len())),
-        Err(_) => filename.to_string(),
-    }
 }
 
 fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
@@ -789,12 +629,7 @@ mod tests {
     #[test]
     fn cassette_rows_have_equal_width() {
         let expected_width = CASSETTE_INNER_WIDTH + 2;
-        let lines = build_cassette_lines(
-            CASSETTE_INNER_WIDTH,
-            0,
-            &PlaybackState::Playing,
-            RecordingState::Off,
-        );
+        let lines = build_cassette_lines(CASSETTE_INNER_WIDTH, 0, &PlaybackState::Playing);
 
         assert_eq!(lines.len(), CASSETTE_HEIGHT as usize);
         for line in lines {

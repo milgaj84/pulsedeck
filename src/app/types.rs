@@ -44,14 +44,6 @@ pub enum PlaybackState {
     Error(String),
 }
 
-/// Tape recorder capturing states.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RecordingState {
-    Off,
-    Pending,
-    Active,
-}
-
 /// TUI Dashboard layout configurations.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LayoutMode {

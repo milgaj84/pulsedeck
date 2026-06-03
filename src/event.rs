@@ -24,7 +24,6 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
     match mode {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
-        _ => None,
     }
 }
 

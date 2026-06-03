@@ -19,46 +19,42 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
 
-    if app.local_playback_path.is_some() {
-        render_local_tape_status(&mut spans, app);
-    } else {
-        match (&app.playback, app.now_playing()) {
-            (PlaybackState::Playing, Some(station)) => {
-                status_chip(&mut spans, "▶", "PLAY", theme::playing());
-                spans.push(Span::styled(station.name.as_str(), theme::cyan()));
-                if let Some(ref track) = app.current_track {
-                    spans.push(Span::styled("  ♫ ", theme::playing()));
-                    spans.push(Span::styled(
-                        track.as_str(),
-                        Style::default()
-                            .fg(theme::accent_secondary())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-            }
-            (PlaybackState::FadingOut { .. }, Some(station)) => {
-                status_chip(&mut spans, "◒", "FADE", Style::default().fg(theme::warm()));
-                spans.push(Span::styled(station.name.as_str(), theme::dim()));
-            }
-            (PlaybackState::Paused, Some(station)) => {
-                status_chip(&mut spans, "⏸", "PAUSE", theme::neon());
-                spans.push(Span::styled(station.name.as_str(), theme::dim()));
-            }
-            (PlaybackState::Connecting, _) => {
-                status_chip(&mut spans, "◌", "TUNE", Style::default().fg(theme::warm()));
+    match (&app.playback, app.now_playing()) {
+        (PlaybackState::Playing, Some(station)) => {
+            status_chip(&mut spans, "▶", "PLAY", theme::playing());
+            spans.push(Span::styled(station.name.as_str(), theme::cyan()));
+            if let Some(ref track) = app.current_track {
+                spans.push(Span::styled("  ♫ ", theme::playing()));
                 spans.push(Span::styled(
-                    "Connecting...",
-                    Style::default().fg(theme::warm()),
+                    track.as_str(),
+                    Style::default()
+                        .fg(theme::accent_secondary())
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
-            (PlaybackState::Error(e), _) => {
-                status_chip(&mut spans, "✗", "ERROR", theme::error());
-                spans.push(Span::styled(e.as_str(), theme::error()));
-            }
-            _ => {
-                status_chip(&mut spans, "■", "STOP", theme::dim());
-                spans.push(Span::styled("Select a station", theme::dim()));
-            }
+        }
+        (PlaybackState::FadingOut { .. }, Some(station)) => {
+            status_chip(&mut spans, "◒", "FADE", Style::default().fg(theme::warm()));
+            spans.push(Span::styled(station.name.as_str(), theme::dim()));
+        }
+        (PlaybackState::Paused, Some(station)) => {
+            status_chip(&mut spans, "⏸", "PAUSE", theme::neon());
+            spans.push(Span::styled(station.name.as_str(), theme::dim()));
+        }
+        (PlaybackState::Connecting, _) => {
+            status_chip(&mut spans, "◌", "TUNE", Style::default().fg(theme::warm()));
+            spans.push(Span::styled(
+                "Connecting...",
+                Style::default().fg(theme::warm()),
+            ));
+        }
+        (PlaybackState::Error(e), _) => {
+            status_chip(&mut spans, "✗", "ERROR", theme::error());
+            spans.push(Span::styled(e.as_str(), theme::error()));
+        }
+        _ => {
+            status_chip(&mut spans, "■", "STOP", theme::dim());
+            spans.push(Span::styled("Select a station", theme::dim()));
         }
     }
 
@@ -100,38 +96,6 @@ fn status_chip(spans: &mut Vec<Span>, icon: &'static str, label: &'static str, s
     spans.push(Span::styled(" ", theme::dim()));
     spans.push(Span::styled(label, style.add_modifier(Modifier::BOLD)));
     spans.push(Span::styled("  ", theme::dim()));
-}
-
-fn render_local_tape_status(spans: &mut Vec<Span>, app: &App) {
-    match app.playback {
-        PlaybackState::Playing => status_chip(spans, "▶", "TAPE", theme::playing()),
-        PlaybackState::Paused => status_chip(spans, "⏸", "TAPE", theme::neon()),
-        PlaybackState::FadingOut { .. } => {
-            status_chip(spans, "◒", "TAPE", Style::default().fg(theme::warm()));
-        }
-        PlaybackState::Connecting => {
-            status_chip(spans, "◌", "TAPE", Style::default().fg(theme::warm()));
-        }
-        PlaybackState::Error(_) => status_chip(spans, "✗", "TAPE", theme::error()),
-        PlaybackState::Stopped => status_chip(spans, "■", "TAPE", theme::dim()),
-    }
-
-    if let Some(track) = app.current_track.as_ref() {
-        spans.push(Span::styled(
-            track.clone(),
-            Style::default()
-                .fg(theme::accent_secondary())
-                .add_modifier(Modifier::BOLD),
-        ));
-    } else if let Some(path) = app.local_playback_path.as_ref() {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Local tape");
-        spans.push(Span::styled(name.to_string(), theme::cyan()));
-    } else {
-        spans.push(Span::styled("Local tape", theme::dim()));
-    }
 }
 
 fn volume_label(app: &App) -> String {

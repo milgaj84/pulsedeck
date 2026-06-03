@@ -2,7 +2,7 @@ use super::buffer::BufferQueue;
 use super::buffer_meter::BufferStatusMeter;
 use super::stream_reader::{StreamReader, StreamReaderConfig};
 use super::visualizer::VisualizerSource;
-use super::{AudioStatus, RecordStateShared};
+use super::AudioStatus;
 
 use rodio::{Decoder, Sink};
 use std::collections::VecDeque;
@@ -21,7 +21,6 @@ pub(super) struct ConnectionContext {
     pub(super) status_tx: mpsc::Sender<AudioStatus>,
     pub(super) conn_id: u64,
     pub(super) active_conn_id: Arc<AtomicU64>,
-    pub(super) record_state: Arc<RecordStateShared>,
     pub(super) sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
 
@@ -169,7 +168,6 @@ fn try_connect_and_decode_once(
         status_tx: context.status_tx,
         conn_id: context.conn_id,
         active_conn_id: context.active_conn_id,
-        record_state: context.record_state,
         metaint,
     });
 
