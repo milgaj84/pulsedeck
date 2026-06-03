@@ -40,7 +40,6 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Search
         (_, KeyCode::Char('/')) => Some(Action::EnterSearch),
-        (_, KeyCode::Char('t')) => Some(Action::EnterTapeFilter),
         (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => {
             Some(Action::EnterSearch)
         }
@@ -75,33 +74,11 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Bento layout cycle
         (_, KeyCode::Char('b')) => Some(Action::CycleLayout),
 
-        // Deck page cycle
-        (_, KeyCode::Char('p')) => Some(Action::NextDeckPage),
-
         // Visualizer mode toggle
         (_, KeyCode::Char('v')) => Some(Action::ToggleVisualizerMode),
 
         // Settings overlay
         (_, KeyCode::Char(',')) => Some(Action::ToggleSettings),
-
-        // Local tape archive
-        (mods, KeyCode::Char('r')) if mods.contains(KeyModifiers::CONTROL) => {
-            Some(Action::RefreshTapeArchive)
-        }
-        (_, KeyCode::Delete) => Some(Action::DeleteSelectedTape),
-        (_, KeyCode::Char('o')) => Some(Action::OpenSelectedTapeFolder),
-        (_, KeyCode::Char('g')) => Some(Action::CycleTapePlaybackMode),
-        (_, KeyCode::Char('i')) => Some(Action::ToggleTapeDetails),
-        (_, KeyCode::Char('R')) => Some(Action::EnterTapeRename),
-        (_, KeyCode::Char('M')) => Some(Action::EnterTapeMove),
-        (_, KeyCode::Char('y')) => Some(Action::ConfirmDeleteTape),
-        (_, KeyCode::Char('n')) => Some(Action::CancelDeleteTape),
-
-        // Tape recording
-        (_, KeyCode::Char('r')) => Some(Action::ToggleRecording),
-        (_, KeyCode::Char('K')) => Some(Action::KeepRecordingRecovery),
-        (_, KeyCode::Char('T')) => Some(Action::TrashRecordingRecovery),
-        (_, KeyCode::Char('D')) => Some(Action::DismissRecordingRecovery),
 
         _ => None,
     }
@@ -366,25 +343,6 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_ctrl_r_refreshes_tape_archive() {
-        assert_eq!(
-            map_key(
-                modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
-                &InputMode::Normal
-            ),
-            Some(Action::RefreshTapeArchive),
-        );
-    }
-
-    #[test]
-    fn normal_mode_t_enters_tape_filter_action() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('t')), &InputMode::Normal),
-            Some(Action::EnterTapeFilter),
-        );
-    }
-
-    #[test]
     fn tape_filter_mode_collects_text() {
         assert_eq!(
             map_key(key(KeyCode::Char('s')), &InputMode::TapeFilter),
@@ -405,22 +363,6 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Backspace), &InputMode::TapeFilter),
             Some(Action::TapeFilterBackspace),
-        );
-    }
-
-    #[test]
-    fn normal_mode_delete_requests_tape_delete() {
-        assert_eq!(
-            map_key(key(KeyCode::Delete), &InputMode::Normal),
-            Some(Action::DeleteSelectedTape),
-        );
-    }
-
-    #[test]
-    fn normal_mode_o_opens_selected_tape_folder() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('o')), &InputMode::Normal),
-            Some(Action::OpenSelectedTapeFolder),
         );
     }
 
@@ -452,34 +394,34 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_shift_k_keeps_recording_recovery() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('K')), &InputMode::Normal),
-            Some(Action::KeepRecordingRecovery),
-        );
-    }
+    fn normal_mode_removed_tape_and_recording_keys_are_unmapped() {
+        let removed_plain_keys = [
+            KeyCode::Char('t'),
+            KeyCode::Char('p'),
+            KeyCode::Char('r'),
+            KeyCode::Char('o'),
+            KeyCode::Char('g'),
+            KeyCode::Char('i'),
+            KeyCode::Char('R'),
+            KeyCode::Char('M'),
+            KeyCode::Char('y'),
+            KeyCode::Char('n'),
+            KeyCode::Char('K'),
+            KeyCode::Char('T'),
+            KeyCode::Char('D'),
+            KeyCode::Delete,
+        ];
 
-    #[test]
-    fn normal_mode_shift_t_trashes_recording_recovery() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('T')), &InputMode::Normal),
-            Some(Action::TrashRecordingRecovery),
-        );
-    }
+        for code in removed_plain_keys {
+            assert_eq!(map_key(key(code), &InputMode::Normal), None);
+        }
 
-    #[test]
-    fn normal_mode_shift_d_dismisses_recording_recovery() {
         assert_eq!(
-            map_key(key(KeyCode::Char('D')), &InputMode::Normal),
-            Some(Action::DismissRecordingRecovery),
-        );
-    }
-
-    #[test]
-    fn normal_mode_g_cycles_tape_playback_mode() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
-            Some(Action::CycleTapePlaybackMode),
+            map_key(
+                modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
         );
     }
 }

@@ -2,7 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState};
+use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState};
 
 /// Render the bottom control bar: playback status + volume + keybinds.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -74,18 +74,6 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         visualizer_label(app.visualizer_mode),
         theme::dim(),
     ));
-
-    if app.recording_state != RecordingState::Off {
-        spans.push(Span::styled("  ", theme::dim()));
-        let style = match app.recording_state {
-            RecordingState::Active => theme::error().add_modifier(Modifier::BOLD),
-            RecordingState::Pending => Style::default()
-                .fg(theme::warm())
-                .add_modifier(Modifier::BOLD),
-            RecordingState::Off => theme::dim(),
-        };
-        spans.push(Span::styled(recording_label(app.recording_state), style));
-    }
 
     if let Some(ref notice) = app.notice {
         spans.push(Span::styled("  │  ", theme::dim()));
@@ -191,14 +179,6 @@ fn visualizer_label(visualizer_mode: usize) -> &'static str {
     }
 }
 
-fn recording_label(recording_state: RecordingState) -> &'static str {
-    match recording_state {
-        RecordingState::Active => "● REC",
-        RecordingState::Pending => "● ARM",
-        RecordingState::Off => "",
-    }
-}
-
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
@@ -254,61 +234,14 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::ITALIC),
             ),
         ]),
-        InputMode::Normal
-            if app.recording_recovery_notice.is_some()
-                && app.recording_state == RecordingState::Off =>
-        {
-            Line::from(vec![
-                Span::styled(" [", theme::dim()),
-                Span::styled("Shift+K", theme::cyan()),
-                Span::styled("] Keep partial  [", theme::dim()),
-                Span::styled("Shift+T", theme::cyan()),
-                Span::styled("] Trash partial  [", theme::dim()),
-                Span::styled("Shift+D", theme::cyan()),
-                Span::styled("] Dismiss journal  [", theme::dim()),
-                Span::styled("r", theme::cyan()),
-                Span::styled("] New recording  [", theme::dim()),
-                Span::styled("h", theme::cyan()),
-                Span::styled("] Help", theme::dim()),
-            ])
-        }
-        InputMode::Normal if app.is_tape_archive_focused() => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Play/Open  [", theme::dim()),
-            Span::styled("Space", theme::cyan()),
-            Span::styled("] Expand/Pause  [", theme::dim()),
-            Span::styled("Ctrl+r", theme::cyan()),
-            Span::styled("] Refresh  [", theme::dim()),
-            Span::styled("o", theme::cyan()),
-            Span::styled("] Folder  [", theme::dim()),
-            Span::styled("g", theme::cyan()),
-            Span::styled("] Mode  [", theme::dim()),
-            Span::styled("i", theme::cyan()),
-            Span::styled("] Info  [", theme::dim()),
-            Span::styled("R/M", theme::cyan()),
-            Span::styled("] Rename/Move  [", theme::dim()),
-            Span::styled("f/Del", theme::cyan()),
-            Span::styled("] Trash  [", theme::dim()),
-            Span::styled("p", theme::cyan()),
-            Span::styled("] Deck  [", theme::dim()),
-            Span::styled("h", theme::cyan()),
-            Span::styled("] Help  [", theme::dim()),
-            Span::styled("q", theme::cyan()),
-            Span::styled("] Quit", theme::dim()),
-        ]),
         InputMode::Normal => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
             Span::styled("] Play  [", theme::dim()),
             Span::styled("Space", theme::cyan()),
             Span::styled("] Pause  [", theme::dim()),
-            Span::styled("r", theme::cyan()),
-            Span::styled("] Rec  [", theme::dim()),
             Span::styled("b", theme::cyan()),
             Span::styled("] Layout  [", theme::dim()),
-            Span::styled("p", theme::cyan()),
-            Span::styled("] Tape  [", theme::dim()),
             Span::styled("v", theme::cyan()),
             Span::styled("] Scope  [", theme::dim()),
             Span::styled("/", theme::cyan()),
