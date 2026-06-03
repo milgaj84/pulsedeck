@@ -72,7 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         shortcut("f", "Remove selected station from Library"),
         shortcut("u", "Undo the most recent station removal"),
         section("Search"),
-        shortcut("/", "Open worldwide station search"),
+        shortcut("/ / Ctrl+f / F3", "Open worldwide station search"),
         shortcut("Type", "Search by station, tag, city, or country"),
         shortcut("Space", "Audition highlighted result without saving"),
         shortcut("Ctrl+Enter", "Audition too, when your terminal supports it"),

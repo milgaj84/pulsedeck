@@ -37,6 +37,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Search
         (_, KeyCode::Char('/')) => Some(Action::EnterSearch),
+        (_, KeyCode::F(3)) => Some(Action::EnterSearch),
         (mods, KeyCode::Char('f')) if mods.contains(KeyModifiers::CONTROL) => {
             Some(Action::EnterSearch)
         }
@@ -246,6 +247,25 @@ mod tests {
                 &InputMode::Search
             ),
             Some(Action::ToggleMute),
+        );
+    }
+
+    #[test]
+    fn normal_mode_search_shortcuts_enter_search() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('/')), &InputMode::Normal),
+            Some(Action::EnterSearch),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::F(3)), &InputMode::Normal),
+            Some(Action::EnterSearch),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('f'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            Some(Action::EnterSearch),
         );
     }
 

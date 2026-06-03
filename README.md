@@ -2,9 +2,9 @@
 
 # ✦ PulseDeck ✦
 
-**A cyber-synthwave internet radio player for your terminal.**
+**A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback.**
 
-*Stream any radio station on Earth. Discover, save, and play stations without leaving the command line.*
+*Search, save, and stream public radio stations without leaving the command line.*
 
 [![Crates.io](https://img.shields.io/crates/v/pulsedeck.svg)](https://crates.io/crates/pulsedeck)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -90,7 +90,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Enter` | Search | Save the highlighted result to your **Library**, then play it |
 | `Space` | Search | Audition the highlighted result without saving it |
 | `Ctrl+Enter` | Search | Audition too, when your terminal reports the key combo |
-| `/` | Anywhere in normal mode | Open worldwide station search |
+| `/` / `Ctrl+f` / `F3` | Anywhere in normal mode | Open worldwide station search |
 | `Esc` | Search or overlay | Leave search / close overlay |
 | `f` | Library only | Remove the highlighted station from your **Library** |
 | `u` | Library only | Undo the most recent station removal |
@@ -118,7 +118,7 @@ While in search, plain printable characters continue to edit the query. Use the 
 
 **Finding and adding a new station:**
 
-1. Press `/` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
+1. Press `/`, `Ctrl+f`, or `F3` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
 2. Use `↑` / `↓` to highlight a result.
 3. Press `Space` to audition the highlighted station without saving it. You stay in search mode and can keep browsing.
 4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
