@@ -6,6 +6,22 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+*   _Nothing yet._
+
+### Changed
+*   _Nothing yet._
+
+### Improved
+*   _Nothing yet._
+
+### Removed
+*   _Nothing yet._
+
+---
+
+## [0.2.0] - 2026-06-03
+
 ### Changed
 *   **Focused 0.2 product reset**: PulseDeck now focuses on terminal radio playback, station discovery, saved library management, themes, visualizers, and audio reliability.
 

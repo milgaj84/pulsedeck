@@ -50,13 +50,13 @@ impl StreamReader {
     fn read_metadata_block(&mut self) -> std::io::Result<()> {
         let mut length_byte = [0u8; 1];
         let bytes_read = self.queue.pop(&mut length_byte)?;
-        self.record_buffer_consumption(bytes_read);
+        self.note_buffer_consumption(bytes_read);
         let length = length_byte[0] as usize * 16;
 
         if length > 0 {
             let mut meta_buf = vec![0u8; length];
             let bytes_read = self.queue.pop(&mut meta_buf)?;
-            self.record_buffer_consumption(bytes_read);
+            self.note_buffer_consumption(bytes_read);
             if let Ok(meta_str) = String::from_utf8(meta_buf) {
                 if let Some(title) = parse_stream_title(&meta_str) {
                     let _ = self.status_tx.send(AudioStatus::TrackChanged {
@@ -70,8 +70,8 @@ impl StreamReader {
         Ok(())
     }
 
-    fn record_buffer_consumption(&self, bytes_read: usize) {
-        self.buffer_meter.record_consumed(
+    fn note_buffer_consumption(&self, bytes_read: usize) {
+        self.buffer_meter.note_consumed(
             bytes_read,
             self.queue.len(),
             self.queue.capacity,
@@ -89,7 +89,7 @@ impl std::io::Read for StreamReader {
         let Some(metaint) = self.metaint else {
             let n = self.queue.pop(buf)?;
             self.pos += n as u64;
-            self.record_buffer_consumption(n);
+            self.note_buffer_consumption(n);
             return Ok(n);
         };
 
@@ -102,7 +102,7 @@ impl std::io::Read for StreamReader {
         let n = self.queue.pop(&mut buf[..max_to_read])?;
         self.pos += n as u64;
         self.bytes_until_meta -= n;
-        self.record_buffer_consumption(n);
+        self.note_buffer_consumption(n);
 
         Ok(n)
     }

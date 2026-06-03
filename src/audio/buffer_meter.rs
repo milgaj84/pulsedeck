@@ -52,7 +52,7 @@ impl BufferStatusMeter {
         send_buffer_status_if_changed(status_tx, &mut state, percent, seconds);
     }
 
-    pub(super) fn record_consumed(
+    pub(super) fn note_consumed(
         &self,
         bytes_read: usize,
         len: usize,
