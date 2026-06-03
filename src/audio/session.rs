@@ -2,7 +2,7 @@ use super::buffer::BufferQueue;
 use super::buffer_meter::BufferStatusMeter;
 use super::stream_reader::{StreamReader, StreamReaderConfig};
 use super::visualizer::VisualizerSource;
-use super::{AudioStatus, RecordStateShared};
+use super::AudioStatus;
 
 use rodio::{Decoder, Sink};
 use std::collections::VecDeque;
@@ -11,12 +11,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+const STREAM_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
+const MIN_PREBUFFER_SECONDS: usize = 2;
+const MIN_PREBUFFER_BYTES: usize = 128 * 1024;
+const MAX_PREBUFFER_WAIT: Duration = Duration::from_secs(4);
+
 #[derive(Clone)]
 pub(super) struct ConnectionContext {
     pub(super) status_tx: mpsc::Sender<AudioStatus>,
     pub(super) conn_id: u64,
     pub(super) active_conn_id: Arc<AtomicU64>,
-    pub(super) record_state: Arc<RecordStateShared>,
     pub(super) sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
 
@@ -64,6 +68,15 @@ pub(super) fn connect_and_decode(
     }
 }
 
+fn prebuffer_stream(queue: &BufferQueue, bytes_per_sec: usize) {
+    let target = bytes_per_sec
+        .saturating_mul(MIN_PREBUFFER_SECONDS)
+        .max(MIN_PREBUFFER_BYTES)
+        .min(queue.capacity / 2);
+
+    let _ = queue.wait_until_at_least(target, MAX_PREBUFFER_WAIT);
+}
+
 fn try_connect_and_decode_once(
     url: &str,
     handle: &rodio::OutputStreamHandle,
@@ -108,7 +121,7 @@ fn try_connect_and_decode_once(
         .unwrap_or(128);
     let bytes_per_sec = (bitrate_kbps * 1000 / 8).max(1) as usize;
 
-    let buffer_capacity = 1024 * 1024;
+    let buffer_capacity = STREAM_BUFFER_CAPACITY;
     let queue = Arc::new(BufferQueue::new(buffer_capacity));
     let buffer_meter = Arc::new(BufferStatusMeter::new(bytes_per_sec));
 
@@ -146,6 +159,8 @@ fn try_connect_and_decode_once(
         }
     });
 
+    prebuffer_stream(&queue, bytes_per_sec);
+
     let reader = StreamReader::new(StreamReaderConfig {
         url: url.to_string(),
         queue,
@@ -153,7 +168,6 @@ fn try_connect_and_decode_once(
         status_tx: context.status_tx,
         conn_id: context.conn_id,
         active_conn_id: context.active_conn_id,
-        record_state: context.record_state,
         metaint,
     });
 
@@ -165,4 +179,16 @@ fn try_connect_and_decode_once(
     sink.append(wrapped_source);
 
     Ok(sink)
+}
+
+#[cfg(test)]
+mod prebuffer_tests {
+    use super::*;
+
+    #[test]
+    fn prebuffer_target_is_capped_by_half_capacity() {
+        let queue = BufferQueue::new(256 * 1024);
+        prebuffer_stream(&queue, 512 * 1024);
+        assert_eq!(queue.len(), 0);
+    }
 }

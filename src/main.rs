@@ -4,10 +4,6 @@ mod audio;
 mod event;
 mod favorites;
 mod radio;
-mod recording_journal;
-mod system_open;
-mod system_trash;
-mod tape_archive;
 mod ui;
 
 use anyhow::Result;
@@ -41,11 +37,6 @@ async fn main() -> Result<()> {
 
     let (search_tx, mut search_rx) =
         tokio::sync::mpsc::unbounded_channel::<(String, Result<Vec<radio::Station>, String>)>();
-    let (tape_tx, mut tape_rx) = tokio::sync::mpsc::unbounded_channel::<(
-        std::path::PathBuf,
-        Result<tape_archive::TapeArchive, String>,
-    )>();
-
     let tick_rate = Duration::from_millis(66);
     let mut search_debounce: Option<(String, Instant)> = None;
 
@@ -56,15 +47,6 @@ async fn main() -> Result<()> {
             app.update(action);
         } else {
             app.update(action::Action::Tick);
-        }
-
-        if let Some(root) = app.take_tape_archive_scan_request() {
-            let tx = tape_tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let result =
-                    tape_archive::scan_tape_archive(root.clone()).map_err(|err| err.to_string());
-                let _ = tx.send((root, result));
-            });
         }
 
         if let Some(query) = app.current_debounce_query().map(str::to_string) {
@@ -97,10 +79,6 @@ async fn main() -> Result<()> {
 
         while let Ok((query, result)) = search_rx.try_recv() {
             app.apply_search_response(query, result);
-        }
-
-        while let Ok((root, result)) = tape_rx.try_recv() {
-            app.apply_tape_archive_scan(root, result);
         }
 
         if app.should_quit {

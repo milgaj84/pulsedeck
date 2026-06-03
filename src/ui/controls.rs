@@ -2,7 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState, RecordingState};
+use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState};
 
 /// Render the bottom control bar: playback status + volume + keybinds.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -19,46 +19,42 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
 
-    if app.local_playback_path.is_some() {
-        render_local_tape_status(&mut spans, app);
-    } else {
-        match (&app.playback, app.now_playing()) {
-            (PlaybackState::Playing, Some(station)) => {
-                status_chip(&mut spans, "▶", "PLAY", theme::playing());
-                spans.push(Span::styled(station.name.as_str(), theme::cyan()));
-                if let Some(ref track) = app.current_track {
-                    spans.push(Span::styled("  ♫ ", theme::playing()));
-                    spans.push(Span::styled(
-                        track.as_str(),
-                        Style::default()
-                            .fg(theme::accent_secondary())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-            }
-            (PlaybackState::FadingOut { .. }, Some(station)) => {
-                status_chip(&mut spans, "◒", "FADE", Style::default().fg(theme::warm()));
-                spans.push(Span::styled(station.name.as_str(), theme::dim()));
-            }
-            (PlaybackState::Paused, Some(station)) => {
-                status_chip(&mut spans, "⏸", "PAUSE", theme::neon());
-                spans.push(Span::styled(station.name.as_str(), theme::dim()));
-            }
-            (PlaybackState::Connecting, _) => {
-                status_chip(&mut spans, "◌", "TUNE", Style::default().fg(theme::warm()));
+    match (&app.playback, app.now_playing()) {
+        (PlaybackState::Playing, Some(station)) => {
+            status_chip(&mut spans, "▶", "PLAY", theme::playing());
+            spans.push(Span::styled(station.name.as_str(), theme::cyan()));
+            if let Some(ref track) = app.current_track {
+                spans.push(Span::styled("  ♫ ", theme::playing()));
                 spans.push(Span::styled(
-                    "Connecting...",
-                    Style::default().fg(theme::warm()),
+                    track.as_str(),
+                    Style::default()
+                        .fg(theme::accent_secondary())
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
-            (PlaybackState::Error(e), _) => {
-                status_chip(&mut spans, "✗", "ERROR", theme::error());
-                spans.push(Span::styled(e.as_str(), theme::error()));
-            }
-            _ => {
-                status_chip(&mut spans, "■", "STOP", theme::dim());
-                spans.push(Span::styled("Select a station", theme::dim()));
-            }
+        }
+        (PlaybackState::FadingOut { .. }, Some(station)) => {
+            status_chip(&mut spans, "◒", "FADE", Style::default().fg(theme::warm()));
+            spans.push(Span::styled(station.name.as_str(), theme::dim()));
+        }
+        (PlaybackState::Paused, Some(station)) => {
+            status_chip(&mut spans, "⏸", "PAUSE", theme::neon());
+            spans.push(Span::styled(station.name.as_str(), theme::dim()));
+        }
+        (PlaybackState::Connecting, _) => {
+            status_chip(&mut spans, "◌", "TUNE", Style::default().fg(theme::warm()));
+            spans.push(Span::styled(
+                "Connecting...",
+                Style::default().fg(theme::warm()),
+            ));
+        }
+        (PlaybackState::Error(e), _) => {
+            status_chip(&mut spans, "✗", "ERROR", theme::error());
+            spans.push(Span::styled(e.as_str(), theme::error()));
+        }
+        _ => {
+            status_chip(&mut spans, "■", "STOP", theme::dim());
+            spans.push(Span::styled("Select a station", theme::dim()));
         }
     }
 
@@ -74,18 +70,6 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         visualizer_label(app.visualizer_mode),
         theme::dim(),
     ));
-
-    if app.recording_state != RecordingState::Off {
-        spans.push(Span::styled("  ", theme::dim()));
-        let style = match app.recording_state {
-            RecordingState::Active => theme::error().add_modifier(Modifier::BOLD),
-            RecordingState::Pending => Style::default()
-                .fg(theme::warm())
-                .add_modifier(Modifier::BOLD),
-            RecordingState::Off => theme::dim(),
-        };
-        spans.push(Span::styled(recording_label(app.recording_state), style));
-    }
 
     if let Some(ref notice) = app.notice {
         spans.push(Span::styled("  │  ", theme::dim()));
@@ -112,38 +96,6 @@ fn status_chip(spans: &mut Vec<Span>, icon: &'static str, label: &'static str, s
     spans.push(Span::styled(" ", theme::dim()));
     spans.push(Span::styled(label, style.add_modifier(Modifier::BOLD)));
     spans.push(Span::styled("  ", theme::dim()));
-}
-
-fn render_local_tape_status(spans: &mut Vec<Span>, app: &App) {
-    match app.playback {
-        PlaybackState::Playing => status_chip(spans, "▶", "TAPE", theme::playing()),
-        PlaybackState::Paused => status_chip(spans, "⏸", "TAPE", theme::neon()),
-        PlaybackState::FadingOut { .. } => {
-            status_chip(spans, "◒", "TAPE", Style::default().fg(theme::warm()));
-        }
-        PlaybackState::Connecting => {
-            status_chip(spans, "◌", "TAPE", Style::default().fg(theme::warm()));
-        }
-        PlaybackState::Error(_) => status_chip(spans, "✗", "TAPE", theme::error()),
-        PlaybackState::Stopped => status_chip(spans, "■", "TAPE", theme::dim()),
-    }
-
-    if let Some(track) = app.current_track.as_ref() {
-        spans.push(Span::styled(
-            track.clone(),
-            Style::default()
-                .fg(theme::accent_secondary())
-                .add_modifier(Modifier::BOLD),
-        ));
-    } else if let Some(path) = app.local_playback_path.as_ref() {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Local tape");
-        spans.push(Span::styled(name.to_string(), theme::cyan()));
-    } else {
-        spans.push(Span::styled("Local tape", theme::dim()));
-    }
 }
 
 fn volume_label(app: &App) -> String {
@@ -191,52 +143,9 @@ fn visualizer_label(visualizer_mode: usize) -> &'static str {
     }
 }
 
-fn recording_label(recording_state: RecordingState) -> &'static str {
-    match recording_state {
-        RecordingState::Active => "● REC",
-        RecordingState::Pending => "● ARM",
-        RecordingState::Off => "",
-    }
-}
-
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
     let hints = match app.input_mode {
-        InputMode::TapeRename => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("type", theme::cyan()),
-            Span::styled("] Rename tape  [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Save  [", theme::dim()),
-            Span::styled("Backspace", theme::cyan()),
-            Span::styled("] Edit  [", theme::dim()),
-            Span::styled("Esc", theme::cyan()),
-            Span::styled("] Cancel", theme::dim()),
-        ]),
-        InputMode::TapeMove => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("type", theme::cyan()),
-            Span::styled("] Target folder  [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Move  [", theme::dim()),
-            Span::styled("Backspace", theme::cyan()),
-            Span::styled("] Edit  [", theme::dim()),
-            Span::styled("Esc", theme::cyan()),
-            Span::styled("] Cancel", theme::dim()),
-        ]),
-        InputMode::TapeFilter => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("type", theme::cyan()),
-            Span::styled("] Filter tapes  [", theme::dim()),
-            Span::styled("Backspace", theme::cyan()),
-            Span::styled("] Edit  [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Play/Open  [", theme::dim()),
-            Span::styled("Esc", theme::cyan()),
-            Span::styled("] Clear  [", theme::dim()),
-            Span::styled("Ctrl+r", theme::cyan()),
-            Span::styled("] Refresh", theme::dim()),
-        ]),
         InputMode::Search => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Space", theme::cyan()),
@@ -254,61 +163,14 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::ITALIC),
             ),
         ]),
-        InputMode::Normal
-            if app.recording_recovery_notice.is_some()
-                && app.recording_state == RecordingState::Off =>
-        {
-            Line::from(vec![
-                Span::styled(" [", theme::dim()),
-                Span::styled("Shift+K", theme::cyan()),
-                Span::styled("] Keep partial  [", theme::dim()),
-                Span::styled("Shift+T", theme::cyan()),
-                Span::styled("] Trash partial  [", theme::dim()),
-                Span::styled("Shift+D", theme::cyan()),
-                Span::styled("] Dismiss journal  [", theme::dim()),
-                Span::styled("r", theme::cyan()),
-                Span::styled("] New recording  [", theme::dim()),
-                Span::styled("h", theme::cyan()),
-                Span::styled("] Help", theme::dim()),
-            ])
-        }
-        InputMode::Normal if app.is_tape_archive_focused() => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Play/Open  [", theme::dim()),
-            Span::styled("Space", theme::cyan()),
-            Span::styled("] Expand/Pause  [", theme::dim()),
-            Span::styled("Ctrl+r", theme::cyan()),
-            Span::styled("] Refresh  [", theme::dim()),
-            Span::styled("o", theme::cyan()),
-            Span::styled("] Folder  [", theme::dim()),
-            Span::styled("g", theme::cyan()),
-            Span::styled("] Mode  [", theme::dim()),
-            Span::styled("i", theme::cyan()),
-            Span::styled("] Info  [", theme::dim()),
-            Span::styled("R/M", theme::cyan()),
-            Span::styled("] Rename/Move  [", theme::dim()),
-            Span::styled("f/Del", theme::cyan()),
-            Span::styled("] Trash  [", theme::dim()),
-            Span::styled("p", theme::cyan()),
-            Span::styled("] Deck  [", theme::dim()),
-            Span::styled("h", theme::cyan()),
-            Span::styled("] Help  [", theme::dim()),
-            Span::styled("q", theme::cyan()),
-            Span::styled("] Quit", theme::dim()),
-        ]),
-        InputMode::Normal => Line::from(vec![
+        _ => Line::from(vec![
             Span::styled(" [", theme::dim()),
             Span::styled("Enter", theme::cyan()),
             Span::styled("] Play  [", theme::dim()),
             Span::styled("Space", theme::cyan()),
             Span::styled("] Pause  [", theme::dim()),
-            Span::styled("r", theme::cyan()),
-            Span::styled("] Rec  [", theme::dim()),
             Span::styled("b", theme::cyan()),
             Span::styled("] Layout  [", theme::dim()),
-            Span::styled("p", theme::cyan()),
-            Span::styled("] Tape  [", theme::dim()),
             Span::styled("v", theme::cyan()),
             Span::styled("] Scope  [", theme::dim()),
             Span::styled("/", theme::cyan()),

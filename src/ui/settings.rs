@@ -75,30 +75,21 @@ fn settings_area_is_compact(area: Rect) -> bool {
 
 fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow) {
     let is_selected = app.selected_setting_idx == row.index();
-    let keep_snippets = app.library.settings.keep_snippets;
-    let duration_dimmed = row == SettingRow::MinSongDuration && keep_snippets;
-
     let active_style = Style::default()
         .fg(theme::accent_secondary())
         .add_modifier(Modifier::BOLD);
     let normal_style = Style::default().fg(theme::text().fg.unwrap());
     let active_bg = Style::default().bg(theme::surface_color());
 
-    let cursor_style = if duration_dimmed {
-        theme::dim()
-    } else {
-        active_style
-    };
-    let label_style = if duration_dimmed {
-        theme::dim()
-    } else if is_selected {
+    let cursor_style = active_style;
+    let label_style = if is_selected {
         active_style
     } else {
         normal_style
     };
 
     let mut spans = vec![Span::styled(
-        setting_row_cursor_symbol(is_selected, duration_dimmed),
+        setting_row_cursor_symbol(is_selected),
         cursor_style,
     )];
 
@@ -106,24 +97,16 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
 
     let mut paragraph = Paragraph::new(Line::from(spans));
     if is_selected {
-        paragraph = paragraph.style(selected_setting_row_style(duration_dimmed, active_bg));
+        paragraph = paragraph.style(active_bg);
     }
     frame.render_widget(paragraph, area);
 }
 
-fn setting_row_cursor_symbol(is_selected: bool, is_disabled: bool) -> &'static str {
-    match (is_selected, is_disabled) {
-        (true, true) => " ◦  ",
-        (true, false) => " ▸  ",
-        (false, _) => "    ",
-    }
-}
-
-fn selected_setting_row_style(is_disabled: bool, active_bg: Style) -> Style {
-    if is_disabled {
-        Style::default().bg(theme::bg())
+fn setting_row_cursor_symbol(is_selected: bool) -> &'static str {
+    if is_selected {
+        " ▸  "
     } else {
-        active_bg
+        "    "
     }
 }
 
@@ -150,54 +133,6 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
             ),
             Span::styled(" (Space/Right forward, Left back)", theme::dim()),
         ],
-        SettingRow::RecordingDir => vec![
-            icon_span("[ 🗁 ] "),
-            Span::styled("Tape Capture Folder: ", label_style),
-            Span::styled(
-                format!("{} ", app.library.settings.recording_dir),
-                Style::default()
-                    .fg(theme::highlight())
-                    .add_modifier(Modifier::UNDERLINED)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("(Space/Right forward, Left back)", theme::dim()),
-        ],
-        SettingRow::KeepSnippets => checkbox_row(
-            app.library.settings.keep_snippets,
-            "Keep Partial Snippets & Commercial Ads",
-            label_style,
-        ),
-        SettingRow::MinSongDuration => {
-            let duration_dimmed = app.library.settings.keep_snippets;
-            let duration_fg = if duration_dimmed {
-                theme::dim().fg.unwrap()
-            } else {
-                theme::highlight()
-            };
-            vec![
-                Span::styled(
-                    "[ ⏱ ] ",
-                    Style::default()
-                        .fg(duration_fg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Min Song Duration: ", label_style),
-                Span::styled(
-                    format!("{}s ", app.library.settings.min_song_duration_secs),
-                    Style::default()
-                        .fg(duration_fg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    if duration_dimmed {
-                        "(disabled — keeping all)"
-                    } else {
-                        "(Space presets, Left/Right +/-5s)"
-                    },
-                    theme::dim(),
-                ),
-            ]
-        }
         SettingRow::Theme => {
             let current_theme = ThemeName::from_key(&app.library.settings.theme);
             vec![
@@ -303,22 +238,9 @@ mod tests {
     }
 
     #[test]
-    fn disabled_selected_row_uses_soft_cursor() {
-        assert_eq!(setting_row_cursor_symbol(true, true), " ◦  ");
-        assert_eq!(setting_row_cursor_symbol(true, false), " ▸  ");
-        assert_eq!(setting_row_cursor_symbol(false, true), "    ");
-        assert_eq!(setting_row_cursor_symbol(false, false), "    ");
-    }
-
-    #[test]
-    fn disabled_selected_row_skips_active_background() {
-        let active_bg = Style::default().bg(Color::Red);
-
-        assert_eq!(selected_setting_row_style(false, active_bg), active_bg);
-
-        let disabled_style = selected_setting_row_style(true, active_bg);
-        assert_ne!(disabled_style, active_bg);
-        assert_eq!(disabled_style.bg, Some(theme::bg()));
+    fn selected_row_uses_cursor() {
+        assert_eq!(setting_row_cursor_symbol(true), " ▸  ");
+        assert_eq!(setting_row_cursor_symbol(false), "    ");
     }
 
     #[test]

@@ -2,17 +2,13 @@ mod buffer;
 mod buffer_meter;
 mod metadata;
 mod output;
-mod recording;
 mod session;
 mod stream_reader;
 mod visualizer;
 
 use rodio::{OutputStream, Sink};
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use output::{
     list_output_device_names, output_device_display_name, DEFAULT_OUTPUT_DEVICE_LABEL,
@@ -32,45 +28,25 @@ pub(super) fn hardware_output_error(message: impl Into<String>) -> String {
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
-    Play(String), // URL
-    PlayLocalFile(PathBuf),
+    Play(String),
     Pause,
     Resume,
     Stop,
-    SetVolume(f32), // 0.0 — 1.0
+    SetVolume(f32),
     SetOutputDevice(Option<String>),
-    StartRecording {
-        recording_dir: String,
-        category: String,
-        keep_snippets: bool,
-        min_song_duration_secs: u32,
-    },
-    StopRecording,
 }
 
 /// Status updates sent from the audio thread back to the UI.
 #[derive(Debug, Clone)]
 pub enum AudioStatus {
     Playing,
-    LocalFilePlaying { path: PathBuf, title: String },
-    LocalFileFinished { path: PathBuf },
     Paused,
     Stopped,
     Error(String),
     Connecting,
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
-    RecordingStateChanged { state: u8, filepath: Option<String> }, // 0 = Off, 1 = Pending, 2 = Active
     BufferLevel { percent: u8, seconds: u32 },
-}
-
-/// Shared thread-safe recording configuration state
-pub struct RecordStateShared {
-    pub state: AtomicU8, // 0 = Off, 1 = Pending, 2 = Active
-    pub recording_dir: Mutex<String>,
-    pub category: Mutex<String>,
-    pub keep_snippets: AtomicBool,
-    pub min_song_duration_secs: std::sync::atomic::AtomicU32,
 }
 
 /// Handle to communicate with the audio engine running on a background thread.
@@ -124,17 +100,7 @@ fn audio_loop(
     let active_conn_id = Arc::new(AtomicU64::new(0));
     let mut current_conn_id: u64 = 0;
     let mut current_url: Option<String> = None;
-    let mut current_local_path: Option<PathBuf> = None;
     let mut hardware_recovery_retries: u8 = 0;
-
-    // Shared thread-safe recording control state
-    let record_state = Arc::new(RecordStateShared {
-        state: AtomicU8::new(0), // Default: Off
-        recording_dir: Mutex::new(String::new()),
-        category: Mutex::new(String::new()),
-        keep_snippets: AtomicBool::new(false),
-        min_song_duration_secs: std::sync::atomic::AtomicU32::new(90),
-    });
 
     // Premium non-blocking volume crossfade/ramping parameters
     let mut target_volume: f32 = 0.8;
@@ -155,7 +121,6 @@ fn audio_loop(
                     output_stream: &mut output_stream,
                     output_handle: &mut output_handle,
                     status_tx: &status_tx,
-                    record_state: &record_state,
                     sample_buffer: &sample_buffer,
                     preferred_output_device_name: &preferred_output_device_name,
                     reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
@@ -177,7 +142,6 @@ fn audio_loop(
                     output_stream: &mut output_stream,
                     output_handle: &mut output_handle,
                     status_tx: &status_tx,
-                    record_state: &record_state,
                     sample_buffer: &sample_buffer,
                     preferred_output_device_name: &preferred_output_device_name,
                     reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
@@ -197,43 +161,10 @@ fn audio_loop(
 
                 match cmd {
                     AudioCommand::Play(url) => {
-                        current_local_path = None;
                         if current_sink.is_some() {
                             pending_action = Some(AudioCommand::Play(url));
                         } else {
                             spawn_connection_for!(url);
-                        }
-                    }
-                    AudioCommand::PlayLocalFile(path) => {
-                        pending_action = None;
-                        current_local_path = None;
-                        current_fade_volume = None;
-                        active_conn_id.store(0, Ordering::SeqCst);
-                        connect_thread = None;
-                        current_url = None;
-
-                        if let Some(old_sink) = current_sink.take() {
-                            old_sink.stop();
-                        }
-
-                        match play_local_file(
-                            &path,
-                            &mut output_stream,
-                            &mut output_handle,
-                            preferred_output_device_name.as_deref(),
-                            &status_tx,
-                            target_volume,
-                        ) {
-                            Ok(sink) => {
-                                let title = crate::tape_archive::display_track_title(&path);
-                                current_sink = Some(sink);
-                                current_local_path = Some(path.clone());
-                                let _ =
-                                    status_tx.send(AudioStatus::LocalFilePlaying { path, title });
-                            }
-                            Err(err) => {
-                                let _ = status_tx.send(AudioStatus::Error(err));
-                            }
                         }
                     }
                     AudioCommand::Pause => {
@@ -254,7 +185,6 @@ fn audio_loop(
                         }
                     }
                     AudioCommand::Stop => {
-                        current_local_path = None;
                         if current_sink.is_some() {
                             pending_action = Some(AudioCommand::Stop);
                         } else {
@@ -283,33 +213,6 @@ fn audio_loop(
                             reopen_output_on_next_connection = false;
                         }
                     }
-                    AudioCommand::StartRecording {
-                        recording_dir,
-                        category,
-                        keep_snippets,
-                        min_song_duration_secs,
-                    } => {
-                        *record_state.recording_dir.lock().unwrap() = recording_dir;
-                        *record_state.category.lock().unwrap() = category;
-                        record_state
-                            .keep_snippets
-                            .store(keep_snippets, Ordering::SeqCst);
-                        record_state
-                            .min_song_duration_secs
-                            .store(min_song_duration_secs, Ordering::SeqCst);
-                        record_state.state.store(1, Ordering::SeqCst); // Transition to Pending
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                            state: 1,
-                            filepath: None,
-                        });
-                    }
-                    AudioCommand::StopRecording => {
-                        record_state.state.store(0, Ordering::SeqCst); // Transition to Off
-                        let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                            state: 0,
-                            filepath: None,
-                        });
-                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -328,7 +231,6 @@ fn audio_loop(
                     let cmd = pending_action.take().unwrap();
                     match cmd {
                         AudioCommand::Play(url) => {
-                            current_local_path = None;
                             // Stop current sink before spawning new connection
                             if let Some(old_sink) = current_sink.take() {
                                 old_sink.stop();
@@ -336,7 +238,6 @@ fn audio_loop(
                             spawn_connection_for!(url);
                         }
                         AudioCommand::Stop => {
-                            current_local_path = None;
                             active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
                             connect_thread = None;
                             if let Some(old_sink) = current_sink.take() {
@@ -359,11 +260,9 @@ fn audio_loop(
                 let cmd = pending_action.take().unwrap();
                 match cmd {
                     AudioCommand::Play(url) => {
-                        current_local_path = None;
                         spawn_connection_for!(url);
                     }
                     AudioCommand::Stop => {
-                        current_local_path = None;
                         active_conn_id.store(0, Ordering::SeqCst);
                         connect_thread = None;
                         let _ = status_tx.send(AudioStatus::Stopped);
@@ -434,11 +333,7 @@ fn audio_loop(
         if let Some(ref sink) = current_sink {
             if sink.empty() {
                 current_sink = None;
-                if let Some(path) = current_local_path.take() {
-                    let _ = status_tx.send(AudioStatus::LocalFileFinished { path });
-                } else {
-                    let _ = status_tx.send(AudioStatus::Stopped);
-                }
+                let _ = status_tx.send(AudioStatus::Stopped);
             }
         }
     }
@@ -448,10 +343,6 @@ fn handle_test_audio_command(cmd: AudioCommand, status_tx: &mpsc::Sender<AudioSt
     match cmd {
         AudioCommand::Play(_) => {
             let _ = status_tx.send(AudioStatus::Playing);
-        }
-        AudioCommand::PlayLocalFile(path) => {
-            let title = crate::tape_archive::display_track_title(&path);
-            let _ = status_tx.send(AudioStatus::LocalFilePlaying { path, title });
         }
         AudioCommand::Pause => {
             let _ = status_tx.send(AudioStatus::Paused);
@@ -463,18 +354,6 @@ fn handle_test_audio_command(cmd: AudioCommand, status_tx: &mpsc::Sender<AudioSt
             let _ = status_tx.send(AudioStatus::Stopped);
         }
         AudioCommand::SetVolume(_) | AudioCommand::SetOutputDevice(_) => {}
-        AudioCommand::StartRecording { .. } => {
-            let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                state: 1,
-                filepath: None,
-            });
-        }
-        AudioCommand::StopRecording => {
-            let _ = status_tx.send(AudioStatus::RecordingStateChanged {
-                state: 0,
-                filepath: None,
-            });
-        }
     }
 }
 
@@ -501,35 +380,6 @@ fn reset_output_handle(
 
 fn is_hardware_output_error(error: &str) -> bool {
     error.starts_with(HARDWARE_OUTPUT_ERROR_PREFIX)
-}
-
-fn play_local_file(
-    path: &Path,
-    output_stream: &mut Option<OutputStream>,
-    output_handle: &mut Option<rodio::OutputStreamHandle>,
-    preferred_output_device_name: Option<&str>,
-    status_tx: &mpsc::Sender<AudioStatus>,
-    target_volume: f32,
-) -> Result<Sink, String> {
-    let Some(handle) = ensure_output_handle(
-        output_stream,
-        output_handle,
-        preferred_output_device_name,
-        status_tx,
-    ) else {
-        return Err("Soundcard unavailable for local tape playback".to_string());
-    };
-
-    let file = File::open(path)
-        .map_err(|err| format!("Could not open tape file '{}': {err}", path.display()))?;
-    let source = rodio::Decoder::new(BufReader::new(file))
-        .map_err(|err| format!("Could not decode tape file '{}': {err}", path.display()))?;
-    let sink = Sink::try_new(&handle)
-        .map_err(|err| hardware_output_error(format!("Sink error: {err}")))?;
-
-    sink.set_volume(target_volume);
-    sink.append(source);
-    Ok(sink)
 }
 
 fn ensure_output_handle(
@@ -561,7 +411,6 @@ struct SpawnConnectionState<'a> {
     output_stream: &'a mut Option<OutputStream>,
     output_handle: &'a mut Option<rodio::OutputStreamHandle>,
     status_tx: &'a mpsc::Sender<AudioStatus>,
-    record_state: &'a Arc<RecordStateShared>,
     sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
     preferred_output_device_name: &'a Option<String>,
     reopen_output_on_next_connection: &'a mut bool,
@@ -592,7 +441,6 @@ fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
         status_tx: state.status_tx.clone(),
         conn_id,
         active_conn_id: state.active_ref.clone(),
-        record_state: state.record_state.clone(),
         sample_buffer: state.sample_buffer.clone(),
     };
 
@@ -638,16 +486,6 @@ mod tests {
     fn non_hardware_error_does_not_trigger_recovery() {
         assert!(!is_hardware_output_error("Connection failed: timeout"));
         assert!(!is_hardware_output_error("Decode error: unsupported"));
-    }
-
-    #[test]
-    fn local_file_title_comes_from_tape_archive_helper() {
-        assert_eq!(
-            crate::tape_archive::display_track_title(std::path::Path::new(
-                "recordings/Synthwave/Lazerhawk - King.mp3"
-            )),
-            "Lazerhawk - King"
-        );
     }
 
     #[test]

@@ -24,14 +24,6 @@ impl App {
         super::ui_state::save_ui_state_or_notice(self);
     }
 
-    pub(super) fn next_deck_page(&mut self) {
-        self.active_deck_page = (self.active_deck_page + 1) % 2;
-        self.pending_tape_delete = None;
-        if self.active_deck_page == 1 {
-            self.request_tape_archive_scan_if_needed();
-        }
-    }
-
     pub(super) fn toggle_visualizer_mode(&mut self) {
         self.visualizer_mode = (self.visualizer_mode + 1) % 3;
         super::ui_state::save_ui_state_or_notice(self);
@@ -79,17 +71,6 @@ mod tests {
         assert_eq!(app.layout_mode, LayoutMode::RightOnly);
         app.cycle_layout();
         assert_eq!(app.layout_mode, LayoutMode::Split);
-    }
-
-    #[test]
-    fn next_deck_page_wraps() {
-        let mut app = test_app();
-
-        app.next_deck_page();
-        assert_eq!(app.active_deck_page, 1);
-        assert!(app.tape_archive_scan_requested);
-        app.next_deck_page();
-        assert_eq!(app.active_deck_page, 0);
     }
 
     #[test]

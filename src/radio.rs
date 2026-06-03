@@ -2,7 +2,6 @@ use serde::Deserialize;
 
 /// A radio station with all metadata needed for display and playback.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Station {
     pub name: String,
     pub url: String,

@@ -9,8 +9,30 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Added
 *   _Nothing yet._
 
+### Changed
+*   _Nothing yet._
+
 ### Improved
 *   _Nothing yet._
+
+### Removed
+*   _Nothing yet._
+
+---
+
+## [0.2.0] - 2026-06-03
+
+### Changed
+*   **Focused 0.2 product reset**: PulseDeck now focuses on terminal radio playback, station discovery, saved library management, themes, visualizers, and audio reliability.
+
+### Removed
+*   Removed recording, local tape archive management, local tape playback, recording recovery, and tape file-management workflows.
+
+### Added
+*   _Nothing yet._
+
+### Improved
+*   **Stream Playback Prebuffer**: Added a short startup prebuffer and larger stream queue to smooth regular internet radio playback.
 
 ---
 

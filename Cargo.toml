@@ -1,15 +1,15 @@
 [package]
 name = "pulsedeck"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2021"
-description = "A cyber-synthwave internet radio player and smart tape recorder for your terminal"
+description = "A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback"
 license = "MIT"
 repository = "https://github.com/milgaj84/pulsedeck"
 homepage = "https://github.com/milgaj84/pulsedeck"
 readme = "README.md"
 keywords = ["radio", "tui", "music", "streaming", "catppuccin"]
 categories = ["command-line-utilities", "multimedia::audio"]
-exclude = ["recordings/", "library.json", ".gitignore", "*.orig"]
+exclude = ["library.json", ".gitignore", "*.orig"]
 
 [[bin]]
 name = "pulsedeck"
@@ -41,7 +41,6 @@ dirs = "6"
 
 # Desktop Notifications
 notify-rust = "4"
-id3 = "1"
 
 # Logging (optional, useful for debugging)
 # tracing = "0.1"
