@@ -24,9 +24,7 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
     match mode {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
-        InputMode::TapeFilter => map_tape_filter(key),
-        InputMode::TapeRename => map_tape_rename(key),
-        InputMode::TapeMove => map_tape_move(key),
+        _ => None,
     }
 }
 
@@ -121,44 +119,6 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         // All other printable characters go to search input
         (_, KeyCode::Char(c)) => Some(Action::SearchInput(c)),
 
-        _ => None,
-    }
-}
-
-fn map_tape_filter(key: KeyEvent) -> Option<Action> {
-    match (key.modifiers, key.code) {
-        (_, KeyCode::Esc) => Some(Action::ExitTapeFilter),
-        (_, KeyCode::Enter) => Some(Action::PlaySelected),
-        (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
-        (_, KeyCode::Down) | (_, KeyCode::Char('j')) => Some(Action::NextStation),
-        (_, KeyCode::Backspace) => Some(Action::TapeFilterBackspace),
-        (mods, KeyCode::Char('r')) if mods.contains(KeyModifiers::CONTROL) => {
-            Some(Action::RefreshTapeArchive)
-        }
-        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
-        (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeFilterInput(c)),
-        _ => None,
-    }
-}
-
-fn map_tape_rename(key: KeyEvent) -> Option<Action> {
-    match (key.modifiers, key.code) {
-        (_, KeyCode::Esc) => Some(Action::CancelTapeManager),
-        (_, KeyCode::Enter) => Some(Action::ConfirmTapeRename),
-        (_, KeyCode::Backspace) => Some(Action::TapeManagerBackspace),
-        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
-        (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeManagerInput(c)),
-        _ => None,
-    }
-}
-
-fn map_tape_move(key: KeyEvent) -> Option<Action> {
-    match (key.modifiers, key.code) {
-        (_, KeyCode::Esc) => Some(Action::CancelTapeManager),
-        (_, KeyCode::Enter) => Some(Action::ConfirmTapeMove),
-        (_, KeyCode::Backspace) => Some(Action::TapeManagerBackspace),
-        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
-        (_, KeyCode::Char(c)) if !c.is_control() => Some(Action::TapeManagerInput(c)),
         _ => None,
     }
 }
@@ -339,30 +299,6 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('u')), &InputMode::Normal),
             Some(Action::UndoRemoveLibrarySelection),
-        );
-    }
-
-    #[test]
-    fn tape_filter_mode_collects_text() {
-        assert_eq!(
-            map_key(key(KeyCode::Char('s')), &InputMode::TapeFilter),
-            Some(Action::TapeFilterInput('s')),
-        );
-    }
-
-    #[test]
-    fn tape_filter_mode_escape_exits_filter() {
-        assert_eq!(
-            map_key(key(KeyCode::Esc), &InputMode::TapeFilter),
-            Some(Action::ExitTapeFilter),
-        );
-    }
-
-    #[test]
-    fn tape_filter_mode_backspace_edits_filter() {
-        assert_eq!(
-            map_key(key(KeyCode::Backspace), &InputMode::TapeFilter),
-            Some(Action::TapeFilterBackspace),
         );
     }
 

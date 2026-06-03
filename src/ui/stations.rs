@@ -164,40 +164,34 @@ fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrat
     let genre = empty_fallback(genre, "Other");
     let country = empty_fallback(country, "??");
 
-    match input_mode {
-        InputMode::Search => format!("{} · {} · {}k", genre, country, bitrate),
-        InputMode::Normal | InputMode::TapeFilter | InputMode::TapeRename | InputMode::TapeMove => {
-            format!("{} · {}k", country, bitrate)
-        }
+    if *input_mode == InputMode::Search {
+        format!("{} · {} · {}k", genre, country, bitrate)
+    } else {
+        format!("{} · {}k", country, bitrate)
     }
 }
 
 fn station_list_title(app: &App, visible_count: usize) -> String {
-    match app.input_mode {
-        InputMode::Search => {
-            if app.search_query.is_empty() {
-                " 🔍 Search the airwaves ".to_string()
-            } else if app.searching_api {
-                format!(" 🔍 Tuning query \"{}\"... ", app.search_query)
-            } else if visible_count == 0 {
-                format!(" 🔍 No signal for \"{}\" ", app.search_query)
-            } else {
-                format!(" 🔍 Search Results ({}) ", visible_count)
-            }
+    if app.input_mode == InputMode::Search {
+        if app.search_query.is_empty() {
+            " 🔍 Search the airwaves ".to_string()
+        } else if app.searching_api {
+            format!(" 🔍 Tuning query \"{}\"... ", app.search_query)
+        } else if visible_count == 0 {
+            format!(" 🔍 No signal for \"{}\" ", app.search_query)
+        } else {
+            format!(" 🔍 Search Results ({}) ", visible_count)
         }
-        InputMode::Normal | InputMode::TapeFilter | InputMode::TapeRename | InputMode::TapeMove => {
-            if visible_count == 0 {
-                " ◇ Empty Library — press / to search ".to_string()
-            } else {
-                let genre_name = app
-                    .library
-                    .available_genres
-                    .get(app.selected_genre_idx)
-                    .map(|s| s.as_str())
-                    .unwrap_or("All");
-                format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
-            }
-        }
+    } else if visible_count == 0 {
+        " ◇ Empty Library — press / to search ".to_string()
+    } else {
+        let genre_name = app
+            .library
+            .available_genres
+            .get(app.selected_genre_idx)
+            .map(|s| s.as_str())
+            .unwrap_or("All");
+        format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
     }
 }
 
