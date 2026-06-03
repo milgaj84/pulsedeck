@@ -3,18 +3,18 @@ use crate::app::{App, LayoutMode, PlaybackState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-const CASSETTE_INNER_WIDTH: usize = 44;
+const DECK_INNER_WIDTH: usize = 44;
 #[cfg(test)]
-const CASSETTE_REEL_CELL_WIDTH: usize = 10;
-const CASSETTE_TAPE_WIDTH: usize = 4;
-const CASSETTE_HEIGHT: u16 = 9;
+const DECK_REEL_CELL_WIDTH: usize = 10;
+const DECK_SIGNAL_WIDTH: usize = 4;
+const DECK_ART_HEIGHT: u16 = 9;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(Span::styled(" 📼 Tape Deck ", theme::title()));
+        .title(Span::styled(" 📡 Signal Deck ", theme::title()));
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(CASSETTE_HEIGHT),
+            Constraint::Length(DECK_ART_HEIGHT),
             Constraint::Length(5),
             Constraint::Min(0),
         ])
@@ -36,19 +36,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
-    let lines = build_cassette_lines(CASSETTE_INNER_WIDTH, app.tick_count, &app.playback);
+    let lines = build_deck_lines(DECK_INNER_WIDTH, app.tick_count, &app.playback);
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
 }
 
 #[derive(Debug, Clone)]
-struct CassetteSegment {
+struct DeckSegment {
     text: String,
     style: Style,
 }
 
-fn build_cassette_lines(
+fn build_deck_lines(
     inner_width: usize,
     tick_count: u64,
     playback: &PlaybackState,
@@ -59,9 +59,9 @@ fn build_cassette_lines(
         .bg(theme::bg())
         .add_modifier(Modifier::BOLD);
 
-    let mut lines = Vec::with_capacity(CASSETTE_HEIGHT as usize);
-    lines.push(cassette_border_line("╭", "╮", inner_width, shell_style));
-    lines.push(cassette_label_line(inner_width, shell_style));
+    let mut lines = Vec::with_capacity(DECK_ART_HEIGHT as usize);
+    lines.push(deck_border_line("╭", "╮", inner_width, shell_style));
+    lines.push(deck_label_line(inner_width, shell_style));
     lines.push(shell_text_line(
         "        ────────────────────────────        ",
         inner_width,
@@ -106,12 +106,12 @@ fn build_cassette_lines(
         shell_style,
         shell_style,
     ));
-    lines.push(cassette_border_line("╰", "╯", inner_width, shell_style));
+    lines.push(deck_border_line("╰", "╯", inner_width, shell_style));
 
     lines
 }
 
-fn cassette_label_line(inner_width: usize, shell_style: Style) -> Line<'static> {
+fn deck_label_line(inner_width: usize, shell_style: Style) -> Line<'static> {
     let brand = "P U L S E  D E C K";
     let label_style = Style::default()
         .fg(theme::accent_secondary())
@@ -152,12 +152,12 @@ fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, S
                 7 - transfer_step
             };
 
-            let left_fill = CASSETTE_TAPE_WIDTH.saturating_sub(transfer).max(1);
-            let right_fill = (1 + transfer).min(CASSETTE_TAPE_WIDTH);
+            let left_fill = DECK_SIGNAL_WIDTH.saturating_sub(transfer).max(1);
+            let right_fill = (1 + transfer).min(DECK_SIGNAL_WIDTH);
 
             (
-                reel_cell("○", fixed_tape_mass(left_fill, CASSETTE_TAPE_WIDTH), "○"),
-                reel_cell("○", fixed_tape_mass(right_fill, CASSETTE_TAPE_WIDTH), "○"),
+                reel_cell("○", fixed_signal_mass(left_fill, DECK_SIGNAL_WIDTH), "○"),
+                reel_cell("○", fixed_signal_mass(right_fill, DECK_SIGNAL_WIDTH), "○"),
             )
         }
         PlaybackState::Connecting => {
@@ -166,25 +166,25 @@ fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, S
             } else {
                 "○"
             };
-            let tape = fixed_tape_mass(1, CASSETTE_TAPE_WIDTH);
+            let tape = fixed_signal_mass(1, DECK_SIGNAL_WIDTH);
             (reel_cell(hub, tape.clone(), hub), reel_cell(hub, tape, hub))
         }
         PlaybackState::Paused => {
-            let tape = fixed_tape_mass(2, CASSETTE_TAPE_WIDTH);
+            let tape = fixed_signal_mass(2, DECK_SIGNAL_WIDTH);
             (reel_cell("○", tape.clone(), "○"), reel_cell("○", tape, "○"))
         }
         PlaybackState::Error(_) => {
-            let tape = fixed_tape_mass(0, CASSETTE_TAPE_WIDTH);
+            let tape = fixed_signal_mass(0, DECK_SIGNAL_WIDTH);
             (reel_cell("×", tape.clone(), "×"), reel_cell("×", tape, "×"))
         }
         PlaybackState::Stopped => {
-            let tape = fixed_tape_mass(0, CASSETTE_TAPE_WIDTH);
+            let tape = fixed_signal_mass(0, DECK_SIGNAL_WIDTH);
             (reel_cell("○", tape.clone(), "○"), reel_cell("○", tape, "○"))
         }
     }
 }
 
-fn fixed_tape_mass(fill: usize, width: usize) -> String {
+fn fixed_signal_mass(fill: usize, width: usize) -> String {
     let fill = fill.min(width);
     format!("{}{}", "█".repeat(fill), "░".repeat(width - fill))
 }
@@ -193,7 +193,7 @@ fn reel_cell(left_hub: &str, tape: String, right_hub: &str) -> String {
     format!("│ {left_hub}{tape}{right_hub} │")
 }
 
-fn cassette_border_line(
+fn deck_border_line(
     left_corner: &str,
     right_corner: &str,
     inner_width: usize,
@@ -218,11 +218,7 @@ fn shell_text_line(
     )
 }
 
-fn shell_line(
-    inner_width: usize,
-    shell_style: Style,
-    parts: Vec<CassetteSegment>,
-) -> Line<'static> {
+fn shell_line(inner_width: usize, shell_style: Style, parts: Vec<DeckSegment>) -> Line<'static> {
     let mut spans = Vec::with_capacity(parts.len() + 3);
     let mut remaining = inner_width;
 
@@ -253,8 +249,8 @@ fn shell_line(
     Line::from(spans)
 }
 
-fn segment(text: impl Into<String>, style: Style) -> CassetteSegment {
-    CassetteSegment {
+fn segment(text: impl Into<String>, style: Style) -> DeckSegment {
+    DeckSegment {
         text: text.into(),
         style,
     }
@@ -322,7 +318,7 @@ fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool
     ]));
 
     let title = if full_deck {
-        " SIGNAL / TAPE STATUS "
+        " SIGNAL STATUS "
     } else {
         " SIGNAL "
     };
@@ -627,11 +623,11 @@ mod tests {
     }
 
     #[test]
-    fn cassette_rows_have_equal_width() {
-        let expected_width = CASSETTE_INNER_WIDTH + 2;
-        let lines = build_cassette_lines(CASSETTE_INNER_WIDTH, 0, &PlaybackState::Playing);
+    fn deck_rows_have_equal_width() {
+        let expected_width = DECK_INNER_WIDTH + 2;
+        let lines = build_deck_lines(DECK_INNER_WIDTH, 0, &PlaybackState::Playing);
 
-        assert_eq!(lines.len(), CASSETTE_HEIGHT as usize);
+        assert_eq!(lines.len(), DECK_ART_HEIGHT as usize);
         for line in lines {
             assert_eq!(line_width(&line), expected_width);
         }
@@ -642,17 +638,17 @@ mod tests {
         for tick_count in 0..96 {
             let (left_reel, right_reel) = reel_cells_for_state(tick_count, &PlaybackState::Playing);
 
-            assert_eq!(left_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
-            assert_eq!(right_reel.chars().count(), CASSETTE_REEL_CELL_WIDTH);
+            assert_eq!(left_reel.chars().count(), DECK_REEL_CELL_WIDTH);
+            assert_eq!(right_reel.chars().count(), DECK_REEL_CELL_WIDTH);
         }
     }
 
     #[test]
-    fn tape_mass_keeps_constant_width() {
-        for fill in 0..=CASSETTE_TAPE_WIDTH + 2 {
+    fn signal_mass_keeps_constant_width() {
+        for fill in 0..=DECK_SIGNAL_WIDTH + 2 {
             assert_eq!(
-                fixed_tape_mass(fill, CASSETTE_TAPE_WIDTH).chars().count(),
-                CASSETTE_TAPE_WIDTH
+                fixed_signal_mass(fill, DECK_SIGNAL_WIDTH).chars().count(),
+                DECK_SIGNAL_WIDTH
             );
         }
     }
