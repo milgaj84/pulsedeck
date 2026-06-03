@@ -1,12 +1,7 @@
 use super::theme;
-use crate::app::{App, InputMode, LayoutMode, PlaybackState, RecordingState};
-use crate::tape_archive::{
-    format_duration, format_file_size, track_metadata_label, TapeArchiveRow, TapeArchiveStatus,
-    TapeTrack,
-};
+use crate::app::{App, LayoutMode, PlaybackState, RecordingState};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use std::time::Duration;
 
 const CASSETTE_INNER_WIDTH: usize = 44;
 #[cfg(test)]
@@ -15,43 +10,29 @@ const CASSETTE_TAPE_WIDTH: usize = 4;
 const CASSETTE_HEIGHT: u16 = 9;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let title_text = match app.active_deck_page {
-        0 => " 📼 Tape Deck ",
-        _ => " 📼 Local Tape Library ",
-    };
-
-    // Outer block with desaturated deep purple border and custom retro neon title
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(Span::styled(title_text, theme::title()));
+        .title(Span::styled(" 📼 Tape Deck ", theme::title()));
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    match app.active_deck_page {
-        0 => {
-            let full_deck = app.layout_mode == LayoutMode::RightOnly;
+    let full_deck = app.layout_mode == LayoutMode::RightOnly;
 
-            // Split the inner area vertically: stable cassette, status strip, framed visualizer.
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(CASSETTE_HEIGHT),
-                    Constraint::Length(5),
-                    Constraint::Min(0),
-                ])
-                .split(inner_area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(CASSETTE_HEIGHT),
+            Constraint::Length(5),
+            Constraint::Min(0),
+        ])
+        .split(inner_area);
 
-            render_cassette(frame, chunks[0], app);
-            render_meta_details(frame, chunks[1], app, full_deck);
-            render_oscilloscope(frame, chunks[2], app);
-        }
-        _ => {
-            render_tape_library(frame, inner_area, app);
-        }
-    }
+    render_cassette(frame, chunks[0], app);
+    render_meta_details(frame, chunks[1], app, full_deck);
+    render_oscilloscope(frame, chunks[2], app);
 }
 
 fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
@@ -794,371 +775,6 @@ impl BrailleCanvas {
     }
 }
 
-fn render_tape_library(frame: &mut Frame, area: Rect, app: &App) {
-    let mut lines = Vec::new();
-
-    lines.push(Line::from(vec![
-        Span::styled("   📼 LOCAL TAPE LIBRARY", theme::title()),
-        Span::styled("   ", theme::dim()),
-        Span::styled(app.tape_archive.root.display().to_string(), theme::dim()),
-    ]));
-
-    let mode_label = if app.input_mode == InputMode::TapeFilter {
-        format!(
-            "   Filter: {}▌ · {} matches",
-            app.tape_archive.filter_query,
-            app.tape_archive.flattened.len().saturating_sub(1)
-        )
-    } else if app.tape_archive.is_filtering() {
-        format!(
-            "   Filter: {} · {} matches",
-            app.tape_archive.filter_query,
-            app.tape_archive.flattened.len().saturating_sub(1)
-        )
-    } else if app.tape_archive.all_recordings_flattened {
-        format!(
-            "   Mode: All Recordings · {} tracks · newest first",
-            app.tape_archive.total_tracks()
-        )
-    } else {
-        "   Mode: Folder Tree".to_string()
-    };
-
-    lines.push(Line::from(vec![Span::styled(mode_label, theme::dim())]));
-    append_tape_manager_panel(&mut lines, app);
-
-    if let Some(path) = app.pending_tape_delete.as_ref() {
-        let filename = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("selected tape");
-
-        lines.push(Line::from(vec![
-            Span::styled(
-                "   MOVE TO TRASH? ",
-                theme::error().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(filename.to_string(), theme::text()),
-            Span::styled("   y confirm / n cancel", theme::dim()),
-        ]));
-    } else {
-        let key_style = Style::default()
-            .fg(theme::highlight())
-            .add_modifier(Modifier::BOLD);
-
-        lines.push(Line::from(vec![
-            Span::styled("   Enter", key_style),
-            Span::styled(" play/open  ", theme::dim()),
-            Span::styled("Space", key_style),
-            Span::styled(" expand/pause  ", theme::dim()),
-            Span::styled("/", key_style),
-            Span::styled(" filter  ", theme::dim()),
-            Span::styled("f/Delete", key_style),
-            Span::styled(" delete  ", theme::dim()),
-            Span::styled("Ctrl+r", key_style),
-            Span::styled(" refresh", theme::dim()),
-        ]));
-    }
-
-    lines.push(Line::from(""));
-
-    match &app.tape_archive.status {
-        TapeArchiveStatus::NotLoaded => {
-            lines.push(status_line(
-                "   Opened for the first time. Scanning will begin shortly...",
-            ));
-        }
-        TapeArchiveStatus::Scanning => {
-            lines.push(status_line("   Scanning tape archive..."));
-        }
-        TapeArchiveStatus::Empty => {
-            lines.push(status_line("   No recordings found yet."));
-            lines.push(status_line(
-                "   Press r while playing a live stream to capture tracks.",
-            ));
-        }
-        TapeArchiveStatus::Error(message) => {
-            lines.push(Line::from(vec![
-                Span::styled("   Archive scan failed: ", theme::error()),
-                Span::styled(message.clone(), theme::dim()),
-            ]));
-        }
-        TapeArchiveStatus::Ready => {
-            render_tape_archive_rows(&mut lines, area, app);
-        }
-    }
-
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn append_tape_manager_panel(lines: &mut Vec<Line<'static>>, app: &App) {
-    match app.input_mode {
-        InputMode::TapeRename => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "   Rename: ",
-                    Style::default()
-                        .fg(theme::highlight())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
-                Span::styled("   Enter save / Esc cancel", theme::dim()),
-            ]));
-        }
-        InputMode::TapeMove => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "   Move to folder: ",
-                    Style::default()
-                        .fg(theme::highlight())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{}▌", app.tape_edit_buffer), theme::text()),
-                Span::styled("   Enter move / Esc cancel", theme::dim()),
-            ]));
-        }
-        _ => {}
-    }
-
-    if !app.tape_details_visible {
-        return;
-    }
-
-    let Some(track) = app.tape_archive.selected_track() else {
-        return;
-    };
-
-    let folder = app
-        .tape_archive
-        .selected_track_folder_name()
-        .unwrap_or("Unknown");
-    lines.push(Line::from(vec![
-        Span::styled("   DETAILS ", theme::title()),
-        Span::styled(track.title.clone(), theme::cyan()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("   Folder ", theme::dim()),
-        Span::styled(folder.to_string(), theme::text()),
-        Span::styled("   File ", theme::dim()),
-        Span::styled(track.filename.clone(), theme::text()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("   Format ", theme::dim()),
-        Span::styled(track.extension.to_uppercase(), theme::text()),
-        Span::styled("   Size ", theme::dim()),
-        Span::styled(format_file_size(track.size_bytes), theme::text()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("   Path ", theme::dim()),
-        Span::styled(track.path.display().to_string(), theme::dim()),
-    ]));
-}
-
-fn render_tape_archive_rows(lines: &mut Vec<Line<'static>>, area: Rect, app: &App) {
-    let row_count = app.tape_archive.flattened.len();
-    if row_count == 0 {
-        lines.push(status_line("   No tape rows available."));
-        return;
-    }
-
-    let visible_rows = (area.height as usize).saturating_sub(6).max(1);
-    let selected = app.tape_archive.selected.min(row_count.saturating_sub(1));
-    let start = if selected >= visible_rows {
-        selected + 1 - visible_rows
-    } else {
-        0
-    };
-
-    for (row_index, row) in app
-        .tape_archive
-        .flattened
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(visible_rows)
-    {
-        let is_selected = row_index == selected;
-        lines.push(render_tape_archive_row(row, is_selected, app));
-    }
-}
-
-fn render_tape_archive_row(row: &TapeArchiveRow, is_selected: bool, app: &App) -> Line<'static> {
-    let cursor = if is_selected { " ▸ " } else { "   " };
-    let cursor_style = if is_selected {
-        theme::selected()
-    } else {
-        theme::dim()
-    };
-
-    match row {
-        TapeArchiveRow::AllRecordings => {
-            let marker = if app.tape_archive.all_recordings_flattened {
-                "▼"
-            } else {
-                "▸"
-            };
-            Line::from(vec![
-                Span::styled(cursor, cursor_style),
-                Span::styled(
-                    format!(
-                        "{marker} [All Recordings] {} tracks",
-                        app.tape_archive.total_tracks()
-                    ),
-                    if is_selected {
-                        theme::selected()
-                    } else {
-                        theme::text()
-                    },
-                ),
-            ])
-        }
-        TapeArchiveRow::Folder { folder_index } => {
-            let Some(folder) = app.tape_archive.folders.get(*folder_index) else {
-                return status_line("   [missing folder]");
-            };
-
-            let marker = if folder.expanded { "▼" } else { "▸" };
-            Line::from(vec![
-                Span::styled(cursor, cursor_style),
-                Span::styled(
-                    format!("{marker} 📁 {} ", folder.name),
-                    if is_selected {
-                        theme::selected()
-                    } else {
-                        theme::title()
-                    },
-                ),
-                Span::styled(format!("({} tracks)", folder.tracks.len()), theme::dim()),
-            ])
-        }
-        TapeArchiveRow::Track {
-            folder_index,
-            track_index,
-        } => render_track_row(
-            cursor,
-            cursor_style,
-            *folder_index,
-            *track_index,
-            false,
-            is_selected,
-            app,
-        ),
-        TapeArchiveRow::AllRecordingTrack {
-            folder_index,
-            track_index,
-        } => render_track_row(
-            cursor,
-            cursor_style,
-            *folder_index,
-            *track_index,
-            true,
-            is_selected,
-            app,
-        ),
-    }
-}
-
-fn render_track_row(
-    cursor: &'static str,
-    cursor_style: Style,
-    folder_index: usize,
-    track_index: usize,
-    show_folder: bool,
-    is_selected: bool,
-    app: &App,
-) -> Line<'static> {
-    let Some(folder) = app.tape_archive.folders.get(folder_index) else {
-        return status_line("   [missing folder]");
-    };
-
-    let Some(track) = folder.tracks.get(track_index) else {
-        return status_line("   [missing track]");
-    };
-
-    let is_playing = app.local_playback_path.as_ref() == Some(&track.path);
-    let icon = if is_playing { "🔊" } else { "📄" };
-    let title = if show_folder {
-        compact_track_label(format!("{} / {}", folder.name, track.title), 46)
-    } else {
-        compact_track_title(track, 46)
-    };
-    let meta = track_metadata_label(track);
-
-    let mut spans = vec![
-        Span::styled(cursor, cursor_style),
-        Span::styled("  ", theme::dim()),
-        Span::styled(
-            format!("{icon} {title}"),
-            if is_playing {
-                theme::playing()
-            } else if is_selected {
-                theme::selected()
-            } else {
-                theme::text()
-            },
-        ),
-        Span::styled(format!("   {meta}"), theme::dim()),
-    ];
-
-    if is_playing {
-        if let Some(progress) = local_tape_progress_label(app, track) {
-            spans.push(Span::styled(format!("   {progress}"), theme::cyan()));
-        }
-    }
-
-    Line::from(spans)
-}
-
-fn local_tape_progress_label(app: &App, track: &TapeTrack) -> Option<String> {
-    if app.local_playback_path.as_ref() != Some(&track.path) {
-        return None;
-    }
-
-    let elapsed = app.local_tape_elapsed();
-
-    match track.duration_hint {
-        Some(duration) if duration > Duration::ZERO => {
-            let clamped = elapsed.min(duration);
-            let ratio = clamped.as_secs_f64() / duration.as_secs_f64();
-            Some(format!(
-                "{} {} / {}",
-                local_tape_progress_bar(ratio, 10),
-                format_duration(clamped),
-                format_duration(duration)
-            ))
-        }
-        _ => Some(format!("{} elapsed", format_duration(elapsed))),
-    }
-}
-
-fn local_tape_progress_bar(ratio: f64, width: usize) -> String {
-    let ratio = ratio.clamp(0.0, 1.0);
-    let filled = (ratio * width as f64).round() as usize;
-    let filled = filled.min(width);
-
-    format!("{}{}", "▰".repeat(filled), "▱".repeat(width - filled))
-}
-
-fn compact_track_title(track: &TapeTrack, max_chars: usize) -> String {
-    compact_track_label(track.title.clone(), max_chars)
-}
-
-fn compact_track_label(value: String, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        value
-    } else if max_chars <= 1 {
-        "…".to_string()
-    } else {
-        let mut truncated = value.chars().take(max_chars - 1).collect::<String>();
-        truncated.push('…');
-        truncated
-    }
-}
-
-fn status_line(message: impl Into<String>) -> Line<'static> {
-    Line::from(vec![Span::styled(message.into(), theme::dim())])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1204,22 +820,6 @@ mod tests {
                 CASSETTE_TAPE_WIDTH
             );
         }
-    }
-
-    #[test]
-    fn compact_track_title_truncates_long_titles() {
-        let track = TapeTrack {
-            title: "A very long local tape recording title".to_string(),
-            artist: None,
-            filename: "track.mp3".to_string(),
-            path: std::path::PathBuf::from("track.mp3"),
-            extension: "mp3".to_string(),
-            size_bytes: 42,
-            modified: None,
-            duration_hint: None,
-        };
-
-        assert_eq!(compact_track_title(&track, 12), "A very long…");
     }
 
     #[test]

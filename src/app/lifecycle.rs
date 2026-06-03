@@ -39,18 +39,10 @@ impl App {
             tick_count: 0,
             layout_mode: ui_state.layout_mode(),
             show_help: false,
-            active_deck_page: 0,
             song_history: VecDeque::new(),
-            tape_archive: TapeArchive::new(recording_dir),
-            tape_archive_scan_requested: false,
-            tape_archive_scan_inflight: false,
             local_playback_path: None,
             local_playback_started_at: None,
             local_playback_elapsed_before_pause: Duration::ZERO,
-            pending_tape_delete: None,
-            tape_playback_mode: TapePlaybackMode::Folder,
-            tape_details_visible: false,
-            tape_edit_buffer: String::new(),
             show_settings: false,
             selected_setting_idx: 0,
             recording_state: RecordingState::Off,
@@ -111,8 +103,12 @@ impl App {
     pub fn poll_audio_status(&mut self) {
         while let Ok(status) = self.audio.status_rx.try_recv() {
             match status {
-                AudioStatus::LocalFileFinished { path } => {
-                    self.handle_local_tape_finished(path);
+                AudioStatus::LocalFileFinished { .. } => {
+                    self.local_playback_path = None;
+                    self.local_playback_started_at = None;
+                    self.local_playback_elapsed_before_pause = Duration::ZERO;
+                    self.current_track = None;
+                    self.playback = PlaybackState::Stopped;
                 }
                 AudioStatus::LocalFilePlaying { path, title } => {
                     self.playing_url = None;
