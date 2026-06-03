@@ -36,12 +36,12 @@ Split layout: cassette stays stable while reels animate
 Right-only Bento layout: stable cassette, status strip, and framed signal screen compose cleanly
 Visualizer modes: Spectrum, Real Oscilloscope, and Simulated Oscilloscope show framed mode titles
 Spectrum analyzer: high-frequency bars do not show an artificial final-bin spike or deep treble valley
-Footer status row: playback, volume, layout, scope, and recording labels stay readable at common terminal widths
-Shortcut row: normal mode shows Rec, Layout, Tape, Scope, Search, Remove, Undo, Config, Help, and Quit
-Help overlay: Deck & Visuals section mentions Tape Deck, Tape History, and all scope modes
+Footer status row: playback, volume, layout, and scope labels stay readable at common terminal widths
+Shortcut row: normal mode shows Layout, Scope, Search, Remove, Undo, Config, Help, and Quit
+Help overlay: Deck & Visuals section mentions deck layout and all scope modes
 Library rows: selected/playing markers, country, and bitrate remain readable without long-name overflow
 Search rows: saved-result stars and genre/country/bitrate metadata display cleanly
-Tape History page: title uses cassette/tape language
+Deck page: title uses PulseDeck control-surface language
 Theme cycling: Retrowave and all Catppuccin themes keep deck, footer, help, library/search rows, and visualizer colors consistent
 ```
 
@@ -50,9 +50,7 @@ Use these in-app keys during the smoke pass:
 ```text
 b   cycle split / library-only / full-deck Bento layout
 v   cycle visualizer modes
-p   switch Tape Deck / Tape History
 /   check search row metadata and saved-result stars
-r   check recording footer labels while playing
 h   check updated help overlay wording
 ,   switch themes in settings
 ```

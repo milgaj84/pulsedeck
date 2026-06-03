@@ -6,6 +6,12 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+*   **Focused 0.2 product reset**: PulseDeck now focuses on terminal radio playback, station discovery, saved library management, themes, visualizers, and audio reliability.
+
+### Removed
+*   Removed recording, local tape archive management, local tape playback, recording recovery, and tape file-management workflows.
+
 ### Added
 *   _Nothing yet._
 

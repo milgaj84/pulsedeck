@@ -4,7 +4,7 @@
 
 **A cyber-synthwave internet radio player for your terminal.**
 
-*Stream any radio station on Earth. Record tracks automatically. Never leave the command line.*
+*Stream any radio station on Earth. Discover, save, and play stations without leaving the command line.*
 
 [![Crates.io](https://img.shields.io/crates/v/pulsedeck.svg)](https://crates.io/crates/pulsedeck)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -22,11 +22,11 @@
 
 ## What is PulseDeck?
 
-PulseDeck is a **terminal internet radio player** with a retrowave soul, built in Rust. It works like any radio — tune in, listen, discover — but it lives entirely in your terminal, starts instantly, and uses a few megabytes of RAM.
+PulseDeck is a **focused terminal internet radio player** with a retrowave soul, built in Rust. It helps you discover, save, and stream public radio stations from your terminal with fast search, polished playback controls, themes, visualizers, and resilient audio handling.
 
 It ships pre-loaded with handpicked synthwave, chiptune, and cyberpunk stations so it sounds great from the first keypress. But you can search, save, and play **any public internet radio station in the world**.
 
-Think of it as: *VLC for internet radio, but it fits in your terminal and records tracks into named folders automatically.*
+Think of it as: *a neon radio console for the terminal: quick to launch, easy to tune, and built for listening.*
 
 > PulseDeck was formerly named DriftFM. The project was renamed to avoid confusion with existing and historical radio-related uses of the old name. Existing DriftFM config is copied into the new PulseDeck config directory on first launch.
 
@@ -37,10 +37,8 @@ Think of it as: *VLC for internet radio, but it fits in your terminal and record
 Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
 
 - 📡 **Search 30,000+ stations** from the global radio-browser.info catalog — by name, tag, or country, with mirror failover for upstream outages
-- 📼 **Automatic track recording** — press `r` and it captures tracks as separate files, named `Artist - Title.mp3`, tagged with ID3 metadata, sorted into genre subfolders
-- 🧹 **Smart ad filtering** — DJ speech, news breaks, and commercial spots are detected and silently discarded. Only real music is kept.
 - 🔊 **Smooth tuning transitions** — switching stations fades out the current stream and fades in the new one, like turning an analog dial
-- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, recording indicators, search bar, favorite stars, footer chips, list metadata, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
+- 🎨 **5 built-in themes** — Retrowave (default), plus all 4 [Catppuccin](https://catppuccin.com/) flavors (Mocha, Macchiato, Frappé, Latte), verified pixel-perfect against the official spec. Every UI element — spectrum gradients, search bar, favorite stars, footer chips, list metadata, and help overlay — routes through the 13-role semantic palette. Switch live in settings.
 - 🎛️ **Three-Way Bento Dashboard Layout** — press `b` to cycle between standard split panels, closed Bento (maximizing station list), and full-screen ambient cassette deck. Full-deck mode keeps the stable cassette design and adds a framed signal screen with a themed status strip.
 - 📊 **Deck visualizers** — press `v` to cycle between a calibrated RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope. The RTA is tuned to avoid artificial final-treble spikes, preserve crisp treble texture with soft-knee dynamics, keep bars readable, and show a subtle tuning pulse while streams connect.
 - 💾 **Favorites & history** — your stations are remembered between sessions, the station list shows compact country/bitrate metadata, and the last-played station can auto-resume on launch
@@ -104,9 +102,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Ctrl+-` / `Alt+-` | Search | Volume down without leaving search |
 | `Ctrl+=` / `Ctrl++` / `Alt+=` / `Alt++` | Search | Volume up without leaving search |
 | `Ctrl+m` / `Alt+m` | Search | Mute / unmute without leaving search |
-| `r` | Playback | Start / stop recording; PulseDeck shows footer status when recording is armed, active, stopped, or unavailable |
 | `b` | View | Cycle Split / Library / Deck layout |
-| `p` | View | Switch Tape Deck / Tape History |
 | `v` | View | Cycle RTA Spectrum / Real Osc / Sim Osc |
 | `,` | App | Open settings |
 | `h` / `?` | App | Show / hide help |
@@ -145,99 +141,14 @@ Search results show saved stations with a star and include compact genre/country
 - In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
 - During stop or station changes, the deck stays visually active while the audio fade-out completes.
 - Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
-- Press `p` to switch between the live Tape Deck and the Local Tape Library page.
-- Watch the footer chips for playback state, volume, layout, scope mode, and recording state.
+- Watch the footer chips for playback state, volume, layout, and scope mode.
 
 **Coming back tomorrow:**
 
 - PulseDeck remembers your library between sessions.
 - PulseDeck also remembers your volume, mute state, layout mode, and visualizer mode in a separate `ui-state.json` file.
-- Settings such as auto-resume, audio output, recording folder, recording filters, and theme are saved automatically.
+- Settings such as auto-resume, audio output, and theme are saved automatically.
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
-
----
-
-## Recording
-
-Press `r` while a station is playing. PulseDeck will:
-
-1. Show `Recording will start at next track boundary` in the footer
-2. Wait for the next song boundary (so you never capture a partial intro)
-3. Record each track to its own file in the **native stream format** — `recordings/Synthwave/Perturbator - Venger.mp3` or `.aac` depending on what the station broadcasts. No transcoding, no quality loss.
-4. Embed the correct ID3 tags (artist, title, station name as album)
-5. Discard anything under 90 seconds — DJ speech, ads, station IDs are swept automatically
-6. Stop cleanly when you press `r` again, with `Recording stopped` shown in the footer
-
-If you press `r` before playback starts, PulseDeck shows `Start playback before recording` instead of failing silently.
-
-The minimum song duration and whether to keep short clips are configurable in the settings (`,`).
-
----
-
-## Local Tape Library
-
-Press `p` to open the **Local Tape Library**, a disk-backed browser for recordings captured by PulseDeck.
-
-- Recordings are scanned from the configured tape capture folder.
-- Genre folders become expandable archive groups.
-- Use `↑` / `↓` or `j` / `k` to move through folders and tracks.
-- Use `Enter` on `[All Recordings]` to switch into a newest-first flat view across every folder.
-- Use `Space` to expand or collapse folders.
-- Use `Enter` on a track to play the selected local recording inside PulseDeck.
-- Duration appears as `03:48` when the file metadata exposes it; otherwise PulseDeck still shows format and size.
-- Use `/` or `t` on the tape page to filter recordings by title, folder, artist, extension, or filename.
-- Use `Esc` while filtering to clear the local tape filter and return to the folder view.
-- Use `Ctrl+r` to rescan the recording folder without restarting.
-- Use `o` on a selected track to open its containing folder in the host file manager.
-- Use `f` or `Delete` on a selected track to request removal; confirmation moves it to the OS trash, then `y` to confirm or `n` / `Esc` to cancel.
-- When a local tape finishes, PulseDeck follows the selected local tape playback mode.
-- Use `g` on the Local Tape Library page to cycle playback modes.
-
-
-Local tape file management:
-
-- Use `i` to show or hide details for the selected local tape.
-- Use `Shift+R` to rename the selected tape without changing its extension.
-- Use `Shift+M` to move the selected tape into another folder under the recording directory.
-- Rename and move operations stop the selected local tape first if it is currently playing, then refresh the archive.
-
-Playing local tapes show elapsed progress directly on the active row. When PulseDeck can read duration metadata, the row shows elapsed and total duration with a compact progress bar; otherwise it falls back to elapsed time only.
-
-Local tape playback modes:
-
-- `Stop`: stop at the end of the current local tape.
-- `Folder`: continue through the current folder.
-- `All`: continue through all recordings newest-first.
-- `Repeat`: repeat the current local tape.
-- `Shuffle`: pick another recording from the archive.
-
-Local tape playback uses the same audio output and volume controls as live streams. Recording remains limited to live streams, so pressing `r` while a local tape is active shows a friendly notice instead of trying to re-record a file.
-
-
-## Recording Session Dashboard
-
-When recording is armed or active, the Tape Deck shows a live recording dashboard:
-
-- Station currently being captured.
-- Pending or active recording state.
-- Elapsed recording time.
-- Current capture filename and size when available.
-- Minimum song duration and snippet policy.
-
-PulseDeck also writes a small hidden recovery journal in the recording directory while a session is pending or active. If the app exits unexpectedly, the next launch surfaces a recovery notice so unfinished captures are not silent ghosts on disk.
-
-
-Recording intelligence:
-
-- PulseDeck avoids overwriting an existing recording with the same artist/title filename.
-- Duplicate recordings are skipped with a visible notice instead of silently replacing files.
-- Completed MP3 captures receive PulseDeck ID3 metadata with artist, title, genre/category, and source stream context when available.
-
-Recovery actions are available from the Tape Deck when a journal is detected:
-
-- `Shift+K` keeps the partial recording on disk and clears the journal.
-- `Shift+T` moves the partial recording to the OS trash and clears the journal.
-- `Shift+D` dismisses the journal without touching the partial recording.
 
 ---
 
@@ -248,9 +159,6 @@ Press `,` to open the settings panel. Current options:
 - **Desktop notifications** — show track info when a song changes. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup** — picks up where you left off.
 - **Audio Output** — choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
-- **Tape capture folder** — cycle between preset recording directories.
-- **Keep partial snippets & ads** — whether short clips and non-music segments are kept or silently deleted.
-- **Min song duration** — threshold for auto-discarding short recordings. `Space` cycles common presets including 45s and 300s; Left/Right or h/l/a/d nudge by 5 seconds within the 15s–600s range. Only active when **Keep partial snippets & ads** is OFF.
 - **Theme** — cycle between Retrowave, Catppuccin Mocha, Macchiato, Frappé, and Latte.
 
 Use `↑` / `↓` or `j` / `k` to move between settings. Use `Space`, `Right`, `l`, or `d` to step values forward; use `Left`, `h`, or `a` to step values backward. Native ALSA/JACK probe diagnostics are suppressed during audio device discovery so backend chatter does not overwrite the TUI. Settings are saved automatically to a JSON file in your config directory.
@@ -303,7 +211,6 @@ The codebase also keeps UI colors routed through the semantic palette in `theme.
 - [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio output selection, decoding, and playback (native, no ffmpeg dependency)
 - [Tokio](https://tokio.rs/) — Async runtime for API search
 - [reqwest](https://docs.rs/reqwest) — HTTP streaming with ICY metadata support
-- [id3](https://docs.rs/id3) — ID3 tag injection into recorded files
 
 ---
 
