@@ -58,7 +58,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let left_area = content_chunks[0];
             let right_area = content_chunks[1];
 
-            // Render Right Column: Tape Deck / History
+            // Render Right Column: Signal Deck
             deck::render(frame, right_area, app);
 
             // Render Left Column: Search Bar (if searching) + Station List
@@ -87,7 +87,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }
         }
         LayoutMode::RightOnly => {
-            // Render Bento Tape Deck across the entire content split area (Full Bento)
+            // Render Signal Deck across the entire content split area (Full Bento)
             deck::render(frame, chunks[2], app);
         }
     }

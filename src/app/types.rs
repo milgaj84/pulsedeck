@@ -47,9 +47,9 @@ pub enum PlaybackState {
 /// TUI Dashboard layout configurations.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LayoutMode {
-    Split,     // Mode 0: Station list on left (55%), Bento Tape Deck on right (45%)
+    Split,     // Mode 0: Station list on left (55%), Signal Deck on right (45%)
     LeftOnly,  // Mode 1: Closed Bento, Station list full width (100%)
-    RightOnly, // Mode 2: Only Bento, Tape Deck full width (100%)
+    RightOnly, // Mode 2: Signal Deck full width (100%)
 }
 
 /// Rows shown in the settings overlay.
