@@ -9,7 +9,7 @@ homepage = "https://github.com/milgaj84/pulsedeck"
 readme = "README.md"
 keywords = ["radio", "tui", "music", "streaming", "catppuccin"]
 categories = ["command-line-utilities", "multimedia::audio"]
-exclude = ["recordings/", "library.json", ".gitignore", "*.orig"]
+exclude = ["library.json", ".gitignore", "*.orig"]
 
 [[bin]]
 name = "pulsedeck"
@@ -41,7 +41,6 @@ dirs = "6"
 
 # Desktop Notifications
 notify-rust = "4"
-id3 = "1"
 
 # Logging (optional, useful for debugging)
 # tracing = "0.1"

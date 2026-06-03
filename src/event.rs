@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_removed_tape_and_recording_keys_are_unmapped() {
+    fn normal_mode_removed_legacy_keys_are_unmapped() {
         let removed_plain_keys = [
             KeyCode::Char('t'),
             KeyCode::Char('p'),

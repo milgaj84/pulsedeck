@@ -23,12 +23,6 @@ pub struct Settings {
     pub autoplay_last: bool,
     #[serde(default)]
     pub last_played_url: Option<String>,
-    #[serde(default = "default_recording_dir")]
-    pub recording_dir: String,
-    #[serde(default = "default_false")]
-    pub keep_snippets: bool,
-    #[serde(default = "default_min_duration")]
-    pub min_song_duration_secs: u32,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default)]
@@ -37,18 +31,6 @@ pub struct Settings {
 
 fn default_true() -> bool {
     true
-}
-
-fn default_recording_dir() -> String {
-    "./recordings".to_string()
-}
-
-fn default_false() -> bool {
-    false
-}
-
-fn default_min_duration() -> u32 {
-    90
 }
 
 fn default_theme() -> String {
@@ -61,9 +43,6 @@ impl Default for Settings {
             notifications_enabled: true,
             autoplay_last: false,
             last_played_url: None,
-            recording_dir: "./recordings".to_string(),
-            keep_snippets: false,
-            min_song_duration_secs: 90,
             theme: "Retrowave".to_string(),
             output_device_name: None,
         }
@@ -361,9 +340,6 @@ mod tests {
         let json = r#"{
             "notifications_enabled": true,
             "autoplay_last": false,
-            "recording_dir": "./recordings",
-            "keep_snippets": false,
-            "min_song_duration_secs": 90,
             "theme": "Retrowave"
         }"#;
 
