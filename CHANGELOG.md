@@ -17,7 +17,6 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ### Improved
 *   **Stream Playback Prebuffer**: Added a short startup prebuffer and larger stream queue to smooth regular internet radio playback.
-*   _Nothing yet._
 
 ---
 
