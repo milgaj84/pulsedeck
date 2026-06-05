@@ -42,7 +42,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
     frame.render_widget(block, popup_area);
 
-    let paragraph = Paragraph::new(recent_track_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
+    let paragraph =
+        Paragraph::new(recent_track_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
 
     if let Some(alert_area) = alert_area {

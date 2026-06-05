@@ -163,15 +163,13 @@ fn render_empty_library_onboarding(frame: &mut Frame, area: Rect) {
         onboarding_hint("h", "Open full help"),
     ];
 
-    let card = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme::border())
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .style(theme::clear()),
-        );
+    let card = Paragraph::new(lines).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::border())
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(theme::clear()),
+    );
 
     frame.render_widget(card, card_area);
 }
@@ -225,7 +223,10 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
         } else if visible_count == 0 {
             format!(" 🔍 No signal for \"{}\" ", app.search_query)
         } else {
-            format!(" 🔍 Search Results ({}) · Space preview · Enter save ", visible_count)
+            format!(
+                " 🔍 Search Results ({}) · Space preview · Enter save ",
+                visible_count
+            )
         }
     } else if visible_count == 0 {
         " ◇ Empty Library — press / to search ".to_string()

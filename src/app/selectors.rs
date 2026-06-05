@@ -103,7 +103,10 @@ mod tests {
         ]));
         app.selected = 1;
 
-        assert_eq!(app.selected_station().map(|s| s.url.as_str()), Some("http://b"));
+        assert_eq!(
+            app.selected_station().map(|s| s.url.as_str()),
+            Some("http://b")
+        );
     }
 
     #[test]

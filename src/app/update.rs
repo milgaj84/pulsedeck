@@ -37,7 +37,7 @@ impl App {
             Action::ToggleHelp => self.toggle_help(),
             Action::ToggleStationDetails => self.toggle_station_details(),
             Action::ToggleRecentTracks => self.toggle_recent_tracks(),
-            Action::StepSettingForward | Action::StepSettingBackward => {},
+            Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),

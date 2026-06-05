@@ -152,13 +152,22 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
 
 fn footer_line(app: &App) -> Line<'static> {
     if app.show_help {
-        return hint_line(&[("h/?/Esc/q", "Close help")], Some("full control reference"));
+        return hint_line(
+            &[("h/?/Esc/q", "Close help")],
+            Some("full control reference"),
+        );
     }
     if app.show_station_details {
-        return hint_line(&[("i/Esc/q", "Close details")], Some("selected station info"));
+        return hint_line(
+            &[("i/Esc/q", "Close details")],
+            Some("selected station info"),
+        );
     }
     if app.show_recent_tracks {
-        return hint_line(&[("g/Esc/q", "Close recent tracks")], Some("session track list"));
+        return hint_line(
+            &[("g/Esc/q", "Close recent tracks")],
+            Some("session track list"),
+        );
     }
 
     match app.input_mode {
@@ -178,27 +187,45 @@ fn footer_line(app: &App) -> Line<'static> {
 fn normal_mode_footer(app: &App) -> Line<'static> {
     if matches!(app.playback, PlaybackState::Error(_)) {
         return hint_line(
-            &[("r", "Retry"), ("s", "Stop"), (",", "Audio Output"), ("/", "Search")],
+            &[
+                ("r", "Retry"),
+                ("s", "Stop"),
+                (",", "Audio Output"),
+                ("/", "Search"),
+            ],
             Some("recover playback"),
         );
     }
 
     if app.visible_count() == 0 {
         return hint_line(
-            &[("/", "Search"), (",", "Settings"), ("h", "Help"), ("q", "Quit")],
+            &[
+                ("/", "Search"),
+                (",", "Settings"),
+                ("h", "Help"),
+                ("q", "Quit"),
+            ],
             Some("start by finding a station"),
         );
     }
 
     if app.notice.is_some() {
         return hint_line(
-            &[("u", "Undo"), ("Enter", "Play"), ("/", "Search"), ("h", "Help")],
+            &[
+                ("u", "Undo"),
+                ("Enter", "Play"),
+                ("/", "Search"),
+                ("h", "Help"),
+            ],
             Some("last action available"),
         );
     }
 
     match app.playback {
-        PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Connecting | PlaybackState::FadingOut { .. } => hint_line(
+        PlaybackState::Playing
+        | PlaybackState::Paused
+        | PlaybackState::Connecting
+        | PlaybackState::FadingOut { .. } => hint_line(
             &[
                 ("Space", "Pause/Stop"),
                 ("s", "Stop"),
@@ -223,7 +250,10 @@ fn normal_mode_footer(app: &App) -> Line<'static> {
     }
 }
 
-fn hint_line(hints: &[(&'static str, &'static str)], suffix: Option<&'static str>) -> Line<'static> {
+fn hint_line(
+    hints: &[(&'static str, &'static str)],
+    suffix: Option<&'static str>,
+) -> Line<'static> {
     let mut spans = Vec::new();
 
     for (idx, (key, label)) in hints.iter().enumerate() {

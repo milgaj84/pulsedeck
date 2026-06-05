@@ -16,7 +16,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             popup_area,
             "Station Details Too Compact",
-            format!("Expand terminal or close details (overlay: {}x{})", popup_area.width, popup_area.height),
+            format!(
+                "Expand terminal or close details (overlay: {}x{})",
+                popup_area.width, popup_area.height
+            ),
         );
         return;
     }
@@ -26,7 +29,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(" Station Details ", theme::title()))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))
+        .border_style(
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::BOLD),
+        )
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(theme::clear());
 
@@ -34,7 +41,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
     frame.render_widget(block, popup_area);
 
-    let paragraph = Paragraph::new(station_detail_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
+    let paragraph =
+        Paragraph::new(station_detail_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
 
     if let Some(alert_area) = alert_area {
@@ -51,13 +59,20 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
         return vec![
             Line::from(Span::styled("No station selected", theme::title())),
             Line::from(""),
-            Line::from(Span::styled("Press / to search for stations or switch categories with Tab.", theme::dim())),
+            Line::from(Span::styled(
+                "Press / to search for stations or switch categories with Tab.",
+                theme::dim(),
+            )),
             Line::from(""),
             close_hint(),
         ];
     };
 
-    let saved = if app.library.contains(&station.url) { "Yes" } else { "No" };
+    let saved = if app.library.contains(&station.url) {
+        "Yes"
+    } else {
+        "No"
+    };
     let now_playing = app
         .current_track
         .as_deref()
@@ -93,11 +108,19 @@ fn close_hint() -> Line<'static> {
 }
 
 fn bitrate_label(bitrate: u32) -> String {
-    if bitrate == 0 { "Unknown".to_string() } else { format!("{bitrate}k") }
+    if bitrate == 0 {
+        "Unknown".to_string()
+    } else {
+        format!("{bitrate}k")
+    }
 }
 
 fn fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
-    if value.trim().is_empty() { fallback } else { value.trim() }
+    if value.trim().is_empty() {
+        fallback
+    } else {
+        value.trim()
+    }
 }
 
 #[cfg(test)]

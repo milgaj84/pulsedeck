@@ -77,9 +77,16 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
     let active_bg = Style::default().bg(theme::surface_color());
 
     let cursor_style = active_style;
-    let label_style = if is_selected { active_style } else { normal_style };
+    let label_style = if is_selected {
+        active_style
+    } else {
+        normal_style
+    };
 
-    let mut spans = vec![Span::styled(setting_row_cursor_symbol(is_selected), cursor_style)];
+    let mut spans = vec![Span::styled(
+        setting_row_cursor_symbol(is_selected),
+        cursor_style,
+    )];
     spans.extend(setting_row_spans(app, row, label_style));
 
     let mut paragraph = Paragraph::new(Line::from(spans));
@@ -102,15 +109,23 @@ fn render_selected_description(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn setting_row_cursor_symbol(is_selected: bool) -> &'static str {
-    if is_selected { " >  " } else { "    " }
+    if is_selected {
+        " >  "
+    } else {
+        "    "
+    }
 }
 
 fn setting_description(row: SettingRow) -> &'static str {
     match row {
         SettingRow::Notifications => "Show current track changes while you listen.",
         SettingRow::AutoplayLast => "Start the previous station automatically on launch.",
-        SettingRow::OutputDevice => "Choose Default or a detected speaker, headset, pulse, or pipewire device.",
-        SettingRow::Theme => "Change PulseDeck's color palette instantly; settings save automatically.",
+        SettingRow::OutputDevice => {
+            "Choose Default or a detected speaker, headset, pulse, or pipewire device."
+        }
+        SettingRow::Theme => {
+            "Change PulseDeck's color palette instantly; settings save automatically."
+        }
     }
 }
 
@@ -131,7 +146,9 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
             Span::styled("Audio Output: ", label_style),
             Span::styled(
                 audio_output_label(app.library.settings.output_device_name.as_deref()),
-                Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::highlight())
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" (Space/Right forward, Left back)", theme::dim()),
         ],
@@ -142,7 +159,9 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                 Span::styled("Theme: ", label_style),
                 Span::styled(
                     format!("{} ", current_theme.label()),
-                    Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::highlight())
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("(Space/Right forward, Left back)", theme::dim()),
             ]
@@ -159,7 +178,11 @@ fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<S
         Span::styled(
             if enabled { "[x] " } else { "[ ] " },
             Style::default()
-                .fg(if enabled { theme::accent_secondary() } else { theme::dim().fg.unwrap() })
+                .fg(if enabled {
+                    theme::accent_secondary()
+                } else {
+                    theme::dim().fg.unwrap()
+                })
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(label, label_style),
@@ -167,18 +190,43 @@ fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<S
 }
 
 fn icon_span(icon: &'static str) -> Span<'static> {
-    Span::styled(icon, Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD))
+    Span::styled(
+        icon,
+        Style::default()
+            .fg(theme::highlight())
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 fn render_footer(frame: &mut Frame, area: Rect) {
     let footer_line = Line::from(vec![
-        Span::styled("  Up/Down or j/k", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Up/Down or j/k",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Move  |  ", theme::dim()),
-        Span::styled("Space/Right/l", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Space/Right/l",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Next  |  ", theme::dim()),
-        Span::styled("Left/h", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Left/h",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Previous  |  ", theme::dim()),
-        Span::styled("Esc/Comma", Style::default().fg(theme::highlight()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc/Comma",
+            Style::default()
+                .fg(theme::highlight())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Close  |  saved automatically", theme::dim()),
     ]);
     let footer = Paragraph::new(vec![Line::from(""), footer_line]).alignment(Alignment::Center);
@@ -191,8 +239,14 @@ mod tests {
 
     #[test]
     fn audio_output_label_defaults_to_default() {
-        assert_eq!(audio_output_label(None), crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL);
-        assert_eq!(audio_output_label(Some("BlueZ Headphones")), "BlueZ Headphones");
+        assert_eq!(
+            audio_output_label(None),
+            crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL
+        );
+        assert_eq!(
+            audio_output_label(Some("BlueZ Headphones")),
+            "BlueZ Headphones"
+        );
     }
 
     #[test]
