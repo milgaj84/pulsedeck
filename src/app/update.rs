@@ -16,6 +16,7 @@ impl App {
             Action::PlaySelected => self.play_selected(),
             Action::TogglePause => self.toggle_pause(),
             Action::Stop => self.stop_playback(),
+            Action::RetryStream => self.retry_stream(),
 
             Action::VolumeUp => self.volume_up(),
             Action::VolumeDown => self.volume_down(),
@@ -34,6 +35,8 @@ impl App {
             Action::PrevGenre => self.prev_genre(),
 
             Action::ToggleHelp => self.toggle_help(),
+            Action::ToggleStationDetails => self.toggle_station_details(),
+            Action::ToggleRecentTracks => self.toggle_recent_tracks(),
             Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
             Action::CycleLayout => self.cycle_layout(),
@@ -51,12 +54,12 @@ impl App {
     }
 
     pub(super) fn quit(&mut self) {
-        if self.show_help {
-            self.show_help = false;
-        } else {
-            self.stop_audio_before_quit();
-            self.should_quit = true;
+        if self.close_any_overlay() {
+            return;
         }
+
+        self.stop_audio_before_quit();
+        self.should_quit = true;
     }
 
     fn next_station(&mut self) {
