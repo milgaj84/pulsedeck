@@ -238,7 +238,7 @@ mod tests {
 
         app.update(Action::StepSettingBackward);
 
-        assert_eq!(app.library.settings.theme, "CatppuccinLatte");
+        assert_eq!(app.library.settings.theme, "Terminal");
     }
 
     #[test]
