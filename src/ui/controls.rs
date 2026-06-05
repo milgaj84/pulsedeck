@@ -129,66 +129,141 @@ fn volume_bar_empty(app: &App) -> String {
 
 fn layout_label(layout_mode: LayoutMode) -> &'static str {
     match layout_mode {
-        LayoutMode::Split => "LAYOUT SPLIT",
-        LayoutMode::LeftOnly => "LAYOUT LIBRARY",
-        LayoutMode::RightOnly => "LAYOUT DECK",
+        LayoutMode::Split => "SPLIT VIEW",
+        LayoutMode::LeftOnly => "LIBRARY FOCUS",
+        LayoutMode::RightOnly => "SIGNAL FOCUS",
     }
 }
 
 fn visualizer_label(visualizer_mode: usize) -> &'static str {
     match visualizer_mode {
-        0 => "SCOPE RTA",
-        1 => "SCOPE OSC",
-        _ => "SCOPE SIM",
+        0 => "RTA",
+        1 => "REAL OSC",
+        _ => "SIM OSC",
     }
 }
 
 /// Bottom row: keyboard shortcut hints, mode-aware.
 fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
-    let hints = match app.input_mode {
-        InputMode::Search => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("Space", theme::cyan()),
-            Span::styled("] Audition  [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Save+Play  [", theme::dim()),
-            Span::styled("Esc", theme::cyan()),
-            Span::styled("] Back  [", theme::dim()),
-            Span::styled("↑↓", theme::cyan()),
-            Span::styled("] Results  ", theme::dim()),
-            Span::styled(
-                "worldwide station search",
-                Style::default()
-                    .fg(theme::accent_secondary())
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ]),
-        _ => Line::from(vec![
-            Span::styled(" [", theme::dim()),
-            Span::styled("Enter", theme::cyan()),
-            Span::styled("] Play  [", theme::dim()),
-            Span::styled("Space", theme::cyan()),
-            Span::styled("] Pause  [", theme::dim()),
-            Span::styled("b", theme::cyan()),
-            Span::styled("] Layout  [", theme::dim()),
-            Span::styled("v", theme::cyan()),
-            Span::styled("] Scope  [", theme::dim()),
-            Span::styled("/", theme::cyan()),
-            Span::styled("] Search  [", theme::dim()),
-            Span::styled("f", theme::cyan()),
-            Span::styled("] Remove  [", theme::dim()),
-            Span::styled("u", theme::cyan()),
-            Span::styled("] Undo  [", theme::dim()),
-            Span::styled(",", theme::cyan()),
-            Span::styled("] Config  [", theme::dim()),
-            Span::styled("h", theme::cyan()),
-            Span::styled("] Help  [", theme::dim()),
-            Span::styled("q", theme::cyan()),
-            Span::styled("] Quit", theme::dim()),
-        ]),
-    };
-
-    let paragraph = Paragraph::new(vec![hints]).style(Style::default().bg(theme::bg()));
+    let paragraph = Paragraph::new(vec![footer_line(app)]).style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
+}
+
+fn footer_line(app: &App) -> Line<'static> {
+    if app.show_help {
+        return hint_line(&[("h/?/Esc/q", "Close help")], Some("full control reference"));
+    }
+    if app.show_station_details {
+        return hint_line(&[("i/Esc/q", "Close details")], Some("selected station info"));
+    }
+    if app.show_recent_tracks {
+        return hint_line(&[("g/Esc/q", "Close recent tracks")], Some("session track list"));
+    }
+
+    match app.input_mode {
+        InputMode::Search => hint_line(
+            &[
+                ("Space", "Audition"),
+                ("Enter", "Save+Play"),
+                ("Esc", "Back"),
+                ("↑↓", "Results"),
+            ],
+            Some("worldwide station search"),
+        ),
+        InputMode::Normal => normal_mode_footer(app),
+    }
+}
+
+fn normal_mode_footer(app: &App) -> Line<'static> {
+    if matches!(app.playback, PlaybackState::Error(_)) {
+        return hint_line(
+            &[("r", "Retry"), ("s", "Stop"), (",", "Audio Output"), ("/", "Search")],
+            Some("recover playback"),
+        );
+    }
+
+    if app.visible_count() == 0 {
+        return hint_line(
+            &[("/", "Search"), (",", "Settings"), ("h", "Help"), ("q", "Quit")],
+            Some("start by finding a station"),
+        );
+    }
+
+    if app.notice.is_some() {
+        return hint_line(
+            &[("u", "Undo"), ("Enter", "Play"), ("/", "Search"), ("h", "Help")],
+            Some("last action available"),
+        );
+    }
+
+    match app.playback {
+        PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Connecting | PlaybackState::FadingOut { .. } => hint_line(
+            &[
+                ("Space", "Pause/Stop"),
+                ("s", "Stop"),
+                ("+/-", "Volume"),
+                ("v", "Visualizer"),
+                ("i", "Details"),
+                ("g", "Tracks"),
+            ],
+            Some("listening"),
+        ),
+        PlaybackState::Stopped | PlaybackState::Error(_) => hint_line(
+            &[
+                ("Enter", "Play"),
+                ("/", "Search"),
+                ("i", "Details"),
+                ("b", "Layout"),
+                (",", "Settings"),
+                ("h", "Help"),
+            ],
+            None,
+        ),
+    }
+}
+
+fn hint_line(hints: &[(&'static str, &'static str)], suffix: Option<&'static str>) -> Line<'static> {
+    let mut spans = Vec::new();
+
+    for (idx, (key, label)) in hints.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled("  ", theme::dim()));
+        }
+        spans.push(Span::styled(" [", theme::dim()));
+        spans.push(Span::styled(*key, theme::cyan()));
+        spans.push(Span::styled("] ", theme::dim()));
+        spans.push(Span::styled(*label, theme::dim()));
+    }
+
+    if let Some(suffix) = suffix {
+        spans.push(Span::styled("  ", theme::dim()));
+        spans.push(Span::styled(
+            suffix,
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::ITALIC),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_labels_use_user_facing_focus_terms() {
+        assert_eq!(layout_label(LayoutMode::Split), "SPLIT VIEW");
+        assert_eq!(layout_label(LayoutMode::LeftOnly), "LIBRARY FOCUS");
+        assert_eq!(layout_label(LayoutMode::RightOnly), "SIGNAL FOCUS");
+    }
+
+    #[test]
+    fn visualizer_labels_drop_scope_jargon() {
+        assert_eq!(visualizer_label(0), "RTA");
+        assert_eq!(visualizer_label(1), "REAL OSC");
+        assert_eq!(visualizer_label(2), "SIM OSC");
+    }
 }
