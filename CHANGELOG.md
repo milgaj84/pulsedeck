@@ -7,13 +7,21 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-*   _Nothing yet._
+*   **Station Details Overlay**: Added an `i` shortcut in normal mode for inspecting the highlighted station's name, genre, country, bitrate, saved status, current track context, and stream URL.
+*   **Recent Tracks Overlay**: Added a `g` shortcut for a session-only list of stream-provided track titles heard during the current run.
+*   **Manual Stream Retry**: Added a plain `r` shortcut for retrying the current stream after playback errors without mapping legacy `Ctrl+r` behavior.
+*   **Empty Library Onboarding**: Added an in-panel first-run guide that points new users toward search, auditioning, saving, settings, and help.
+*   **Terminal Theme**: Added a terminal-native theme that uses ANSI colors and reset backgrounds for users who prefer their emulator palette.
 
 ### Changed
-*   _Nothing yet._
+*   **Post-0.2 UX Language**: Reworded visible layout and visualizer labels around Split View, Library Focus, Signal Focus, RTA, Real Osc, and Sim Osc.
+*   **Settings Overlay Copy**: Renamed the settings surface away from config-console language and added per-row descriptions plus saved-automatically guidance.
 
 ### Improved
-*   _Nothing yet._
+*   **Adaptive Footer Hints**: The footer now emphasizes the most relevant actions for empty libraries, search, playback, errors, and open overlays instead of showing every shortcut at once.
+*   **Search Action Clarity**: Search list titles and footer hints now make the `Space` preview versus `Enter` save-and-play distinction harder to miss.
+*   **Overlay Behavior**: Help, settings, station details, and recent tracks now close or replace each other predictably, and `q` / `Esc` closes overlays before quitting.
+*   **Playback Error Recovery**: Error-state hints now surface retry, stop, audio-output settings, and search as recovery actions.
 
 ### Removed
 *   _Nothing yet._
