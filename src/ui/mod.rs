@@ -3,8 +3,10 @@ pub mod critical;
 pub mod deck;
 pub mod header;
 pub mod help;
+pub mod recent_tracks;
 pub mod search;
 pub mod settings;
+pub mod station_details;
 pub mod stations;
 pub mod theme;
 
@@ -94,6 +96,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     render_separator(frame, chunks[3]);
     controls::render(frame, chunks[4], app);
+
+    // Draw context overlays before help/settings, which remain highest priority.
+    if app.show_station_details {
+        station_details::render(frame, size, app);
+    }
+
+    if app.show_recent_tracks {
+        recent_tracks::render(frame, size, app);
+    }
 
     // Draw help modal floating overlay if enabled
     if app.show_help {

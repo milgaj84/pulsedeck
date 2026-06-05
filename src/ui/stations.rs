@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Tabs};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs};
 
 use super::theme;
 use crate::app::{App, InputMode};
@@ -137,6 +137,49 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     frame.render_stateful_widget(list, list_area, &mut state);
+
+    if should_render_empty_library_onboarding(app, visible.len()) {
+        render_empty_library_onboarding(frame, list_area);
+    }
+}
+
+fn should_render_empty_library_onboarding(app: &App, visible_count: usize) -> bool {
+    app.input_mode == InputMode::Normal && visible_count == 0
+}
+
+fn render_empty_library_onboarding(frame: &mut Frame, area: Rect) {
+    if area.width < 36 || area.height < 8 {
+        return;
+    }
+
+    let card_area = super::centered_rect(82, 58, area);
+    let lines = vec![
+        Line::from(Span::styled("No saved stations yet", theme::title())),
+        Line::from(""),
+        onboarding_hint("/", "Search worldwide radio"),
+        onboarding_hint("Space", "Audition a search result"),
+        onboarding_hint("Enter", "Save + play highlighted result"),
+        onboarding_hint(",", "Configure theme and audio output"),
+        onboarding_hint("h", "Open full help"),
+    ];
+
+    let card = Paragraph::new(lines).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::border())
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(theme::clear()),
+    );
+
+    frame.render_widget(card, card_area);
+}
+
+fn onboarding_hint(key: &'static str, label: &'static str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{key:>7}"), theme::cyan()),
+        Span::styled("  ", theme::dim()),
+        Span::styled(label, theme::dim()),
+    ])
 }
 
 fn station_cursor(is_playing: bool, is_selected: bool) -> &'static str {
@@ -174,13 +217,16 @@ fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrat
 fn station_list_title(app: &App, visible_count: usize) -> String {
     if app.input_mode == InputMode::Search {
         if app.search_query.is_empty() {
-            " 🔍 Search the airwaves ".to_string()
+            " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
         } else if app.searching_api {
             format!(" 🔍 Tuning query \"{}\"... ", app.search_query)
         } else if visible_count == 0 {
             format!(" 🔍 No signal for \"{}\" ", app.search_query)
         } else {
-            format!(" 🔍 Search Results ({}) ", visible_count)
+            format!(
+                " 🔍 Search Results ({}) · Space preview · Enter save ",
+                visible_count
+            )
         }
     } else if visible_count == 0 {
         " ◇ Empty Library — press / to search ".to_string()
@@ -288,6 +334,7 @@ fn visible_len(value: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::favorites::Library;
 
     #[test]
     fn truncation_keeps_short_names_unchanged() {
@@ -316,6 +363,25 @@ mod tests {
             station_meta_label(&InputMode::Normal, "Synthwave", "US", 128),
             "US · 128k"
         );
+    }
+
+    #[test]
+    fn empty_library_onboarding_only_renders_for_empty_normal_mode() {
+        let app = App::new(Library::in_memory(vec![]));
+
+        assert!(should_render_empty_library_onboarding(&app, 0));
+        assert!(!should_render_empty_library_onboarding(&app, 1));
+    }
+
+    #[test]
+    fn search_title_explains_preview_and_save_actions() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.input_mode = InputMode::Search;
+
+        let title = station_list_title(&app, 3);
+
+        assert!(title.contains("Space preview"));
+        assert!(title.contains("Enter save"));
     }
 
     #[test]

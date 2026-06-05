@@ -54,6 +54,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Enter) => Some(Action::PlaySelected),
         (_, KeyCode::Char(' ')) => Some(Action::TogglePause),
         (_, KeyCode::Char('s')) => Some(Action::Stop),
+        (KeyModifiers::NONE, KeyCode::Char('r')) => Some(Action::RetryStream),
 
         // Volume
         (_, KeyCode::Char('+')) | (_, KeyCode::Char('=')) => Some(Action::VolumeUp),
@@ -66,8 +67,10 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
-        // Help overlay
+        // Help and context overlays
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => Some(Action::ToggleHelp),
+        (_, KeyCode::Char('i')) => Some(Action::ToggleStationDetails),
+        (_, KeyCode::Char('g')) => Some(Action::ToggleRecentTracks),
 
         // Bento layout cycle
         (_, KeyCode::Char('b')) => Some(Action::CycleLayout),
@@ -107,7 +110,6 @@ fn map_search(key: KeyEvent) -> Option<Action> {
 
         // Ctrl+C still quits
         (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
-        (_, KeyCode::Char('\u{3}')) => Some(Action::Quit),
 
         // Modifier escape rails: keep core audio controls reachable while typing.
         (mods, KeyCode::Char('-')) if has_search_escape_modifier(mods) => Some(Action::VolumeDown),
@@ -160,6 +162,22 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('u')), &InputMode::Search),
             Some(Action::SearchInput('u')),
+        );
+    }
+
+    #[test]
+    fn search_mode_treats_context_overlay_keys_as_text_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('i')), &InputMode::Search),
+            Some(Action::SearchInput('i')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('g')), &InputMode::Search),
+            Some(Action::SearchInput('g')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('r')), &InputMode::Search),
+            Some(Action::SearchInput('r')),
         );
     }
 
@@ -322,6 +340,22 @@ mod tests {
     }
 
     #[test]
+    fn normal_mode_context_shortcuts_open_overlays_and_retry() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('i')), &InputMode::Normal),
+            Some(Action::ToggleStationDetails),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
+            Some(Action::ToggleRecentTracks),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('r')), &InputMode::Normal),
+            Some(Action::RetryStream),
+        );
+    }
+
+    #[test]
     fn search_mode_space_auditions_selected_result() {
         assert_eq!(
             map_key(key(KeyCode::Char(' ')), &InputMode::Search),
@@ -353,10 +387,7 @@ mod tests {
         let removed_plain_keys = [
             KeyCode::Char('t'),
             KeyCode::Char('p'),
-            KeyCode::Char('r'),
             KeyCode::Char('o'),
-            KeyCode::Char('g'),
-            KeyCode::Char('i'),
             KeyCode::Char('R'),
             KeyCode::Char('M'),
             KeyCode::Char('y'),

@@ -18,6 +18,21 @@ impl App {
         }
     }
 
+    pub(super) fn retry_stream(&mut self) {
+        let Some(url) = self.playing_url.clone() else {
+            self.set_error_notice("No stream to retry");
+            return;
+        };
+
+        self.current_track = None;
+        self.buffer_percent = 0;
+        self.buffer_seconds = 0;
+        self.playback = PlaybackState::Connecting;
+        self.audio.send(AudioCommand::Play(url));
+        self.sync_volume();
+        self.set_info_notice("Retrying stream");
+    }
+
     pub(super) fn toggle_pause(&mut self) {
         match self.playback.clone() {
             PlaybackState::Playing => {
@@ -145,6 +160,35 @@ mod tests {
             Some("http://a")
         );
         assert_eq!(app.playback, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn retry_stream_reuses_current_url_and_resets_transient_status() {
+        let mut app = test_app();
+        app.playing_url = Some("http://a".to_string());
+        app.playback = PlaybackState::Error("device vanished".to_string());
+        app.current_track = Some("Old Track".to_string());
+        app.buffer_percent = 80;
+        app.buffer_seconds = 12;
+
+        app.retry_stream();
+
+        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
+        assert_eq!(app.playback, PlaybackState::Connecting);
+        assert_eq!(app.current_track, None);
+        assert_eq!(app.buffer_percent, 0);
+        assert_eq!(app.buffer_seconds, 0);
+    }
+
+    #[test]
+    fn retry_stream_without_url_sets_error_notice() {
+        let mut app = test_app();
+
+        app.retry_stream();
+
+        assert_eq!(app.playing_url, None);
+        assert_eq!(app.playback, PlaybackState::Stopped);
+        assert!(matches!(app.notice, Some(AppNotice::Error(_))));
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub enum Action {
     PlaySelected,
     TogglePause,
     Stop,
+    RetryStream,
 
     /// Volume
     VolumeUp,
@@ -33,6 +34,8 @@ pub enum Action {
     /// Dynamic TUI Modules
     CycleLayout,
     ToggleHelp,
+    ToggleStationDetails,
+    ToggleRecentTracks,
     StepSettingForward,
     StepSettingBackward,
     ToggleSettings,

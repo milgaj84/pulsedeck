@@ -23,6 +23,11 @@ impl App {
         }
     }
 
+    /// Get the highlighted station from the currently visible list.
+    pub fn selected_station(&self) -> Option<&Station> {
+        self.visible_stations().get(self.selected).copied()
+    }
+
     /// Get the currently playing station, if any.
     pub fn now_playing(&self) -> Option<&Station> {
         self.playing_url.as_ref().and_then(|url| {
@@ -71,5 +76,43 @@ impl App {
                 self.selected = pos;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::favorites::Library;
+    use crate::radio::Station;
+
+    fn station(name: &str, url: &str) -> Station {
+        Station {
+            name: name.to_string(),
+            url: url.to_string(),
+            genre: "Synthwave".to_string(),
+            country: "US".to_string(),
+            bitrate: 128,
+        }
+    }
+
+    #[test]
+    fn selected_station_returns_highlighted_visible_station() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("A", "http://a"),
+            station("B", "http://b"),
+        ]));
+        app.selected = 1;
+
+        assert_eq!(
+            app.selected_station().map(|s| s.url.as_str()),
+            Some("http://b")
+        );
+    }
+
+    #[test]
+    fn selected_station_returns_none_for_empty_visible_list() {
+        let app = App::new(Library::in_memory(vec![]));
+
+        assert!(app.selected_station().is_none());
     }
 }

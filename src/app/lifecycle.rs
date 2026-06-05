@@ -32,6 +32,8 @@ impl App {
             tick_count: 0,
             layout_mode: ui_state.layout_mode(),
             show_help: false,
+            show_station_details: false,
+            show_recent_tracks: false,
             song_history: VecDeque::new(),
             show_settings: false,
             selected_setting_idx: 0,

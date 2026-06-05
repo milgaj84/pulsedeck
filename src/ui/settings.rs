@@ -9,7 +9,6 @@ const MIN_SETTINGS_WIDTH: u16 = 60;
 const MIN_SETTINGS_HEIGHT: u16 = 16;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    // Elegant config popup at 54% width, 64% height to fit all setting rows
     let popup_area = super::centered_rect(54, 64, area);
 
     if settings_area_is_compact(popup_area) {
@@ -17,7 +16,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         super::render_boundary_warning(
             frame,
             popup_area,
-            "Config Console Too Compact",
+            "Settings Too Compact",
             format!(
                 "Expand terminal or close settings (overlay: {}x{})",
                 popup_area.width, popup_area.height
@@ -26,15 +25,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    // Clear background
     frame.render_widget(Clear, popup_area);
 
-    // Beautiful rounded block with glowing highlight border
     let block = Block::default()
-        .title(Span::styled(
-            " ✦ PulseDeck Config Console ✦ ",
-            theme::title(),
-        ))
+        .title(Span::styled(" PulseDeck Settings ", theme::title()))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
@@ -50,7 +44,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let constraints = std::iter::once(Constraint::Length(1))
         .chain(SettingRow::ALL.iter().map(|_| Constraint::Length(2)))
-        .chain(std::iter::once(Constraint::Min(0)))
+        .chain([Constraint::Length(2), Constraint::Min(0)])
         .collect::<Vec<_>>();
 
     let chunks = Layout::default()
@@ -62,7 +56,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         render_setting_row(frame, chunks[offset + 1], app, row);
     }
 
-    render_footer(frame, chunks[SettingRow::COUNT + 1]);
+    render_selected_description(frame, chunks[SettingRow::COUNT + 1], app);
+    render_footer(frame, chunks[SettingRow::COUNT + 2]);
 
     if let Some(alert_area) = alert_area {
         critical::render_engine_fault_banner(frame, alert_area, &app.playback);
@@ -92,7 +87,6 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
         setting_row_cursor_symbol(is_selected),
         cursor_style,
     )];
-
     spans.extend(setting_row_spans(app, row, label_style));
 
     let mut paragraph = Paragraph::new(Line::from(spans));
@@ -102,11 +96,36 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
     frame.render_widget(paragraph, area);
 }
 
+fn render_selected_description(frame: &mut Frame, area: Rect, app: &App) {
+    let row = SettingRow::from_index(app.selected_setting_idx).unwrap_or(SettingRow::Notifications);
+    let paragraph = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Hint: ", theme::cyan()),
+            Span::styled(setting_description(row), theme::dim()),
+        ]),
+    ]);
+    frame.render_widget(paragraph, area);
+}
+
 fn setting_row_cursor_symbol(is_selected: bool) -> &'static str {
     if is_selected {
-        " ▸  "
+        " >  "
     } else {
         "    "
+    }
+}
+
+fn setting_description(row: SettingRow) -> &'static str {
+    match row {
+        SettingRow::Notifications => "Show current track changes while you listen.",
+        SettingRow::AutoplayLast => "Start the previous station automatically on launch.",
+        SettingRow::OutputDevice => {
+            "Choose Default or a detected speaker, headset, pulse, or pipewire device."
+        }
+        SettingRow::Theme => {
+            "Change PulseDeck's color palette instantly; settings save automatically."
+        }
     }
 }
 
@@ -123,7 +142,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
             label_style,
         ),
         SettingRow::OutputDevice => vec![
-            icon_span("[ 🔊 ] "),
+            icon_span("[ audio ] "),
             Span::styled("Audio Output: ", label_style),
             Span::styled(
                 audio_output_label(app.library.settings.output_device_name.as_deref()),
@@ -136,7 +155,7 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
         SettingRow::Theme => {
             let current_theme = ThemeName::from_key(&app.library.settings.theme);
             vec![
-                icon_span("[ 🎨 ] "),
+                icon_span("[ theme ] "),
                 Span::styled("Theme: ", label_style),
                 Span::styled(
                     format!("{} ", current_theme.label()),
@@ -157,7 +176,7 @@ fn audio_output_label(value: Option<&str>) -> String {
 fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<Span<'static>> {
     vec![
         Span::styled(
-            if enabled { "[ ▣ ] " } else { "[ ▢ ] " },
+            if enabled { "[x] " } else { "[ ] " },
             Style::default()
                 .fg(if enabled {
                     theme::accent_secondary()
@@ -182,40 +201,33 @@ fn icon_span(icon: &'static str) -> Span<'static> {
 fn render_footer(frame: &mut Frame, area: Rect) {
     let footer_line = Line::from(vec![
         Span::styled(
-            "  j/k",
+            "  Up/Down or j/k",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Navigate  •  ", theme::dim()),
+        Span::styled(" Move  |  ", theme::dim()),
         Span::styled(
-            "Left/Right",
+            "Space/Right/l",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Back/Forward  •  ", theme::dim()),
+        Span::styled(" Next  |  ", theme::dim()),
         Span::styled(
-            "h/l",
+            "Left/h",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Back/Forward  •  ", theme::dim()),
+        Span::styled(" Previous  |  ", theme::dim()),
         Span::styled(
-            "Space",
+            "Esc/Comma",
             Style::default()
                 .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Toggle / Forward  •  ", theme::dim()),
-        Span::styled(
-            "Esc/ ,",
-            Style::default()
-                .fg(theme::highlight())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" Exit Config", theme::dim()),
+        Span::styled(" Close  |  saved automatically", theme::dim()),
     ]);
     let footer = Paragraph::new(vec![Line::from(""), footer_line]).alignment(Alignment::Center);
     frame.render_widget(footer, area);
@@ -239,8 +251,15 @@ mod tests {
 
     #[test]
     fn selected_row_uses_cursor() {
-        assert_eq!(setting_row_cursor_symbol(true), " ▸  ");
+        assert_eq!(setting_row_cursor_symbol(true), " >  ");
         assert_eq!(setting_row_cursor_symbol(false), "    ");
+    }
+
+    #[test]
+    fn setting_descriptions_cover_all_rows() {
+        for row in SettingRow::ALL {
+            assert!(!setting_description(row).is_empty());
+        }
     }
 
     #[test]
