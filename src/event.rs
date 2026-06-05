@@ -54,7 +54,9 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Enter) => Some(Action::PlaySelected),
         (_, KeyCode::Char(' ')) => Some(Action::TogglePause),
         (_, KeyCode::Char('s')) => Some(Action::Stop),
-        (KeyModifiers::NONE, KeyCode::Char('r')) => Some(Action::RetryStream),
+        (mods, KeyCode::Char('r')) if allows_normal_shortcut_modifier(mods) => {
+            Some(Action::RetryStream)
+        }
 
         // Volume
         (_, KeyCode::Char('+')) | (_, KeyCode::Char('=')) => Some(Action::VolumeUp),
@@ -69,8 +71,16 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         // Help and context overlays
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => Some(Action::ToggleHelp),
-        (_, KeyCode::Char('i')) => Some(Action::ToggleStationDetails),
-        (_, KeyCode::Char('g')) => Some(Action::ToggleRecentTracks),
+        (mods, KeyCode::Char('i') | KeyCode::Char('I'))
+            if allows_normal_shortcut_modifier(mods) =>
+        {
+            Some(Action::ToggleStationDetails)
+        }
+        (mods, KeyCode::Char('g') | KeyCode::Char('G'))
+            if allows_normal_shortcut_modifier(mods) =>
+        {
+            Some(Action::ToggleRecentTracks)
+        }
 
         // Bento layout cycle
         (_, KeyCode::Char('b')) => Some(Action::CycleLayout),
@@ -83,6 +93,12 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
 
         _ => None,
     }
+}
+
+/// Some terminals report harmless modifier bits for printable shortcut keys.
+/// Keep Ctrl reserved so legacy Ctrl+r stays unmapped and Ctrl+c still quits.
+fn allows_normal_shortcut_modifier(modifiers: KeyModifiers) -> bool {
+    !modifiers.contains(KeyModifiers::CONTROL)
 }
 
 /// Key mapping for search mode.
@@ -352,6 +368,56 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('r')), &InputMode::Normal),
             Some(Action::RetryStream),
+        );
+    }
+
+    #[test]
+    fn normal_mode_context_shortcuts_tolerate_non_control_modifiers() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('I'), KeyModifiers::SHIFT),
+                &InputMode::Normal
+            ),
+            Some(Action::ToggleStationDetails),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('G'), KeyModifiers::SHIFT),
+                &InputMode::Normal
+            ),
+            Some(Action::ToggleRecentTracks),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('r'), KeyModifiers::ALT),
+                &InputMode::Normal
+            ),
+            Some(Action::RetryStream),
+        );
+    }
+
+    #[test]
+    fn normal_mode_context_shortcuts_do_not_capture_control_combos() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('i'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('g'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
         );
     }
 
