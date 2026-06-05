@@ -21,12 +21,6 @@ use std::sync::{Arc, Mutex};
 pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
 
 /// Core application state.
-///
-/// Two completely separate data sources:
-/// - `library` = your saved stations (shown in Normal mode)
-/// - `search_results` = temporary API results (shown in Search mode)
-///
-/// They NEVER mix.
 pub struct App {
     // Your station library (persisted to disk)
     pub library: Library,
@@ -64,6 +58,8 @@ pub struct App {
 
     pub layout_mode: LayoutMode,
     pub show_help: bool,
+    pub show_station_details: bool,
+    pub show_recent_tracks: bool,
     pub song_history: VecDeque<String>,
 
     pub show_settings: bool,
