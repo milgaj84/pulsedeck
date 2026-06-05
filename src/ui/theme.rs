@@ -42,6 +42,7 @@ pub enum ThemeName {
     CatppuccinMacchiato,
     CatppuccinFrappe,
     CatppuccinLatte,
+    Terminal,
 }
 
 impl ThemeName {
@@ -52,6 +53,7 @@ impl ThemeName {
         ThemeName::CatppuccinMacchiato,
         ThemeName::CatppuccinFrappe,
         ThemeName::CatppuccinLatte,
+        ThemeName::Terminal,
     ];
 
     /// Human-readable display name.
@@ -62,6 +64,7 @@ impl ThemeName {
             ThemeName::CatppuccinMacchiato => "Catppuccin Macchiato",
             ThemeName::CatppuccinFrappe => "Catppuccin Frappé",
             ThemeName::CatppuccinLatte => "Catppuccin Latte",
+            ThemeName::Terminal => "Terminal",
         }
     }
 
@@ -73,6 +76,7 @@ impl ThemeName {
             "CatppuccinMacchiato" => ThemeName::CatppuccinMacchiato,
             "CatppuccinFrappe" => ThemeName::CatppuccinFrappe,
             "CatppuccinLatte" => ThemeName::CatppuccinLatte,
+            "Terminal" => ThemeName::Terminal,
             _ => ThemeName::Retrowave,
         }
     }
@@ -85,6 +89,7 @@ impl ThemeName {
             ThemeName::CatppuccinMacchiato => "CatppuccinMacchiato",
             ThemeName::CatppuccinFrappe => "CatppuccinFrappe",
             ThemeName::CatppuccinLatte => "CatppuccinLatte",
+            ThemeName::Terminal => "Terminal",
         }
     }
 
@@ -96,6 +101,7 @@ impl ThemeName {
             ThemeName::CatppuccinMacchiato => palette_macchiato(),
             ThemeName::CatppuccinFrappe => palette_frappe(),
             ThemeName::CatppuccinLatte => palette_latte(),
+            ThemeName::Terminal => palette_terminal(),
         }
     }
 }
@@ -209,6 +215,28 @@ fn palette_latte() -> ThemePalette {
 
         vol_filled: Color::Rgb(30, 102, 245), // Blue
         vol_empty: Color::Rgb(172, 176, 190), // Surface 2
+    }
+}
+
+fn palette_terminal() -> ThemePalette {
+    ThemePalette {
+        bg: Color::Reset,
+        bg_highlight: Color::Black, // ANSI 0 — selection bg
+        surface: Color::Reset,      // no scanline tint
+
+        text_primary: Color::Gray, // ANSI 7 — normal fg
+        text_dim: Color::DarkGray, // ANSI 8 — dim
+
+        accent: Color::Magenta,                // ANSI 5 — borders/titles
+        accent_secondary: Color::LightMagenta, // ANSI 13
+        highlight: Color::Cyan,                // ANSI 6 — selection text
+        warm: Color::Yellow,                   // ANSI 3 — connecting state
+
+        success: Color::Green, // ANSI 2
+        error: Color::Red,     // ANSI 1
+
+        vol_filled: Color::Cyan,    // ANSI 6
+        vol_empty: Color::DarkGray, // ANSI 8
     }
 }
 
