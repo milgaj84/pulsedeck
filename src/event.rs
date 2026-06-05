@@ -54,7 +54,7 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Enter) => Some(Action::PlaySelected),
         (_, KeyCode::Char(' ')) => Some(Action::TogglePause),
         (_, KeyCode::Char('s')) => Some(Action::Stop),
-        (_, KeyCode::Char('r')) => Some(Action::RetryStream),
+        (KeyModifiers::NONE, KeyCode::Char('r')) => Some(Action::RetryStream),
 
         // Volume
         (_, KeyCode::Char('+')) | (_, KeyCode::Char('=')) => Some(Action::VolumeUp),
