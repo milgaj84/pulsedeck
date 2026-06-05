@@ -1,5 +1,4 @@
 use crate::app::App;
-use crate::radio::Station;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -17,10 +16,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             popup_area,
             "Station Details Too Compact",
-            format!(
-                "Expand terminal or close details (overlay: {}x{})",
-                popup_area.width, popup_area.height
-            ),
+            format!("Expand terminal or close details (overlay: {}x{})", popup_area.width, popup_area.height),
         );
         return;
     }
@@ -28,13 +24,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(Span::styled(" ✦ Station Details ✦ ", theme::title()))
+        .title(Span::styled(" Station Details ", theme::title()))
         .borders(Borders::ALL)
-        .border_style(
-            Style::default()
-                .fg(theme::accent_secondary())
-                .add_modifier(Modifier::BOLD),
-        )
+        .border_style(Style::default().fg(theme::accent_secondary()).add_modifier(Modifier::BOLD))
         .border_type(ratatui::widgets::BorderType::Rounded)
         .style(theme::clear());
 
@@ -42,8 +34,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
     frame.render_widget(block, popup_area);
 
-    let lines = station_detail_lines(app);
-    let paragraph = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true });
+    let paragraph = Paragraph::new(station_detail_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
 
     if let Some(alert_area) = alert_area {
@@ -72,15 +63,16 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
         .as_deref()
         .filter(|_| app.playing_url.as_ref() == Some(&station.url))
         .unwrap_or("N/A");
+    let bitrate = bitrate_label(station.bitrate);
 
     vec![
         detail_row("Name", station.name.as_str()),
         detail_row("Genre", fallback(station.genre.as_str(), "Other")),
         detail_row("Country", fallback(station.country.as_str(), "??")),
-        detail_row("Bitrate", bitrate_label(station.bitrate).as_str()),
+        detail_row("Bitrate", bitrate.as_str()),
         detail_row("Saved", saved),
         detail_row("Now playing", now_playing),
-        detail_row("URL", station.url.as_str()),
+        detail_row("Stream", station.url.as_str()),
         Line::from(""),
         close_hint(),
     ]
@@ -96,26 +88,16 @@ fn detail_row(label: &'static str, value: &str) -> Line<'static> {
 fn close_hint() -> Line<'static> {
     Line::from(vec![
         Span::styled(" i ", theme::cyan()),
-        Span::styled("or", theme::dim()),
-        Span::styled(" Esc/q ", theme::cyan()),
         Span::styled("closes this panel", theme::dim()),
     ])
 }
 
 fn bitrate_label(bitrate: u32) -> String {
-    if bitrate == 0 {
-        "Unknown".to_string()
-    } else {
-        format!("{bitrate}k")
-    }
+    if bitrate == 0 { "Unknown".to_string() } else { format!("{bitrate}k") }
 }
 
 fn fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
-    if value.trim().is_empty() {
-        fallback
-    } else {
-        value.trim()
-    }
+    if value.trim().is_empty() { fallback } else { value.trim() }
 }
 
 #[cfg(test)]
