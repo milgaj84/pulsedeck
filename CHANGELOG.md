@@ -6,6 +6,10 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.2.1] - 2026-06-13
+
 ### Added
 *   **Station Details Overlay**: Added an `i` shortcut in normal mode for inspecting the highlighted station's name, genre, country, bitrate, saved status, current track context, and stream URL.
 *   **Recent Tracks Overlay**: Added a `g` shortcut for a session-only list of stream-provided track titles heard during the current run.
