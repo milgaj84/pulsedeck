@@ -24,6 +24,7 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
     match mode {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
+        InputMode::SleepTimer => map_sleep_timer(key),
     }
 }
 
@@ -91,6 +92,12 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Settings overlay
         (_, KeyCode::Char(',')) => Some(Action::ToggleSettings),
 
+        // Sleep timer
+        (_, KeyCode::Char('t')) => Some(Action::ToggleSleepTimer),
+
+        // Export library
+        (_, KeyCode::Char('e')) => Some(Action::ExportLibrary),
+
         _ => None,
     }
 }
@@ -145,6 +152,44 @@ fn has_search_escape_modifier(modifiers: KeyModifiers) -> bool {
     modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
+/// Key mapping for the sleep-timer overlay.
+///
+/// This table is fully isolated: it is only reached when `InputMode::SleepTimer`
+/// is active, so none of these keys can shadow or conflict with Normal/Search
+/// bindings. Only `Ctrl+C` escapes to a global quit; no other Ctrl/Alt combos
+/// are used, avoiding terminal-reserved sequences (XON/XOFF, SIGTSTP, ...).
+fn map_sleep_timer(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        // Global quit still works from the overlay.
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+
+        // Fine adjust by a fixed 5-minute step.
+        (_, KeyCode::Up) | (_, KeyCode::Char('+')) | (_, KeyCode::Char('=')) => {
+            Some(Action::SleepTimerIncrease)
+        }
+        (_, KeyCode::Down) | (_, KeyCode::Char('-')) => Some(Action::SleepTimerDecrease),
+
+        // Quick presets (minutes).
+        (_, KeyCode::Char('1')) => Some(Action::SleepTimerPreset(15)),
+        (_, KeyCode::Char('2')) => Some(Action::SleepTimerPreset(30)),
+        (_, KeyCode::Char('3')) => Some(Action::SleepTimerPreset(45)),
+        (_, KeyCode::Char('4')) => Some(Action::SleepTimerPreset(60)),
+        (_, KeyCode::Char('5')) => Some(Action::SleepTimerPreset(90)),
+        (_, KeyCode::Char('6')) => Some(Action::SleepTimerPreset(120)),
+
+        // Turn the timer off without leaving the overlay.
+        (_, KeyCode::Char('0')) | (_, KeyCode::Char('c')) => Some(Action::SleepTimerClear),
+
+        // Close the overlay (changes already applied live).
+        (_, KeyCode::Esc)
+        | (_, KeyCode::Enter)
+        | (_, KeyCode::Char('t'))
+        | (_, KeyCode::Char('q')) => Some(Action::ToggleSleepTimer),
+
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +200,57 @@ mod tests {
 
     fn modified_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
+    }
+
+    #[test]
+    fn sleep_timer_mode_maps_adjust_presets_and_close() {
+        assert_eq!(
+            map_key(key(KeyCode::Up), &InputMode::SleepTimer),
+            Some(Action::SleepTimerIncrease),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('+')), &InputMode::SleepTimer),
+            Some(Action::SleepTimerIncrease),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Down), &InputMode::SleepTimer),
+            Some(Action::SleepTimerDecrease),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('-')), &InputMode::SleepTimer),
+            Some(Action::SleepTimerDecrease),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('2')), &InputMode::SleepTimer),
+            Some(Action::SleepTimerPreset(30)),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('0')), &InputMode::SleepTimer),
+            Some(Action::SleepTimerClear),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('c')), &InputMode::SleepTimer),
+            Some(Action::SleepTimerClear),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Esc), &InputMode::SleepTimer),
+            Some(Action::ToggleSleepTimer),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('t')), &InputMode::SleepTimer),
+            Some(Action::ToggleSleepTimer),
+        );
+    }
+
+    #[test]
+    fn sleep_timer_mode_ctrl_c_quits() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &InputMode::SleepTimer,
+            ),
+            Some(Action::Quit),
+        );
     }
 
     #[test]
@@ -451,7 +547,6 @@ mod tests {
     #[test]
     fn normal_mode_removed_legacy_keys_are_unmapped() {
         let removed_plain_keys = [
-            KeyCode::Char('t'),
             KeyCode::Char('p'),
             KeyCode::Char('o'),
             KeyCode::Char('R'),
@@ -474,6 +569,18 @@ mod tests {
                 &InputMode::Normal
             ),
             None,
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_t_and_e_bindings() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('t')), &InputMode::Normal),
+            Some(Action::ToggleSleepTimer)
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('e')), &InputMode::Normal),
+            Some(Action::ExportLibrary)
         );
     }
 }

@@ -37,12 +37,7 @@ impl App {
             Action::Quit => {
                 self.show_settings = false;
             }
-            Action::Tick => {
-                self.tick_count += 1;
-                self.tick_notice();
-                self.poll_audio_status();
-                self.update_visualizer();
-            }
+            Action::Tick => self.tick(),
             _ => {
                 // Block all other actions while settings are open.
             }
@@ -82,6 +77,10 @@ impl App {
                 let next = step_choice(ThemeName::ALL, current, forward);
                 self.library.settings.theme = next.key().to_string();
                 crate::ui::theme::set_active(next);
+                true
+            }
+            Some(SettingRow::SaveHistory) => {
+                self.library.settings.save_history = !self.library.settings.save_history;
                 true
             }
             None => false,
@@ -341,5 +340,19 @@ mod tests {
 
         assert_eq!(app.tick_count, 1);
         assert!(app.notice.is_some());
+    }
+
+    #[test]
+    fn settings_toggle_save_history() {
+        let mut app = test_app();
+        app.show_settings = true;
+        app.selected_setting_idx = SettingRow::SaveHistory.index();
+        assert!(!app.library.settings.save_history);
+
+        app.update(Action::PlaySelected);
+        assert!(app.library.settings.save_history);
+
+        app.update(Action::PlaySelected);
+        assert!(!app.library.settings.save_history);
     }
 }

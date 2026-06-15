@@ -44,9 +44,11 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📊 **Deck visualizers**: press `v` to cycle RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope
 - 💾 **Library management**: saved stations persist between sessions, rows show compact country/bitrate metadata, and removals are undoable with `u`
 - 🪪 **Station details**: press `i` in normal mode to inspect the highlighted station's metadata and stream URL
-- 🧾 **Recent Tracks**: press `g` to see stream-provided track titles heard during the current session; nothing is recorded or archived
+- 🧾 **Persistent History**: opt-in settings to save song titles to `history.json` and persist across runs; view with `g`
+- 💤 **Sleep Timer**: press `t` to open a sleep-timer panel; nudge by 5 minutes with ↑ / ↓, jump to presets (15-120 min) with number keys, turn it off with `0` / `c`, and playback fades out and stops when time is up
+- 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line
 - 🔔 **Desktop notifications**: a quiet system notification can show the current track when a new song starts
-- 🎛️ **Resilient streaming**: a circular buffer absorbs network hiccups, and manual retry with `r` helps recover after playback errors
+- 🎛️ **Resilient streaming**: a circular buffer absorbs network hiccups, auto-reconnecting up to 3× on dropout; manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
 - 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
 
@@ -100,9 +102,11 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Tab` / `Shift+Tab` | Library | Switch genre categories |
 | `i` | Library | Show details for the highlighted station |
 | `g` | Library | Show recent stream-provided track titles for this session |
+| `e` | Library | Export saved library to M3U format |
 | `Space` | Playback | Pause / resume |
 | `s` | Playback | Stop playback |
 | `r` | Playback error | Retry the current stream |
+| `t` | Playback | Open the sleep timer panel (±5 min, presets, off) |
 | `+` / `-` | Playback | Volume up / down with fine low-volume and faster high-volume steps |
 | `m` | Playback | Mute / unmute |
 | `Ctrl+-` / `Alt+-` | Search | Volume down without leaving search |
@@ -167,12 +171,39 @@ Search results show saved stations with a star and include compact genre/country
 
 ---
 
+## Command Line Interface (CLI)
+
+PulseDeck features a headless CLI mode to backup or migrate your library of stations:
+
+- **Export Library**:
+  ```bash
+  pulsedeck export ~/my_library.m3u
+  pulsedeck export ~/my_library.json
+  ```
+  This writes your current library to the specified path in M3U or JSON format (auto-detected by file extension).
+
+- **Import / Merge Library**:
+  ```bash
+  pulsedeck import ~/my_library.m3u
+  pulsedeck import ~/my_library.json
+  ```
+  This parses the input file and merges all unique stations into your library (deduplicated by URL).
+
+- **Help / Version**:
+  ```bash
+  pulsedeck --help
+  pulsedeck --version
+  ```
+
+---
+
 ## Settings
 
 Press `,` to open the settings panel. Current options:
 
 - **Desktop notifications**: show current track changes while you listen. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup**: start the previous station automatically on launch.
+- **Save song history**: toggles persistent track history (saved to `history.json` and viewable via `g`).
 - **Audio Output**: choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
 - **Theme**: cycle between Retrowave, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, Catppuccin Latte, and Terminal. The Terminal theme uses reset backgrounds and ANSI colors so PulseDeck follows your terminal emulator palette.
 

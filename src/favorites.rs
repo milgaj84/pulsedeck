@@ -27,6 +27,8 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub output_device_name: Option<String>,
+    #[serde(default)]
+    pub save_history: bool,
 }
 
 fn default_true() -> bool {
@@ -45,6 +47,7 @@ impl Default for Settings {
             last_played_url: None,
             theme: "Retrowave".to_string(),
             output_device_name: None,
+            save_history: false,
         }
     }
 }
@@ -53,7 +56,7 @@ pub struct Library {
     pub stations: Vec<Station>,
     pub available_genres: Vec<String>,
     pub settings: Settings,
-    path: Option<PathBuf>,
+    pub(crate) path: Option<std::path::PathBuf>,
 }
 
 /// On-disk JSON format — stores full station data.
@@ -123,6 +126,12 @@ pub fn resolve_parent_genre(subgenre: &str) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSummary {
+    pub added: usize,
+    pub skipped: usize,
+}
+
 impl Library {
     /// Load library from disk.
     /// On first launch (no file), seeds with starter stations.
@@ -168,6 +177,35 @@ impl Library {
         lib
     }
 
+    /// Load the library for read-only/CLI use without seeding starters or writing a file.
+    /// Keeps the resolved path so a later import can still persist.
+    pub fn load_existing() -> Self {
+        let path = config_path();
+
+        let (stations, settings) = match path.as_ref() {
+            Some(p) if p.exists() => match fs::read_to_string(p) {
+                Ok(contents) => match serde_json::from_str::<LibraryFile>(&contents) {
+                    Ok(file) => (
+                        file.stations.into_iter().map(Station::from).collect(),
+                        file.settings,
+                    ),
+                    Err(_) => (Vec::new(), Settings::default()),
+                },
+                Err(_) => (Vec::new(), Settings::default()),
+            },
+            _ => (Vec::new(), Settings::default()),
+        };
+
+        let mut lib = Self {
+            stations,
+            available_genres: Vec::new(),
+            settings,
+            path,
+        };
+        lib.rebuild_genres();
+        lib
+    }
+
     /// Create an in-memory library for tests without touching the user's config file.
     #[cfg(test)]
     pub fn in_memory(stations: Vec<Station>) -> Self {
@@ -191,6 +229,25 @@ impl Library {
         self.rebuild_genres();
         self.save()?;
         Ok(true)
+    }
+
+    /// Import a list of stations, merging by URL.
+    pub fn import_stations(&mut self, stations: Vec<Station>) -> anyhow::Result<ImportSummary> {
+        let mut added = 0;
+        let mut skipped = 0;
+        for s in stations {
+            if self.contains(&s.url) {
+                skipped += 1;
+            } else {
+                self.stations.push(s);
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.rebuild_genres();
+            self.save()?;
+        }
+        Ok(ImportSummary { added, skipped })
     }
 
     /// Remove a station by URL. Returns true if removed.
@@ -459,5 +516,38 @@ mod tests {
         }]);
         assert!(lib.path.is_none());
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
+    }
+
+    #[test]
+    fn test_import_stations() {
+        let mut lib = Library::in_memory(vec![Station {
+            name: "Test A".to_string(),
+            url: "http://a".to_string(),
+            genre: "Synthwave".to_string(),
+            country: "US".to_string(),
+            bitrate: 128,
+        }]);
+
+        let to_import = vec![
+            Station {
+                name: "Test A".to_string(),
+                url: "http://a".to_string(),
+                genre: "Synthwave".to_string(),
+                country: "US".to_string(),
+                bitrate: 128,
+            },
+            Station {
+                name: "Test B".to_string(),
+                url: "http://b".to_string(),
+                genre: "Ambient".to_string(),
+                country: "UK".to_string(),
+                bitrate: 96,
+            },
+        ];
+
+        let summary = lib.import_stations(to_import).unwrap();
+        assert_eq!(summary.added, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(lib.stations.len(), 2);
     }
 }

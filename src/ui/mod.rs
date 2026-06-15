@@ -6,6 +6,7 @@ pub mod help;
 pub mod recent_tracks;
 pub mod search;
 pub mod settings;
+pub mod sleep_timer;
 pub mod station_details;
 pub mod stations;
 pub mod theme;
@@ -114,6 +115,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Draw settings modal floating overlay if enabled
     if app.show_settings {
         settings::render(frame, size, app);
+    }
+
+    // Sleep-timer overlay (own input mode); highest priority modal.
+    if app.show_sleep_timer {
+        sleep_timer::render(frame, size, app);
     }
 }
 

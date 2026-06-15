@@ -44,4 +44,10 @@ pub enum Action {
     /// App lifecycle
     Tick,
     Quit,
+    ToggleSleepTimer,
+    SleepTimerIncrease,
+    SleepTimerDecrease,
+    SleepTimerPreset(u16),
+    SleepTimerClear,
+    ExportLibrary,
 }

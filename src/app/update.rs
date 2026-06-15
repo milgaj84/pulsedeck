@@ -9,6 +9,11 @@ impl App {
             return;
         }
 
+        if self.show_sleep_timer {
+            self.handle_sleep_timer_action(action);
+            return;
+        }
+
         match action {
             Action::NextStation => self.next_station(),
             Action::PrevStation => self.prev_station(),
@@ -41,6 +46,12 @@ impl App {
             Action::ToggleSettings => self.toggle_settings(),
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
+            Action::ToggleSleepTimer => self.toggle_sleep_timer(),
+            Action::SleepTimerIncrease
+            | Action::SleepTimerDecrease
+            | Action::SleepTimerPreset(_)
+            | Action::SleepTimerClear => {}
+            Action::ExportLibrary => self.export_library(),
 
             Action::Tick => self.tick(),
             Action::Quit => self.quit(),
@@ -48,9 +59,13 @@ impl App {
     }
 
     pub(super) fn tick(&mut self) {
+        let now = std::time::Instant::now();
         self.tick_count += 1;
+        self.tick_notice();
         self.poll_audio_status();
         self.update_visualizer();
+        self.drive_reconnect(now);
+        self.check_sleep_timer(now);
     }
 
     pub(super) fn quit(&mut self) {

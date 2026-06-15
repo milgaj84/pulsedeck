@@ -55,7 +55,63 @@ fn recent_area_is_compact(area: Rect) -> bool {
     area.width < MIN_RECENT_WIDTH || area.height < MIN_RECENT_HEIGHT
 }
 
+fn format_relative_time(entry_at_str: &str) -> String {
+    let Ok(entry_at) = entry_at_str.parse::<u64>() else {
+        return "unknown".to_string();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if now <= entry_at {
+        return "just now".to_string();
+    }
+    let diff = now - entry_at;
+    if diff < 60 {
+        "just now".to_string()
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else {
+        format!("{}d ago", diff / 86400)
+    }
+}
+
 fn recent_track_lines(app: &App) -> Vec<Line<'static>> {
+    if app.library.settings.save_history {
+        if app.history.is_empty() {
+            return vec![
+                Line::from(Span::styled("No track titles archived yet", theme::title())),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "PulseDeck will persist played track titles here across runs.",
+                    theme::dim(),
+                )),
+                Line::from(""),
+                close_hint(),
+            ];
+        }
+
+        let mut lines = Vec::new();
+        for (idx, entry) in app.history.recent(MAX_VISIBLE_TRACKS).enumerate() {
+            let relative = format_relative_time(&entry.at);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:>2}. ", idx + 1), theme::dim()),
+                Span::styled(entry.title.clone(), theme::text()),
+                Span::styled(format!(" ({}, {})", entry.station, relative), theme::dim()),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Persistent history enabled; saved to history.json.",
+            theme::dim(),
+        )));
+        lines.push(close_hint());
+        return lines;
+    }
+
     if app.song_history.is_empty() {
         return vec![
             Line::from(Span::styled("No track titles heard yet", theme::title())),

@@ -40,6 +40,7 @@ impl App {
     pub(super) fn confirm_search(&mut self) {
         // Add the selected search result to library and play it.
         let played = if let Some(station) = self.search_results.get(self.selected).cloned() {
+            self.reconnect.disarm();
             match self.library.add(station.clone()) {
                 Ok(true) => self.set_info_notice("Station saved to library"),
                 Ok(false) => {}
@@ -68,6 +69,7 @@ impl App {
 
     pub(super) fn audition_search_result(&mut self) {
         if let Some(station) = self.search_results.get(self.selected).cloned() {
+            self.reconnect.disarm();
             let next_playback = if matches!(
                 &self.playback,
                 PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }

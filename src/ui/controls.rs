@@ -71,6 +71,15 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         theme::dim(),
     ));
 
+    if let Some(remaining) = app.sleep_timer.remaining(std::time::Instant::now()) {
+        let secs = remaining.as_secs();
+        spans.push(Span::styled("  │  ", theme::dim()));
+        spans.push(Span::styled(
+            format!("\u{1F4A4} {:02}:{:02}", secs / 60, secs % 60),
+            theme::dim(),
+        ));
+    }
+
     if let Some(ref notice) = app.notice {
         spans.push(Span::styled("  │  ", theme::dim()));
         match notice {
@@ -164,9 +173,23 @@ fn footer_line(app: &App) -> Line<'static> {
         );
     }
     if app.show_recent_tracks {
+        let suffix = if app.library.settings.save_history {
+            "persistent track history"
+        } else {
+            "session track list"
+        };
+        return hint_line(&[("g/Esc/q", "Close recent tracks")], Some(suffix));
+    }
+
+    if app.show_sleep_timer {
         return hint_line(
-            &[("g/Esc/q", "Close recent tracks")],
-            Some("session track list"),
+            &[
+                ("↑/+ ↓/-", "±5 min"),
+                ("1-6", "Presets"),
+                ("0/c", "Off"),
+                ("t/Esc", "Close"),
+            ],
+            Some("sleep timer"),
         );
     }
 
@@ -181,6 +204,7 @@ fn footer_line(app: &App) -> Line<'static> {
             Some("worldwide station search"),
         ),
         InputMode::Normal => normal_mode_footer(app),
+        InputMode::SleepTimer => normal_mode_footer(app),
     }
 }
 

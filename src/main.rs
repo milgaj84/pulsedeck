@@ -1,8 +1,11 @@
 mod action;
 mod app;
 mod audio;
+mod cli;
 mod event;
 mod favorites;
+mod history;
+mod playlist;
 mod radio;
 mod ui;
 
@@ -25,6 +28,10 @@ impl Drop for TerminalRestoreGuard {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let cli::CliOutcome::Handled = cli::run(std::env::args())? {
+        return Ok(());
+    }
+
     let library = Library::load(fallback_stations());
 
     let saved_theme = ui::theme::ThemeName::from_key(&library.settings.theme);

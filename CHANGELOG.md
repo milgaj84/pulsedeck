@@ -8,6 +8,16 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.2.2] - 2026-06-15
+
+### Added
+*   **Auto-reconnect**: Added resilient auto-reconnect backoff on unintended dropouts or errors.
+*   **Persistent history**: Added opt-in history persistence for track history overlay.
+*   **Sleep timer panel**: Added a sleep timer overlay (`t`) with 5-minute fine adjustments (`↑`/`+`, `↓`/`-`), one-key presets for 15/30/45/60/90/120 minutes, and an off toggle (`0`/`c`), all on an isolated input mode that cannot collide with other shortcuts.
+*   **Import / export**: Added TUI (`e` key) and CLI import/export features for stations library.
+
+---
+
 ## [0.2.1] - 2026-06-13
 
 ### Added

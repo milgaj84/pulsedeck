@@ -126,6 +126,9 @@ fn setting_description(row: SettingRow) -> &'static str {
         SettingRow::Theme => {
             "Change PulseDeck's color palette instantly; settings save automatically."
         }
+        SettingRow::SaveHistory => {
+            "Save played tracks to history.json so they persist across restarts."
+        }
     }
 }
 
@@ -166,6 +169,11 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                 Span::styled("(Space/Right forward, Left back)", theme::dim()),
             ]
         }
+        SettingRow::SaveHistory => checkbox_row(
+            app.library.settings.save_history,
+            "Save Track History (g Overlay)",
+            label_style,
+        ),
     }
 }
 

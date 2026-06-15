@@ -5,6 +5,9 @@ pub(super) const SEARCH_MIN_CHARS: usize = 2;
 pub enum InputMode {
     Normal,
     Search,
+    /// Modal sleep-timer overlay; keys route through an isolated table so they
+    /// can never collide with Normal or Search bindings.
+    SleepTimer,
 }
 
 /// Explicit search state for UI messages and stale-response handling.
@@ -59,14 +62,16 @@ pub enum SettingRow {
     AutoplayLast,
     OutputDevice,
     Theme,
+    SaveHistory,
 }
 
 impl SettingRow {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Notifications,
         Self::AutoplayLast,
         Self::OutputDevice,
         Self::Theme,
+        Self::SaveHistory,
     ];
 
     pub const COUNT: usize = Self::ALL.len();
@@ -81,6 +86,7 @@ impl SettingRow {
             Self::AutoplayLast => 1,
             Self::OutputDevice => 2,
             Self::Theme => 3,
+            Self::SaveHistory => 4,
         }
     }
 }

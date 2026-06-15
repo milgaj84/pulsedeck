@@ -6,6 +6,7 @@
 
 # User library / favorites / settings database
 library.json
+history.json
 
 # macOS filesystem noise
 .DS_Store

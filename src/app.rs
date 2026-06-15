@@ -4,9 +4,11 @@ mod lifecycle;
 mod notifier;
 mod overlays;
 mod playback;
+mod reconnect;
 mod search;
 mod selectors;
 mod settings;
+mod sleep_timer;
 mod types;
 mod ui_state;
 mod update;
@@ -18,6 +20,8 @@ use crate::radio::Station;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+pub use reconnect::Reconnect;
+pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
 
 /// Core application state.
@@ -65,10 +69,17 @@ pub struct App {
     pub show_settings: bool,
     pub selected_setting_idx: usize,
 
+    pub show_sleep_timer: bool,
+
     pub buffer_percent: u8,
     pub buffer_seconds: u32,
 
     pub undo_history: VecDeque<(Station, usize, String)>,
+
+    pub reconnect: Reconnect,
+    pub sleep_timer: SleepTimer,
+    pub history: crate::history::History,
+    pub intentional_stop: bool,
 
     audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,

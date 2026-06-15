@@ -6,6 +6,7 @@ impl App {
         let ui_state = super::ui_state::UiState::load();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
+        let history = crate::history::History::load();
 
         let mut app = Self {
             library,
@@ -37,9 +38,14 @@ impl App {
             song_history: VecDeque::new(),
             show_settings: false,
             selected_setting_idx: 0,
+            show_sleep_timer: false,
             buffer_percent: 0,
             buffer_seconds: 0,
             undo_history: VecDeque::new(),
+            reconnect: Reconnect::default(),
+            sleep_timer: SleepTimer::default(),
+            history,
+            intentional_stop: false,
             audio,
             sample_buffer,
             visualizer_mode: ui_state.visualizer_mode(),
@@ -96,6 +102,14 @@ impl App {
                             while self.song_history.len() > 100 {
                                 self.song_history.pop_front();
                             }
+                            if self.library.settings.save_history {
+                                let station_name = self
+                                    .now_playing()
+                                    .map(|s| s.name.clone())
+                                    .unwrap_or_else(|| "Radio Stream".to_string());
+                                self.history.record(title.clone(), station_name);
+                                let _ = self.history.save();
+                            }
                         }
 
                         if is_new && self.library.settings.notifications_enabled {
@@ -121,35 +135,49 @@ impl App {
                     self.buffer_percent = percent;
                     self.buffer_seconds = seconds;
                 }
-                other => {
-                    self.playback = match other {
-                        AudioStatus::Playing => PlaybackState::Playing,
-                        AudioStatus::Paused => PlaybackState::Paused,
-                        AudioStatus::Stopped => {
+                other => match other {
+                    AudioStatus::Playing => {
+                        self.playback = PlaybackState::Playing;
+                        self.reconnect.disarm();
+                    }
+                    AudioStatus::Paused => {
+                        self.playback = PlaybackState::Paused;
+                    }
+                    AudioStatus::Stopped => {
+                        let was_playing = self.playing_url.is_some();
+                        if self.intentional_stop || !was_playing {
+                            self.intentional_stop = false;
                             self.playing_url = None;
                             self.current_track = None;
                             self.buffer_percent = 0;
                             self.buffer_seconds = 0;
-                            PlaybackState::Stopped
+                            self.playback = PlaybackState::Stopped;
+                            self.reconnect.disarm();
+                        } else if let Some(url) = self.playing_url.clone() {
+                            self.reconnect.arm(url, std::time::Instant::now());
+                            self.playback = PlaybackState::Connecting;
                         }
-                        AudioStatus::Error(e) => {
-                            self.current_track = None;
-                            self.buffer_percent = 0;
-                            self.buffer_seconds = 0;
-                            PlaybackState::Error(e)
+                    }
+                    AudioStatus::Error(e) => {
+                        if let Some(url) = self.playing_url.clone() {
+                            self.reconnect.arm(url, std::time::Instant::now());
                         }
-                        AudioStatus::FadingOut { current_volume } => PlaybackState::FadingOut {
+                        self.current_track = None;
+                        self.buffer_percent = 0;
+                        self.buffer_seconds = 0;
+                        self.playback = PlaybackState::Error(e);
+                    }
+                    AudioStatus::FadingOut { current_volume } => {
+                        self.playback = PlaybackState::FadingOut {
                             current_volume: current_volume.clamp(0.0, 1.0),
-                        },
-                        AudioStatus::Connecting => {
-                            self.current_track = None;
-                            PlaybackState::Connecting
-                        }
-                        AudioStatus::TrackChanged { .. } | AudioStatus::BufferLevel { .. } => {
-                            self.playback.clone()
-                        }
-                    };
-                }
+                        };
+                    }
+                    AudioStatus::Connecting => {
+                        self.current_track = None;
+                        self.playback = PlaybackState::Connecting;
+                    }
+                    AudioStatus::TrackChanged { .. } | AudioStatus::BufferLevel { .. } => {}
+                },
             }
         }
     }
