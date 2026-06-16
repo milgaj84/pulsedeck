@@ -19,11 +19,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
 
-    match (&app.playback, app.now_playing()) {
+    match (&app.player.state, app.now_playing()) {
         (PlaybackState::Playing, Some(station)) => {
             status_chip(&mut spans, "▶", "PLAY", theme::playing());
             spans.push(Span::styled(station.name.as_str(), theme::cyan()));
-            if let Some(ref track) = app.current_track {
+            if let Some(ref track) = app.player.current_track {
                 spans.push(Span::styled("  ♫ ", theme::playing()));
                 spans.push(Span::styled(
                     track.as_str(),
@@ -80,7 +80,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
 
-    if let Some(ref notice) = app.notice {
+    if let Some(ref notice) = app.notice.current {
         spans.push(Span::styled("  │  ", theme::dim()));
         match notice {
             AppNotice::Info(message) => {
@@ -160,19 +160,19 @@ fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn footer_line(app: &App) -> Line<'static> {
-    if app.show_help {
+    if app.show_help() {
         return hint_line(
             &[("h/?/Esc/q", "Close help")],
             Some("full control reference"),
         );
     }
-    if app.show_station_details {
+    if app.show_station_details() {
         return hint_line(
             &[("i/Esc/q", "Close details")],
             Some("selected station info"),
         );
     }
-    if app.show_recent_tracks {
+    if app.show_recent_tracks() {
         let suffix = if app.library.settings.save_history {
             "persistent track history"
         } else {
@@ -181,7 +181,7 @@ fn footer_line(app: &App) -> Line<'static> {
         return hint_line(&[("g/Esc/q", "Close recent tracks")], Some(suffix));
     }
 
-    if app.show_sleep_timer {
+    if app.show_sleep_timer() {
         return hint_line(
             &[
                 ("↑/+ ↓/-", "±5 min"),
@@ -209,7 +209,7 @@ fn footer_line(app: &App) -> Line<'static> {
 }
 
 fn normal_mode_footer(app: &App) -> Line<'static> {
-    if matches!(app.playback, PlaybackState::Error(_)) {
+    if matches!(app.player.state, PlaybackState::Error(_)) {
         return hint_line(
             &[
                 ("r", "Retry"),
@@ -233,7 +233,7 @@ fn normal_mode_footer(app: &App) -> Line<'static> {
         );
     }
 
-    if app.notice.is_some() {
+    if app.notice.current.is_some() {
         return hint_line(
             &[
                 ("u", "Undo"),
@@ -245,7 +245,7 @@ fn normal_mode_footer(app: &App) -> Line<'static> {
         );
     }
 
-    match app.playback {
+    match app.player.state {
         PlaybackState::Playing
         | PlaybackState::Paused
         | PlaybackState::Connecting

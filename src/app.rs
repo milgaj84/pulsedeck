@@ -1,8 +1,10 @@
 mod idle;
 mod library;
 mod lifecycle;
+mod nav;
 mod notifier;
 mod overlays;
+mod persist;
 mod playback;
 mod reconnect;
 mod search;
@@ -17,10 +19,15 @@ mod visualizer;
 use crate::audio::AudioEngine;
 use crate::favorites::Library;
 use crate::radio::Station;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+pub use lifecycle::NoticeState;
+pub use nav::Navigation;
+pub use overlays::{ActiveOverlay, Overlays};
+pub use playback::PlaybackView;
 pub use reconnect::Reconnect;
+pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
 
@@ -29,58 +36,29 @@ pub struct App {
     // Your station library (persisted to disk)
     pub library: Library,
 
-    // Search results (temporary, separate from library)
-    pub search_results: Vec<Station>,
-
-    pub selected: usize,
-    normal_selected_snapshot: usize,
-    search_selected_snapshot: usize,
-    genre_selection_memory: HashMap<String, usize>,
-    pub playback: PlaybackState,
-    pub playing_url: Option<String>,
+    pub nav: Navigation,
+    pub search: SearchState,
+    pub player: PlaybackView,
     pub volume: u8, // 0-100
     pub muted: bool,
     pub should_quit: bool,
-    pub notice: Option<AppNotice>,
-    notice_ticks_remaining: u16,
+    pub notice: NoticeState,
 
     // Input mode
     pub input_mode: InputMode,
 
-    // Search state
-    pub search_query: String,
-    pub search_status: SearchStatus,
-
-    // API search state - main.rs checks these to spawn async fetches
-    pub pending_api_search: Option<String>,
-    pub searching_api: bool,
-    last_api_query: String,
-
-    pub selected_genre_idx: usize,
-    pub current_track: Option<String>,
     pub tick_count: u64,
 
     pub layout_mode: LayoutMode,
-    pub show_help: bool,
-    pub show_station_details: bool,
-    pub show_recent_tracks: bool,
+    pub overlays: Overlays,
     pub song_history: VecDeque<String>,
-
-    pub show_settings: bool,
-    pub selected_setting_idx: usize,
-
-    pub show_sleep_timer: bool,
-
-    pub buffer_percent: u8,
-    pub buffer_seconds: u32,
 
     pub undo_history: VecDeque<(Station, usize, String)>,
 
     pub reconnect: Reconnect,
     pub sleep_timer: SleepTimer,
     pub history: crate::history::History,
-    pub intentional_stop: bool,
-
+    persist: persist::PersistFlags,
     audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
     pub visualizer_mode: usize, // 0 = Spectrum, 1 = Oscilloscope, 2 = Simulated

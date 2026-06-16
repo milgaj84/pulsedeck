@@ -4,14 +4,16 @@ use crate::action::Action;
 impl App {
     /// Process an action and update state accordingly.
     pub fn update(&mut self, action: Action) {
-        if self.show_settings {
-            self.handle_settings_action(action);
-            return;
-        }
-
-        if self.show_sleep_timer {
-            self.handle_sleep_timer_action(action);
-            return;
+        match self.overlays.active {
+            ActiveOverlay::Settings if self.show_settings() => {
+                self.handle_settings_action(action);
+                return;
+            }
+            ActiveOverlay::SleepTimer => {
+                self.handle_sleep_timer_action(action);
+                return;
+            }
+            _ => {}
         }
 
         match action {
@@ -66,6 +68,7 @@ impl App {
         self.update_visualizer();
         self.drive_reconnect(now);
         self.check_sleep_timer(now);
+        self.flush_persistence();
     }
 
     pub(super) fn quit(&mut self) {
@@ -80,17 +83,17 @@ impl App {
     fn next_station(&mut self) {
         let count = self.visible_count();
         if count > 0 {
-            self.selected = (self.selected + 1) % count;
+            self.nav.selected = (self.nav.selected + 1) % count;
         }
     }
 
     fn prev_station(&mut self) {
         let count = self.visible_count();
         if count > 0 {
-            self.selected = if self.selected == 0 {
+            self.nav.selected = if self.nav.selected == 0 {
                 count - 1
             } else {
-                self.selected - 1
+                self.nav.selected - 1
             };
         }
     }

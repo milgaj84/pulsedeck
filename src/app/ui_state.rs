@@ -1,18 +1,9 @@
 use super::LayoutMode;
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(test))]
-use std::fs;
-#[cfg(not(test))]
-use std::path::{Path, PathBuf};
-
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
 const VISUALIZER_MODE_COUNT: usize = 3;
-#[cfg(not(test))]
-const NEW_CONFIG_DIR: &str = "pulsedeck";
-#[cfg(not(test))]
-const OLD_CONFIG_DIR: &str = "driftfm";
 #[cfg(not(test))]
 const UI_STATE_FILE: &str = "ui-state.json";
 
@@ -42,15 +33,7 @@ impl Default for UiState {
 impl UiState {
     #[cfg(not(test))]
     pub(super) fn load() -> Self {
-        let Some(path) = ui_state_path() else {
-            return Self::default();
-        };
-
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|contents| serde_json::from_str::<Self>(&contents).ok())
-            .map(Self::sanitized)
-            .unwrap_or_default()
+        crate::config::load_json::<Self>(UI_STATE_FILE).sanitized()
     }
 
     #[cfg(test)]
@@ -91,16 +74,11 @@ impl UiState {
 
     #[cfg(not(test))]
     pub(super) fn save(&self) -> anyhow::Result<()> {
-        let Some(path) = ui_state_path() else {
-            return Ok(());
-        };
+        crate::config::save_json(UI_STATE_FILE, &self.clone().sanitized())
+    }
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let json = serde_json::to_string_pretty(&self.clone().sanitized())?;
-        fs::write(path, json)?;
+    #[cfg(test)]
+    pub(super) fn save(&self) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -113,19 +91,6 @@ impl UiState {
         self
     }
 }
-
-#[cfg(not(test))]
-pub(super) fn save_ui_state_or_notice(app: &mut super::App) {
-    let state =
-        UiState::from_app_values(app.volume, app.muted, app.layout_mode, app.visualizer_mode);
-
-    if let Err(err) = state.save() {
-        app.set_error_notice(format!("Could not save UI state: {err}"));
-    }
-}
-
-#[cfg(test)]
-pub(super) fn save_ui_state_or_notice(_app: &mut super::App) {}
 
 fn default_volume() -> u8 {
     DEFAULT_VOLUME
@@ -150,36 +115,6 @@ fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
         "right-only" => Some(LayoutMode::RightOnly),
         _ => None,
     }
-}
-
-#[cfg(not(test))]
-fn ui_state_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|base| {
-        let new_path = ui_state_path_for(&base, NEW_CONFIG_DIR);
-        let old_path = ui_state_path_for(&base, OLD_CONFIG_DIR);
-        migrate_file_if_needed(&old_path, &new_path);
-        new_path
-    })
-}
-
-#[cfg(not(test))]
-fn ui_state_path_for(base: &Path, config_dir: &str) -> PathBuf {
-    base.join(config_dir).join(UI_STATE_FILE)
-}
-
-#[cfg(not(test))]
-fn migrate_file_if_needed(old_path: &Path, new_path: &Path) {
-    if new_path.exists() || !old_path.exists() {
-        return;
-    }
-
-    if let Some(parent) = new_path.parent() {
-        if fs::create_dir_all(parent).is_err() {
-            return;
-        }
-    }
-
-    let _ = fs::copy(old_path, new_path);
 }
 
 #[cfg(test)]

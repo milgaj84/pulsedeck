@@ -1,5 +1,5 @@
 use crate::action::Action;
-use crate::app::InputMode;
+use crate::app::PlaybackState;
 use std::time::{Duration, Instant};
 
 /// Fine-adjust granularity, in minutes.
@@ -18,6 +18,7 @@ pub const SLEEP_PRESETS: [u32; 6] = [15, 30, 45, 60, 90, 120];
 pub struct SleepTimer {
     minutes: u32,
     deadline: Option<Instant>,
+    remaining: Option<Duration>,
 }
 
 impl SleepTimer {
@@ -31,6 +32,10 @@ impl SleepTimer {
         self.minutes > 0
     }
 
+    pub fn is_waiting_for_playback(&self) -> bool {
+        self.is_armed() && self.deadline.is_none()
+    }
+
     /// Set an absolute duration in minutes, clamped to `[0, SLEEP_MAX_MINUTES]`,
     /// recomputing the deadline from `now`.
     pub fn set_minutes(&mut self, minutes: u32, now: Instant) {
@@ -40,29 +45,42 @@ impl SleepTimer {
         } else {
             Some(now + Duration::from_secs(self.minutes as u64 * 60))
         };
+        self.remaining = None;
+    }
+
+    /// Arm the timer without starting the countdown yet.
+    pub fn set_minutes_waiting(&mut self, minutes: u32) {
+        self.minutes = minutes.min(SLEEP_MAX_MINUTES);
+        self.deadline = None;
+        self.remaining = if self.minutes == 0 {
+            None
+        } else {
+            Some(Duration::from_secs(self.minutes as u64 * 60))
+        };
     }
 
     /// Increase by one step. Stepping past the maximum wraps back to off.
-    pub fn increase(&mut self, now: Instant) {
+    pub fn increase(&mut self, now: Instant, should_run: bool) {
         let next = self.minutes + SLEEP_STEP_MINUTES;
         let next = if next > SLEEP_MAX_MINUTES { 0 } else { next };
-        self.set_minutes(next, now);
+        self.set_minutes_for_playback(next, now, should_run);
     }
 
     /// Decrease by one step. Stepping below off wraps to the maximum.
-    pub fn decrease(&mut self, now: Instant) {
+    pub fn decrease(&mut self, now: Instant, should_run: bool) {
         let next = if self.minutes == 0 {
             SLEEP_MAX_MINUTES
         } else {
             self.minutes.saturating_sub(SLEEP_STEP_MINUTES)
         };
-        self.set_minutes(next, now);
+        self.set_minutes_for_playback(next, now, should_run);
     }
 
     /// Turn the timer off.
     pub fn clear(&mut self) {
         self.minutes = 0;
         self.deadline = None;
+        self.remaining = None;
     }
 
     /// Human-readable label for the current selection.
@@ -78,8 +96,7 @@ impl SleepTimer {
     pub fn expired(&mut self, now: Instant) -> bool {
         match self.deadline {
             Some(deadline) if now >= deadline => {
-                self.minutes = 0;
-                self.deadline = None;
+                self.clear();
                 true
             }
             _ => false,
@@ -90,6 +107,33 @@ impl SleepTimer {
     pub fn remaining(&self, now: Instant) -> Option<Duration> {
         self.deadline
             .map(|deadline| deadline.saturating_duration_since(now))
+            .or(self.remaining)
+    }
+
+    fn set_minutes_for_playback(&mut self, minutes: u32, now: Instant, should_run: bool) {
+        if should_run {
+            self.set_minutes(minutes, now);
+        } else {
+            self.set_minutes_waiting(minutes);
+        }
+    }
+
+    fn start(&mut self, now: Instant) {
+        if self.minutes == 0 || self.deadline.is_some() {
+            return;
+        }
+
+        let remaining = self
+            .remaining
+            .unwrap_or_else(|| Duration::from_secs(self.minutes as u64 * 60));
+        self.deadline = Some(now + remaining);
+        self.remaining = None;
+    }
+
+    fn pause(&mut self, now: Instant) {
+        if let Some(deadline) = self.deadline.take() {
+            self.remaining = Some(deadline.saturating_duration_since(now));
+        }
     }
 }
 
@@ -97,15 +141,7 @@ impl super::App {
     /// Open or close the sleep-timer overlay. Opening switches into the
     /// dedicated input mode and closes any other overlay first.
     pub(super) fn toggle_sleep_timer(&mut self) {
-        self.show_sleep_timer = !self.show_sleep_timer;
-        if self.show_sleep_timer {
-            self.show_help = false;
-            self.show_settings = false;
-            self.close_context_overlays();
-            self.input_mode = InputMode::SleepTimer;
-        } else {
-            self.input_mode = InputMode::Normal;
-        }
+        self.toggle_sleep_timer_overlay();
     }
 
     /// Handle actions while the sleep-timer overlay is open. Changes apply live.
@@ -113,15 +149,17 @@ impl super::App {
         let now = Instant::now();
         match action {
             Action::SleepTimerIncrease => {
-                self.sleep_timer.increase(now);
+                self.sleep_timer
+                    .increase(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
             Action::SleepTimerDecrease => {
-                self.sleep_timer.decrease(now);
+                self.sleep_timer
+                    .decrease(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
             Action::SleepTimerPreset(minutes) => {
-                self.sleep_timer.set_minutes(minutes as u32, now);
+                self.set_sleep_timer_minutes(minutes as u32, now);
                 self.announce_sleep_timer();
             }
             Action::SleepTimerClear => {
@@ -129,7 +167,10 @@ impl super::App {
                 self.set_info_notice("Sleep timer off");
             }
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),
-            Action::Quit => self.quit(),
+            Action::Quit => {
+                self.stop_audio_before_quit();
+                self.should_quit = true;
+            }
             Action::Tick => self.tick(),
             _ => {
                 // Ignore everything else while the overlay is open.
@@ -138,7 +179,10 @@ impl super::App {
     }
 
     fn announce_sleep_timer(&mut self) {
-        if self.sleep_timer.is_armed() {
+        if self.sleep_timer.is_waiting_for_playback() {
+            let label = self.sleep_timer.label();
+            self.set_info_notice(format!("Sleep timer: {label} when playback starts"));
+        } else if self.sleep_timer.is_armed() {
             let label = self.sleep_timer.label();
             self.set_info_notice(format!("Sleep timer: {label}"));
         } else {
@@ -147,11 +191,32 @@ impl super::App {
     }
 
     pub(super) fn check_sleep_timer(&mut self, now: Instant) {
+        if self.sleep_timer_should_run() {
+            self.sleep_timer.start(now);
+        } else {
+            self.sleep_timer.pause(now);
+        }
+
         if self.sleep_timer.expired(now) {
-            self.intentional_stop = true;
+            self.player.intentional_stop = true;
             self.stop_playback();
             self.set_info_notice("Sleep timer ended playback");
         }
+    }
+
+    fn set_sleep_timer_minutes(&mut self, minutes: u32, now: Instant) {
+        if self.sleep_timer_should_run() {
+            self.sleep_timer.set_minutes(minutes, now);
+        } else {
+            self.sleep_timer.set_minutes_waiting(minutes);
+        }
+    }
+
+    fn sleep_timer_should_run(&self) -> bool {
+        matches!(
+            self.player.state,
+            PlaybackState::Playing | PlaybackState::Connecting | PlaybackState::FadingOut { .. }
+        )
     }
 }
 
@@ -166,17 +231,17 @@ mod tests {
         let mut timer = SleepTimer::default();
         assert_eq!(timer.minutes(), 0);
 
-        timer.increase(now);
+        timer.increase(now, true);
         assert_eq!(timer.minutes(), SLEEP_STEP_MINUTES);
         assert!(timer.is_armed());
 
         while timer.minutes() < SLEEP_MAX_MINUTES {
-            timer.increase(now);
+            timer.increase(now, true);
         }
         assert_eq!(timer.minutes(), SLEEP_MAX_MINUTES);
         assert!(timer.remaining(now).is_some());
 
-        timer.increase(now);
+        timer.increase(now, true);
         assert_eq!(timer.minutes(), 0);
         assert!(timer.remaining(now).is_none());
     }
@@ -185,9 +250,9 @@ mod tests {
     fn decrease_from_off_wraps_to_max() {
         let now = Instant::now();
         let mut timer = SleepTimer::default();
-        timer.decrease(now);
+        timer.decrease(now, true);
         assert_eq!(timer.minutes(), SLEEP_MAX_MINUTES);
-        timer.decrease(now);
+        timer.decrease(now, true);
         assert_eq!(timer.minutes(), SLEEP_MAX_MINUTES - SLEEP_STEP_MINUTES);
     }
 
@@ -196,7 +261,7 @@ mod tests {
         let now = Instant::now();
         let mut timer = SleepTimer::default();
         timer.set_minutes(SLEEP_STEP_MINUTES, now);
-        timer.decrease(now);
+        timer.decrease(now, true);
         assert_eq!(timer.minutes(), 0);
         assert!(timer.remaining(now).is_none());
     }
@@ -210,6 +275,47 @@ mod tests {
         assert_eq!(timer.remaining(now).unwrap().as_secs(), 30 * 60);
         timer.set_minutes(9999, now);
         assert_eq!(timer.minutes(), SLEEP_MAX_MINUTES);
+    }
+
+    #[test]
+    fn waiting_timer_does_not_spend_time_before_playback_starts() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes_waiting(15);
+        assert_eq!(
+            timer
+                .remaining(now + Duration::from_secs(5 * 60))
+                .unwrap()
+                .as_secs(),
+            15 * 60
+        );
+
+        timer.start(now + Duration::from_secs(5 * 60));
+        assert_eq!(
+            timer
+                .remaining(now + Duration::from_secs(5 * 60))
+                .unwrap()
+                .as_secs(),
+            15 * 60
+        );
+    }
+
+    #[test]
+    fn timer_pauses_when_playback_is_not_running() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes(15, now);
+        timer.pause(now + Duration::from_secs(2 * 60));
+
+        assert_eq!(
+            timer
+                .remaining(now + Duration::from_secs(10 * 60))
+                .unwrap()
+                .as_secs(),
+            13 * 60
+        );
     }
 
     #[test]

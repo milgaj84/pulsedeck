@@ -1,53 +1,97 @@
 use super::*;
 
-impl App {
-    pub(super) fn toggle_help(&mut self) {
-        self.show_help = !self.show_help;
-        if self.show_help {
-            self.close_context_overlays();
-            self.show_settings = false;
+/// Exactly one overlay can be active at a time, or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActiveOverlay {
+    #[default]
+    None,
+    Help,
+    StationDetails,
+    RecentTracks,
+    Settings,
+    SleepTimer,
+}
+
+pub struct Overlays {
+    pub active: ActiveOverlay,
+    pub selected_setting_idx: usize,
+}
+
+impl Default for Overlays {
+    fn default() -> Self {
+        Self {
+            active: ActiveOverlay::None,
+            selected_setting_idx: 0,
         }
+    }
+}
+
+impl App {
+    pub(super) fn set_overlay(&mut self, which: ActiveOverlay) {
+        let next = if self.overlays.active == which {
+            ActiveOverlay::None
+        } else {
+            which
+        };
+
+        self.overlays.active = next;
+        if next == ActiveOverlay::SleepTimer {
+            self.input_mode = InputMode::SleepTimer;
+        } else if self.input_mode == InputMode::SleepTimer {
+            self.input_mode = InputMode::Normal;
+        }
+    }
+
+    pub(super) fn toggle_help(&mut self) {
+        self.set_overlay(ActiveOverlay::Help);
     }
 
     pub(super) fn toggle_station_details(&mut self) {
-        self.show_station_details = !self.show_station_details;
-        if self.show_station_details {
-            self.show_help = false;
-            self.show_recent_tracks = false;
-            self.show_settings = false;
-        }
+        self.set_overlay(ActiveOverlay::StationDetails);
     }
 
     pub(super) fn toggle_recent_tracks(&mut self) {
-        self.show_recent_tracks = !self.show_recent_tracks;
-        if self.show_recent_tracks {
-            self.show_help = false;
-            self.show_station_details = false;
-            self.show_settings = false;
-        }
-    }
-
-    pub(super) fn close_context_overlays(&mut self) {
-        self.show_station_details = false;
-        self.show_recent_tracks = false;
+        self.set_overlay(ActiveOverlay::RecentTracks);
     }
 
     pub(super) fn close_any_overlay(&mut self) -> bool {
-        if self.show_help || self.show_station_details || self.show_recent_tracks {
-            self.show_help = false;
-            self.close_context_overlays();
-            true
-        } else {
+        if self.overlays.active == ActiveOverlay::None {
             false
+        } else {
+            self.overlays.active = ActiveOverlay::None;
+            if self.input_mode == InputMode::SleepTimer {
+                self.input_mode = InputMode::Normal;
+            }
+            true
         }
     }
 
     pub(super) fn toggle_settings(&mut self) {
-        self.show_settings = !self.show_settings;
-        if self.show_settings {
-            self.show_help = false;
-            self.close_context_overlays();
-        }
+        self.set_overlay(ActiveOverlay::Settings);
+    }
+
+    pub(super) fn toggle_sleep_timer_overlay(&mut self) {
+        self.set_overlay(ActiveOverlay::SleepTimer);
+    }
+
+    pub fn show_help(&self) -> bool {
+        self.overlays.active == ActiveOverlay::Help
+    }
+
+    pub fn show_station_details(&self) -> bool {
+        self.overlays.active == ActiveOverlay::StationDetails
+    }
+
+    pub fn show_recent_tracks(&self) -> bool {
+        self.overlays.active == ActiveOverlay::RecentTracks
+    }
+
+    pub fn show_settings(&self) -> bool {
+        self.overlays.active == ActiveOverlay::Settings
+    }
+
+    pub fn show_sleep_timer(&self) -> bool {
+        self.overlays.active == ActiveOverlay::SleepTimer
     }
 
     pub(super) fn cycle_layout(&mut self) {
@@ -56,12 +100,12 @@ impl App {
             LayoutMode::LeftOnly => LayoutMode::RightOnly,
             LayoutMode::RightOnly => LayoutMode::Split,
         };
-        super::ui_state::save_ui_state_or_notice(self);
+        self.mark_ui_state_dirty();
     }
 
     pub(super) fn toggle_visualizer_mode(&mut self) {
         self.visualizer_mode = (self.visualizer_mode + 1) % 3;
-        super::ui_state::save_ui_state_or_notice(self);
+        self.mark_ui_state_dirty();
     }
 }
 
@@ -77,27 +121,25 @@ mod tests {
     #[test]
     fn toggle_help_closes_settings_and_context_overlays() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.show_station_details = true;
+        app.overlays.active = ActiveOverlay::Settings;
 
         app.toggle_help();
 
-        assert!(app.show_help);
-        assert!(!app.show_settings);
-        assert!(!app.show_station_details);
+        assert!(app.show_help());
+        assert!(!app.show_settings());
+        assert!(!app.show_station_details());
     }
 
     #[test]
     fn toggle_settings_closes_help_and_context_overlays() {
         let mut app = test_app();
-        app.show_help = true;
-        app.show_recent_tracks = true;
+        app.overlays.active = ActiveOverlay::Help;
 
         app.toggle_settings();
 
-        assert!(app.show_settings);
-        assert!(!app.show_help);
-        assert!(!app.show_recent_tracks);
+        assert!(app.show_settings());
+        assert!(!app.show_help());
+        assert!(!app.show_recent_tracks());
     }
 
     #[test]
@@ -105,23 +147,36 @@ mod tests {
         let mut app = test_app();
 
         app.toggle_station_details();
-        assert!(app.show_station_details);
+        assert!(app.show_station_details());
 
         app.toggle_recent_tracks();
-        assert!(!app.show_station_details);
-        assert!(app.show_recent_tracks);
+        assert!(!app.show_station_details());
+        assert!(app.show_recent_tracks());
     }
 
     #[test]
     fn close_any_overlay_closes_help_and_context_overlays() {
         let mut app = test_app();
-        app.show_help = true;
-        app.show_station_details = true;
+        app.overlays.active = ActiveOverlay::Help;
 
         assert!(app.close_any_overlay());
-        assert!(!app.show_help);
-        assert!(!app.show_station_details);
+        assert!(!app.show_help());
+        assert!(!app.show_station_details());
         assert!(!app.close_any_overlay());
+    }
+
+    #[test]
+    fn only_one_overlay_active_at_a_time() {
+        let mut app = test_app();
+
+        app.toggle_help();
+        assert_eq!(app.overlays.active, ActiveOverlay::Help);
+
+        app.toggle_settings();
+        assert_eq!(app.overlays.active, ActiveOverlay::Settings);
+
+        assert!(app.close_any_overlay());
+        assert_eq!(app.overlays.active, ActiveOverlay::None);
     }
 
     #[test]

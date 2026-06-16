@@ -58,6 +58,9 @@ pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome
             let summary = library
                 .import_stations(stations)
                 .context("Failed to import stations into library")?;
+            library
+                .save()
+                .context("Failed to save imported stations into library")?;
             println!(
                 "Import completed: added {} new stations, skipped {} duplicates.",
                 summary.added, summary.skipped

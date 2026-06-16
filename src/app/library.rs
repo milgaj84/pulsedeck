@@ -5,36 +5,40 @@ const UNDO_HISTORY_LIMIT: usize = 10;
 impl App {
     pub(super) fn remove_library_selection(&mut self) {
         if self.input_mode == InputMode::Normal {
-            if let Some(station) = self.visible_stations().get(self.selected).copied().cloned() {
+            if let Some(station) = self
+                .visible_stations()
+                .get(self.nav.selected)
+                .copied()
+                .cloned()
+            {
                 let removed_index = self
                     .library
                     .stations
                     .iter()
                     .position(|saved| saved.url == station.url)
-                    .unwrap_or(self.selected);
+                    .unwrap_or(self.nav.selected);
                 let removed_genre = self
                     .library
                     .available_genres
-                    .get(self.selected_genre_idx)
+                    .get(self.nav.selected_genre_idx)
                     .cloned()
                     .unwrap_or_else(|| "All".to_string());
                 let url = station.url.clone();
                 match self.library.remove(&url) {
                     Ok(true) => {
+                        self.mark_library_dirty();
                         self.remember_removed_station(station, removed_index, removed_genre);
                         self.set_info_notice("Station removed. Press u to undo");
                     }
                     Ok(false) => {}
                     Err(err) => {
                         self.remember_removed_station(station, removed_index, removed_genre);
-                        self.set_error_notice(format!(
-                            "Station removed in memory, but could not save library: {err}"
-                        ));
+                        self.set_error_notice(format!("Could not remove station: {err}"));
                     }
                 }
                 let count = self.visible_count();
-                if self.selected >= count && self.selected > 0 {
-                    self.selected = count - 1;
+                if self.nav.selected >= count && self.nav.selected > 0 {
+                    self.nav.selected = count - 1;
                 }
             }
         }
@@ -65,19 +69,15 @@ impl App {
             .iter()
             .position(|genre| genre == &previous_genre)
         {
-            self.selected_genre_idx = genre_index;
+            self.nav.selected_genre_idx = genre_index;
         }
-        self.selected = self
+        self.nav.selected = self
             .visible_stations()
             .iter()
             .position(|visible| visible.url == station.url)
             .unwrap_or(0);
-        match self.library.save() {
-            Ok(()) => self.set_info_notice(format!("Restored station: {station_name}")),
-            Err(err) => self.set_error_notice(format!(
-                "Station restored in memory, but could not save library: {err}"
-            )),
-        }
+        self.mark_library_dirty();
+        self.set_info_notice(format!("Restored station: {station_name}"));
     }
 
     fn remember_removed_station(&mut self, station: Station, index: usize, genre: String) {
@@ -92,7 +92,7 @@ impl App {
             let count = self.library.available_genres.len();
             if count > 0 {
                 self.remember_current_genre_selection();
-                self.selected_genre_idx = (self.selected_genre_idx + 1) % count;
+                self.nav.selected_genre_idx = (self.nav.selected_genre_idx + 1) % count;
                 self.select_remembered_genre_station_or_default();
             }
         }
@@ -103,10 +103,10 @@ impl App {
             let count = self.library.available_genres.len();
             if count > 0 {
                 self.remember_current_genre_selection();
-                self.selected_genre_idx = if self.selected_genre_idx == 0 {
+                self.nav.selected_genre_idx = if self.nav.selected_genre_idx == 0 {
                     count - 1
                 } else {
-                    self.selected_genre_idx - 1
+                    self.nav.selected_genre_idx - 1
                 };
                 self.select_remembered_genre_station_or_default();
             }
@@ -119,22 +119,24 @@ impl App {
         }
 
         if let Some(genre) = self.current_genre_key() {
-            self.genre_selection_memory.insert(genre, self.selected);
+            self.nav
+                .genre_selection_memory
+                .insert(genre, self.nav.selected);
         }
     }
 
     fn select_remembered_genre_station_or_default(&mut self) {
         let count = self.visible_count();
         if count == 0 {
-            self.selected = 0;
+            self.nav.selected = 0;
             return;
         }
 
         if let Some(remembered) = self
             .current_genre_key()
-            .and_then(|genre| self.genre_selection_memory.get(&genre).copied())
+            .and_then(|genre| self.nav.genre_selection_memory.get(&genre).copied())
         {
-            self.selected = remembered.min(count - 1);
+            self.nav.selected = remembered.min(count - 1);
             return;
         }
 
@@ -144,12 +146,13 @@ impl App {
     fn current_genre_key(&self) -> Option<String> {
         self.library
             .available_genres
-            .get(self.selected_genre_idx)
+            .get(self.nav.selected_genre_idx)
             .cloned()
     }
 
     fn select_playing_station_or_first_visible(&mut self) {
         let next_selected = self
+            .player
             .playing_url
             .as_deref()
             .and_then(|playing_url| {
@@ -159,13 +162,7 @@ impl App {
             })
             .unwrap_or(0);
 
-        self.selected = next_selected;
-    }
-
-    pub(super) fn save_library_or_notice(&mut self, context: &str) {
-        if let Err(err) = self.library.save() {
-            self.set_error_notice(format!("Could not save {context}: {err}"));
-        }
+        self.nav.selected = next_selected;
     }
 }
 
@@ -187,7 +184,7 @@ mod tests {
     }
 
     fn notice_text(app: &App) -> Option<&str> {
-        match app.notice.as_ref() {
+        match app.notice.current.as_ref() {
             Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message),
             None => None,
         }
@@ -207,7 +204,7 @@ mod tests {
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
         ]));
-        app.selected = 0;
+        app.nav.selected = 0;
 
         app.remove_library_selection();
 
@@ -222,7 +219,7 @@ mod tests {
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
         ]));
-        app.selected = 0;
+        app.nav.selected = 0;
 
         app.update(Action::RemoveLibrarySelection);
         app.update(Action::UndoRemoveLibrarySelection);
@@ -230,7 +227,7 @@ mod tests {
         assert_eq!(app.library.stations.len(), 2);
         assert_eq!(app.library.stations[0].name, "A");
         assert_eq!(app.library.stations[1].name, "B");
-        assert_eq!(app.selected, 0);
+        assert_eq!(app.nav.selected, 0);
         assert_eq!(notice_text(&app), Some("Restored station: A"));
     }
 
@@ -241,19 +238,19 @@ mod tests {
             station("Ambient A", "http://ambient-a", "Ambient"),
             station("Synth B", "http://synth-b", "Synthwave"),
         ]));
-        app.selected_genre_idx = app
+        app.nav.selected_genre_idx = app
             .library
             .available_genres
             .iter()
             .position(|genre| genre == "Synthwave")
             .unwrap();
-        app.selected = 1;
+        app.nav.selected = 1;
 
         app.update(Action::RemoveLibrarySelection);
         app.update(Action::UndoRemoveLibrarySelection);
 
         assert_eq!(app.library.stations[2].name, "Synth B");
-        assert_eq!(app.visible_stations()[app.selected].name, "Synth B");
+        assert_eq!(app.visible_stations()[app.nav.selected].name, "Synth B");
     }
 
     #[test]
@@ -263,7 +260,7 @@ mod tests {
             "http://a",
             "Synthwave",
         )]));
-        app.playing_url = Some("http://a".to_string());
+        app.player.playing_url = Some("http://a".to_string());
 
         app.update(Action::RemoveLibrarySelection);
 
@@ -295,9 +292,9 @@ mod tests {
             station("C", "http://c", "Synthwave"),
         ]));
 
-        app.selected = 0;
+        app.nav.selected = 0;
         app.update(Action::RemoveLibrarySelection);
-        app.selected = 0;
+        app.nav.selected = 0;
         app.update(Action::RemoveLibrarySelection);
 
         assert!(!app.library.contains("http://a"));
@@ -336,7 +333,7 @@ mod tests {
         let mut app = App::new(Library::in_memory(stations));
 
         for _ in 0..11 {
-            app.selected = 0;
+            app.nav.selected = 0;
             app.update(Action::RemoveLibrarySelection);
         }
 
@@ -359,17 +356,20 @@ mod tests {
             station("Synth A", "http://synth-a", "Synthwave"),
             station("Ambient B", "http://ambient-b", "Ambient"),
         ]));
-        app.selected_genre_idx = genre_index(&app, "All");
-        app.selected = 1;
-        app.playing_url = Some("http://ambient-b".to_string());
+        app.nav.selected_genre_idx = genre_index(&app, "All");
+        app.nav.selected = 1;
+        app.player.playing_url = Some("http://ambient-b".to_string());
 
         app.update(Action::NextGenre);
 
         assert_eq!(
-            app.library.available_genres[app.selected_genre_idx],
+            app.library.available_genres[app.nav.selected_genre_idx],
             "Ambient"
         );
-        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+        assert_eq!(
+            app.visible_stations()[app.nav.selected].url,
+            "http://ambient-b"
+        );
     }
 
     #[test]
@@ -379,17 +379,20 @@ mod tests {
             station("Synth A", "http://synth-a", "Synthwave"),
             station("Ambient B", "http://ambient-b", "Ambient"),
         ]));
-        app.selected_genre_idx = genre_index(&app, "Synthwave");
-        app.selected = 0;
-        app.playing_url = Some("http://ambient-b".to_string());
+        app.nav.selected_genre_idx = genre_index(&app, "Synthwave");
+        app.nav.selected = 0;
+        app.player.playing_url = Some("http://ambient-b".to_string());
 
         app.update(Action::PrevGenre);
 
         assert_eq!(
-            app.library.available_genres[app.selected_genre_idx],
+            app.library.available_genres[app.nav.selected_genre_idx],
             "Ambient"
         );
-        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+        assert_eq!(
+            app.visible_stations()[app.nav.selected].url,
+            "http://ambient-b"
+        );
     }
 
     #[test]
@@ -399,18 +402,21 @@ mod tests {
             station("Synth A", "http://synth-a", "Synthwave"),
             station("Ambient B", "http://ambient-b", "Ambient"),
         ]));
-        app.selected_genre_idx = genre_index(&app, "All");
-        app.selected = 2;
-        app.playing_url = Some("http://synth-a".to_string());
+        app.nav.selected_genre_idx = genre_index(&app, "All");
+        app.nav.selected = 2;
+        app.player.playing_url = Some("http://synth-a".to_string());
 
         app.update(Action::NextGenre);
 
         assert_eq!(
-            app.library.available_genres[app.selected_genre_idx],
+            app.library.available_genres[app.nav.selected_genre_idx],
             "Ambient"
         );
-        assert_eq!(app.selected, 0);
-        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-a");
+        assert_eq!(app.nav.selected, 0);
+        assert_eq!(
+            app.visible_stations()[app.nav.selected].url,
+            "http://ambient-a"
+        );
     }
 
     #[test]
@@ -421,18 +427,21 @@ mod tests {
             station("Synth A", "http://synth-a", "Synthwave"),
             station("Synth B", "http://synth-b", "Synthwave"),
         ]));
-        app.selected_genre_idx = genre_index(&app, "Ambient");
-        app.selected = 1;
+        app.nav.selected_genre_idx = genre_index(&app, "Ambient");
+        app.nav.selected = 1;
 
         app.update(Action::NextGenre);
-        app.selected = 1;
+        app.nav.selected = 1;
         app.update(Action::PrevGenre);
 
         assert_eq!(
-            app.library.available_genres[app.selected_genre_idx],
+            app.library.available_genres[app.nav.selected_genre_idx],
             "Ambient"
         );
-        assert_eq!(app.visible_stations()[app.selected].url, "http://ambient-b");
+        assert_eq!(
+            app.visible_stations()[app.nav.selected].url,
+            "http://ambient-b"
+        );
     }
 
     #[test]
@@ -442,8 +451,8 @@ mod tests {
             station("Ambient B", "http://ambient-b", "Ambient"),
             station("Synth A", "http://synth-a", "Synthwave"),
         ]));
-        app.selected_genre_idx = genre_index(&app, "Ambient");
-        app.selected = 1;
+        app.nav.selected_genre_idx = genre_index(&app, "Ambient");
+        app.nav.selected = 1;
         app.remember_current_genre_selection();
         app.library.remove("http://ambient-b").unwrap();
         app.library.rebuild_genres();
@@ -452,9 +461,9 @@ mod tests {
         app.update(Action::PrevGenre);
 
         assert_eq!(
-            app.library.available_genres[app.selected_genre_idx],
+            app.library.available_genres[app.nav.selected_genre_idx],
             "Ambient"
         );
-        assert_eq!(app.selected, 0);
+        assert_eq!(app.nav.selected, 0);
     }
 }

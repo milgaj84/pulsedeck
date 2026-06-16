@@ -38,7 +38,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
-    let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
+    let (content_area, alert_area) =
+        critical::split_overlay_alert_area(inner_area, &app.player.state);
     frame.render_widget(block, popup_area);
 
     let paragraph =
@@ -46,7 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(paragraph, content_area);
 
     if let Some(alert_area) = alert_area {
-        critical::render_engine_fault_banner(frame, alert_area, &app.playback);
+        critical::render_engine_fault_banner(frame, alert_area, &app.player.state);
     }
 }
 
@@ -74,9 +75,10 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
         "No"
     };
     let now_playing = app
+        .player
         .current_track
         .as_deref()
-        .filter(|_| app.playing_url.as_ref() == Some(&station.url))
+        .filter(|_| app.player.playing_url.as_ref() == Some(&station.url))
         .unwrap_or("N/A");
     let bitrate = bitrate_label(station.bitrate);
 

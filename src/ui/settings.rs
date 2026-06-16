@@ -39,7 +39,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
-    let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
+    let (content_area, alert_area) =
+        critical::split_overlay_alert_area(inner_area, &app.player.state);
     frame.render_widget(block, popup_area);
 
     let constraints = std::iter::once(Constraint::Length(1))
@@ -60,7 +61,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     render_footer(frame, chunks[SettingRow::COUNT + 2]);
 
     if let Some(alert_area) = alert_area {
-        critical::render_engine_fault_banner(frame, alert_area, &app.playback);
+        critical::render_engine_fault_banner(frame, alert_area, &app.player.state);
     }
 }
 
@@ -69,7 +70,7 @@ fn settings_area_is_compact(area: Rect) -> bool {
 }
 
 fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow) {
-    let is_selected = app.selected_setting_idx == row.index();
+    let is_selected = app.overlays.selected_setting_idx == row.index();
     let active_style = Style::default()
         .fg(theme::accent_secondary())
         .add_modifier(Modifier::BOLD);
@@ -97,7 +98,8 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
 }
 
 fn render_selected_description(frame: &mut Frame, area: Rect, app: &App) {
-    let row = SettingRow::from_index(app.selected_setting_idx).unwrap_or(SettingRow::Notifications);
+    let row = SettingRow::from_index(app.overlays.selected_setting_idx)
+        .unwrap_or(SettingRow::Notifications);
     let paragraph = Paragraph::new(vec![
         Line::from(""),
         Line::from(vec![

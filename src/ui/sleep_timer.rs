@@ -41,14 +41,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
-    let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
+    let (content_area, alert_area) =
+        critical::split_overlay_alert_area(inner_area, &app.player.state);
     frame.render_widget(block, popup_area);
 
     let paragraph = Paragraph::new(sleep_lines(app)).wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(paragraph, content_area);
 
     if let Some(alert_area) = alert_area {
-        critical::render_engine_fault_banner(frame, alert_area, &app.playback);
+        critical::render_engine_fault_banner(frame, alert_area, &app.player.state);
     }
 }
 
@@ -67,6 +68,15 @@ fn sleep_lines(app: &App) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     let status = match app.sleep_timer.remaining(now) {
+        Some(remaining) if app.sleep_timer.is_waiting_for_playback() => {
+            let secs = remaining.as_secs();
+            format!(
+                "Armed for {} min  (starts with playback at {:02}:{:02})",
+                app.sleep_timer.minutes(),
+                secs / 60,
+                secs % 60
+            )
+        }
         Some(remaining) => {
             let secs = remaining.as_secs();
             format!(

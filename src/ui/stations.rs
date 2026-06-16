@@ -37,7 +37,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .title(Span::styled(" ◇ Library Categories ", theme::title())),
         )
-        .select(app.selected_genre_idx)
+        .select(app.nav.selected_genre_idx)
         .style(theme::dim())
         .highlight_style(
             Style::default()
@@ -54,8 +54,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .iter()
         .enumerate()
         .map(|(idx, station)| {
-            let is_playing = app.playing_url.as_ref() == Some(&station.url);
-            let is_selected = app.selected == idx;
+            let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
+            let is_selected = app.nav.selected == idx;
             let is_saved_search_result =
                 app.input_mode == InputMode::Search && app.library.contains(&station.url);
 
@@ -91,20 +91,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 station.bitrate,
             );
             let meta_chip = format!(" {} ", meta);
-            let fixed_width =
-                visible_len(cursor) + visible_len(save_marker) + visible_len(&meta_chip) + 2;
+            let fixed_width = crate::ui::text::visible_len(cursor)
+                + crate::ui::text::visible_len(save_marker)
+                + crate::ui::text::visible_len(&meta_chip)
+                + 2;
             let name_width = row_width.saturating_sub(fixed_width).max(8);
             let search_query = if app.input_mode == InputMode::Search {
-                Some(app.search_query.as_str())
+                Some(app.search.query.as_str())
             } else {
                 None
             };
             let name = truncate_station_name(station.name.as_str(), search_query, name_width);
             let padding = row_width.saturating_sub(
-                visible_len(cursor)
-                    + visible_len(save_marker)
-                    + visible_len(&name)
-                    + visible_len(&meta_chip),
+                crate::ui::text::visible_len(cursor)
+                    + crate::ui::text::visible_len(save_marker)
+                    + crate::ui::text::visible_len(&name)
+                    + crate::ui::text::visible_len(&meta_chip),
             );
 
             ListItem::new(Line::from(vec![
@@ -133,7 +135,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let mut state = ListState::default();
     if !visible.is_empty() {
-        state.select(Some(app.selected));
+        state.select(Some(app.nav.selected));
     }
 
     frame.render_stateful_widget(list, list_area, &mut state);
@@ -216,12 +218,12 @@ fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrat
 
 fn station_list_title(app: &App, visible_count: usize) -> String {
     if app.input_mode == InputMode::Search {
-        if app.search_query.is_empty() {
+        if app.search.query.is_empty() {
             " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
-        } else if app.searching_api {
-            format!(" 🔍 Tuning query \"{}\"... ", app.search_query)
+        } else if app.search.searching_api {
+            format!(" 🔍 Tuning query \"{}\"... ", app.search.query)
         } else if visible_count == 0 {
-            format!(" 🔍 No signal for \"{}\" ", app.search_query)
+            format!(" 🔍 No signal for \"{}\" ", app.search.query)
         } else {
             format!(
                 " 🔍 Search Results ({}) · Space preview · Enter save ",
@@ -234,7 +236,7 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
         let genre_name = app
             .library
             .available_genres
-            .get(app.selected_genre_idx)
+            .get(app.nav.selected_genre_idx)
             .map(|s| s.as_str())
             .unwrap_or("All");
         format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
@@ -252,12 +254,12 @@ fn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 fn truncate_station_name(value: &str, query: Option<&str>, max_chars: usize) -> String {
     match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => adaptive_search_truncate(value, query, max_chars),
-        None => truncate_with_ellipsis(value, max_chars),
+        None => crate::ui::text::truncate_with_ellipsis(value, max_chars),
     }
 }
 
 fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> String {
-    let value_len = visible_len(value);
+    let value_len = crate::ui::text::visible_len(value);
     if value_len <= max_chars {
         return value.to_string();
     }
@@ -267,11 +269,11 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     }
 
     let Some(match_start) = find_case_insensitive_char_index(value, query) else {
-        return truncate_with_ellipsis(value, max_chars);
+        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
     };
 
     if match_start < max_chars.saturating_sub(1) {
-        return truncate_with_ellipsis(value, max_chars);
+        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
     }
 
     let available = max_chars.saturating_sub(2);
@@ -279,7 +281,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
         return "…".to_string();
     }
 
-    let query_len = visible_len(query).max(1);
+    let query_len = crate::ui::text::visible_len(query).max(1);
     let context_before = available.saturating_sub(query_len) / 2;
     let start = match_start
         .saturating_sub(context_before)
@@ -287,7 +289,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     let end = start + available;
 
     if start == 0 {
-        return truncate_with_ellipsis(value, max_chars);
+        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
     }
 
     if end >= value_len {
@@ -312,25 +314,6 @@ fn find_case_insensitive_char_index(value: &str, query: &str) -> Option<usize> {
     Some(value_lower[..byte_index].chars().count())
 }
 
-fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
-    let value_len = visible_len(value);
-    if value_len <= max_chars {
-        return value.to_string();
-    }
-
-    if max_chars <= 1 {
-        return "…".to_string();
-    }
-
-    let mut truncated = value.chars().take(max_chars - 1).collect::<String>();
-    truncated.push('…');
-    truncated
-}
-
-fn visible_len(value: &str) -> usize {
-    value.chars().count()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,13 +321,16 @@ mod tests {
 
     #[test]
     fn truncation_keeps_short_names_unchanged() {
-        assert_eq!(truncate_with_ellipsis("Nightride FM", 20), "Nightride FM");
+        assert_eq!(
+            crate::ui::text::truncate_with_ellipsis("Nightride FM", 20),
+            "Nightride FM"
+        );
     }
 
     #[test]
     fn truncation_adds_ellipsis_for_long_names() {
         assert_eq!(
-            truncate_with_ellipsis("SomaFM Deep Space One", 10),
+            crate::ui::text::truncate_with_ellipsis("SomaFM Deep Space One", 10),
             "SomaFM De…"
         );
     }

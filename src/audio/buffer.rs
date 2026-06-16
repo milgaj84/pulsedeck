@@ -24,11 +24,15 @@ impl BufferQueue {
     }
 
     pub(super) fn push(&self, bytes: &[u8]) {
-        let mut queue = self.queue.lock().unwrap();
+        // A poisoned lock intentionally aborts the audio thread instead of hiding corruption.
+        let mut queue = self.queue.lock().expect("audio buffer mutex poisoned");
         // Block downloader thread if buffer capacity limit is reached
         while queue.len() + bytes.len() > self.capacity && !self.disconnected.load(Ordering::SeqCst)
         {
-            queue = self.cv_write.wait(queue).unwrap();
+            queue = self
+                .cv_write
+                .wait(queue)
+                .expect("audio buffer mutex poisoned");
         }
         if self.disconnected.load(Ordering::SeqCst) {
             return;
@@ -38,9 +42,12 @@ impl BufferQueue {
     }
 
     pub(super) fn pop(&self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock().expect("audio buffer mutex poisoned");
         while queue.is_empty() && !self.disconnected.load(Ordering::SeqCst) {
-            queue = self.cv_read.wait(queue).unwrap();
+            queue = self
+                .cv_read
+                .wait(queue)
+                .expect("audio buffer mutex poisoned");
         }
         if queue.is_empty() && self.disconnected.load(Ordering::SeqCst) {
             return Ok(0); // EOF or network disconnection
@@ -56,7 +63,7 @@ impl BufferQueue {
 
     pub(super) fn wait_until_at_least(&self, target_len: usize, max_wait: Duration) -> usize {
         let deadline = Instant::now() + max_wait;
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock().expect("audio buffer mutex poisoned");
 
         while queue.len() < target_len && !self.disconnected.load(Ordering::SeqCst) {
             let now = Instant::now();
@@ -65,7 +72,10 @@ impl BufferQueue {
             }
 
             let remaining = deadline.saturating_duration_since(now);
-            let (next_queue, timeout) = self.cv_read.wait_timeout(queue, remaining).unwrap();
+            let (next_queue, timeout) = self
+                .cv_read
+                .wait_timeout(queue, remaining)
+                .expect("audio buffer mutex poisoned");
             queue = next_queue;
 
             if timeout.timed_out() {
@@ -77,12 +87,15 @@ impl BufferQueue {
     }
 
     pub(super) fn len(&self) -> usize {
-        self.queue.lock().unwrap().len()
+        self.queue
+            .lock()
+            .expect("audio buffer mutex poisoned")
+            .len()
     }
 
     pub(super) fn set_disconnected(&self, disc: bool) {
         self.disconnected.store(disc, Ordering::SeqCst);
-        let _queue = self.queue.lock().unwrap();
+        let _queue = self.queue.lock().expect("audio buffer mutex poisoned");
         // Wake up both consumer and producer to terminate gracefully
         self.cv_read.notify_all();
         self.cv_write.notify_all();

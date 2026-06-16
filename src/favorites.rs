@@ -1,12 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::radio::Station;
 
-const NEW_CONFIG_DIR: &str = "pulsedeck";
-const OLD_CONFIG_DIR: &str = "driftfm";
 const LIBRARY_FILE: &str = "library.json";
 
 /// Your personal station library, persisted to disk.
@@ -57,15 +55,21 @@ pub struct Library {
     pub available_genres: Vec<String>,
     pub settings: Settings,
     pub(crate) path: Option<std::path::PathBuf>,
+    pub load_warnings: Vec<String>,
 }
 
 /// On-disk JSON format — stores full station data.
 #[derive(Serialize, Deserialize)]
 struct LibraryFile {
+    #[serde(default = "default_library_version")]
     version: u32,
     stations: Vec<SavedStation>,
     #[serde(default)]
     settings: Settings,
+}
+
+fn default_library_version() -> u32 {
+    1
 }
 
 /// Serializable station (mirrors Station but with serde).
@@ -138,14 +142,18 @@ impl Library {
     pub fn load(seed_stations: Vec<Station>) -> Self {
         let path = config_path();
 
+        let mut load_warnings = Vec::new();
+
         let (stations, settings) = if let Some(ref p) = path {
             if p.exists() {
                 match fs::read_to_string(p) {
-                    Ok(contents) => match serde_json::from_str::<LibraryFile>(&contents) {
-                        Ok(file) => (
-                            file.stations.into_iter().map(Station::from).collect(),
-                            file.settings,
-                        ),
+                    Ok(contents) => match parse_library_file(&contents) {
+                        Ok((stations, settings, warning)) => {
+                            if let Some(warning) = warning {
+                                load_warnings.push(warning);
+                            }
+                            (stations, settings)
+                        }
                         Err(_) => (seed_stations, Settings::default()), // corrupt file → use seeds
                     },
                     Err(_) => (seed_stations, Settings::default()),
@@ -157,10 +165,13 @@ impl Library {
                     available_genres: Vec::new(),
                     settings: Settings::default(),
                     path: path.clone(),
+                    load_warnings: Vec::new(),
                 };
                 lib.rebuild_genres();
-                // TODO: return load warnings to App so first-launch seed save failures can be shown.
-                let _ = lib.save();
+                if let Err(err) = lib.save() {
+                    lib.load_warnings
+                        .push(format!("Could not save starter library: {err}"));
+                }
                 return lib;
             }
         } else {
@@ -172,6 +183,7 @@ impl Library {
             available_genres: Vec::new(),
             settings,
             path,
+            load_warnings,
         };
         lib.rebuild_genres();
         lib
@@ -184,11 +196,8 @@ impl Library {
 
         let (stations, settings) = match path.as_ref() {
             Some(p) if p.exists() => match fs::read_to_string(p) {
-                Ok(contents) => match serde_json::from_str::<LibraryFile>(&contents) {
-                    Ok(file) => (
-                        file.stations.into_iter().map(Station::from).collect(),
-                        file.settings,
-                    ),
+                Ok(contents) => match parse_library_file(&contents) {
+                    Ok((stations, settings, _warning)) => (stations, settings),
                     Err(_) => (Vec::new(), Settings::default()),
                 },
                 Err(_) => (Vec::new(), Settings::default()),
@@ -201,6 +210,7 @@ impl Library {
             available_genres: Vec::new(),
             settings,
             path,
+            load_warnings: Vec::new(),
         };
         lib.rebuild_genres();
         lib
@@ -214,6 +224,7 @@ impl Library {
             available_genres: Vec::new(),
             settings: Settings::default(),
             path: None,
+            load_warnings: Vec::new(),
         };
         lib.rebuild_genres();
         lib
@@ -227,7 +238,6 @@ impl Library {
         }
         self.stations.push(station);
         self.rebuild_genres();
-        self.save()?;
         Ok(true)
     }
 
@@ -245,7 +255,6 @@ impl Library {
         }
         if added > 0 {
             self.rebuild_genres();
-            self.save()?;
         }
         Ok(ImportSummary { added, skipped })
     }
@@ -257,7 +266,6 @@ impl Library {
         let removed = self.stations.len() < before;
         if removed {
             self.rebuild_genres();
-            self.save()?;
         }
         Ok(removed)
     }
@@ -310,30 +318,26 @@ impl Library {
 /// If an existing DriftFM config exists and no PulseDeck config has been written yet,
 /// copy the old file into the new config directory so users keep their library.
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|base| {
-        let new_path = library_path(&base, NEW_CONFIG_DIR);
-        let old_path = library_path(&base, OLD_CONFIG_DIR);
-        migrate_file_if_needed(&old_path, &new_path);
-        new_path
-    })
+    crate::config::config_path(LIBRARY_FILE)
 }
 
-fn library_path(base: &Path, config_dir: &str) -> PathBuf {
-    base.join(config_dir).join(LIBRARY_FILE)
-}
-
-fn migrate_file_if_needed(old_path: &Path, new_path: &Path) {
-    if new_path.exists() || !old_path.exists() {
-        return;
-    }
-
-    if let Some(parent) = new_path.parent() {
-        if fs::create_dir_all(parent).is_err() {
-            return;
-        }
-    }
-
-    let _ = fs::copy(old_path, new_path);
+fn parse_library_file(
+    contents: &str,
+) -> serde_json::Result<(Vec<Station>, Settings, Option<String>)> {
+    let file = serde_json::from_str::<LibraryFile>(contents)?;
+    let warning = if file.version == 1 {
+        None
+    } else {
+        Some(format!(
+            "Library file version {} is newer than supported version 1",
+            file.version
+        ))
+    };
+    Ok((
+        file.stations.into_iter().map(Station::from).collect(),
+        file.settings,
+        warning,
+    ))
 }
 
 #[cfg(test)]
@@ -406,12 +410,39 @@ mod tests {
     }
 
     #[test]
+    fn newer_library_version_loads_with_warning() {
+        let json = r#"{
+            "version": 2,
+            "stations": [{
+                "name": "Future FM",
+                "url": "http://future",
+                "genre": "Synthwave",
+                "country": "US",
+                "bitrate": 128
+            }],
+            "settings": {
+                "theme": "Terminal"
+            }
+        }"#;
+
+        let (stations, settings, warning) = parse_library_file(json).unwrap();
+
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].name, "Future FM");
+        assert_eq!(settings.theme, "Terminal");
+        assert!(warning
+            .as_deref()
+            .is_some_and(|message| message.contains("version 2")));
+    }
+
+    #[test]
     fn test_library_add_deduplicates() {
         let mut lib = Library {
             stations: vec![],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
+            load_warnings: Vec::new(),
         };
         let station = Station {
             name: "Test".to_string(),
@@ -438,6 +469,7 @@ mod tests {
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
+            load_warnings: Vec::new(),
         };
         assert!(lib.remove("http://test").unwrap());
         assert!(!lib.remove("http://missing").unwrap());
@@ -457,6 +489,7 @@ mod tests {
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
+            load_warnings: Vec::new(),
         };
         assert!(lib.contains("http://test"));
         assert!(!lib.contains("http://missing"));
@@ -484,25 +517,12 @@ mod tests {
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
+            load_warnings: Vec::new(),
         };
         lib.rebuild_genres();
         assert_eq!(lib.available_genres[0], "All");
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
         assert!(lib.available_genres.contains(&"Ambient".to_string()));
-    }
-
-    #[test]
-    fn library_path_uses_requested_config_dir() {
-        let base = PathBuf::from("/tmp/config");
-
-        assert_eq!(
-            library_path(&base, NEW_CONFIG_DIR),
-            PathBuf::from("/tmp/config/pulsedeck/library.json")
-        );
-        assert_eq!(
-            library_path(&base, OLD_CONFIG_DIR),
-            PathBuf::from("/tmp/config/driftfm/library.json")
-        );
     }
 
     #[test]

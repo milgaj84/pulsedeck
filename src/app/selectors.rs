@@ -5,10 +5,14 @@ impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
     pub fn visible_stations(&self) -> Vec<&Station> {
         if self.input_mode == InputMode::Search {
-            return self.search_results.iter().collect();
+            return self.search.results.iter().collect();
         }
 
-        if let Some(genre) = self.library.available_genres.get(self.selected_genre_idx) {
+        if let Some(genre) = self
+            .library
+            .available_genres
+            .get(self.nav.selected_genre_idx)
+        {
             if genre == "All" {
                 self.library.stations.iter().collect()
             } else {
@@ -25,17 +29,17 @@ impl App {
 
     /// Get the highlighted station from the currently visible list.
     pub fn selected_station(&self) -> Option<&Station> {
-        self.visible_stations().get(self.selected).copied()
+        self.visible_stations().get(self.nav.selected).copied()
     }
 
     /// Get the currently playing station, if any.
     pub fn now_playing(&self) -> Option<&Station> {
-        self.playing_url.as_ref().and_then(|url| {
+        self.player.playing_url.as_ref().and_then(|url| {
             self.library
                 .stations
                 .iter()
                 .find(|s| s.url == *url)
-                .or_else(|| self.search_results.iter().find(|s| s.url == *url))
+                .or_else(|| self.search.results.iter().find(|s| s.url == *url))
                 .or_else(|| {
                     self.undo_history.iter().rev().find_map(|(station, _, _)| {
                         if station.url == *url {
@@ -51,10 +55,14 @@ impl App {
     /// Count visible stations without allocating a Vec.
     pub fn visible_count(&self) -> usize {
         if self.input_mode == InputMode::Search {
-            return self.search_results.len();
+            return self.search.results.len();
         }
 
-        if let Some(genre) = self.library.available_genres.get(self.selected_genre_idx) {
+        if let Some(genre) = self
+            .library
+            .available_genres
+            .get(self.nav.selected_genre_idx)
+        {
             if genre == "All" {
                 self.library.stations.len()
             } else {
@@ -71,9 +79,9 @@ impl App {
 
     /// Try to select the currently playing station in the visible list.
     pub(super) fn select_playing(&mut self) {
-        if let Some(ref url) = self.playing_url {
+        if let Some(ref url) = self.player.playing_url {
             if let Some(pos) = self.visible_stations().iter().position(|s| s.url == *url) {
-                self.selected = pos;
+                self.nav.selected = pos;
             }
         }
     }
@@ -101,7 +109,7 @@ mod tests {
             station("A", "http://a"),
             station("B", "http://b"),
         ]));
-        app.selected = 1;
+        app.nav.selected = 1;
 
         assert_eq!(
             app.selected_station().map(|s| s.url.as_str()),

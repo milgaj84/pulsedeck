@@ -8,14 +8,15 @@ const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "
 
 /// Render the search input bar.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let result_count = app.search_results.len();
+    let result_count = app.search.results.len();
     let selected_saved = app
-        .search_results
-        .get(app.selected)
+        .search
+        .results
+        .get(app.nav.selected)
         .map(|station| app.library.contains(&station.url))
         .unwrap_or(false);
 
-    let api_indicator = match &app.search_status {
+    let api_indicator = match &app.search.status {
         SearchStatus::WaitingForInput => Span::styled("  Type 2+ chars to search", theme::dim()),
         SearchStatus::Debouncing { query } => {
             Span::styled(debounce_indicator_text(query, app.tick_count), theme::dim())
@@ -54,7 +55,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let spans = vec![
         Span::styled(" 🔍 ", theme::neon()),
-        Span::styled(&app.search_query, theme::cyan()),
+        Span::styled(&app.search.query, theme::cyan()),
         Span::styled("█", Style::default().fg(theme::highlight())),
         api_indicator,
     ];

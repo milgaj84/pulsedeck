@@ -8,6 +8,21 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.2.3] - 2026-06-16
+
+### Changed
+*   **Sleep timer timing**: Sleep timers now wait for active playback instead of silently counting down while no station is playing.
+
+### Internal
+*   Split shared UI text helpers, deck rendering, theme palettes, and visualizer DSP into smaller modules.
+*   Replaced independent overlay booleans with a single `ActiveOverlay` state.
+*   Grouped `App` navigation, search, playback, overlay, notice, and persistence state into focused structs.
+*   Unified config-path handling for library, history, and UI-state persistence, with debounced writes flushed from the app tick.
+*   Flattened audio status handling and split the audio engine loop into `src/audio/engine_loop.rs`.
+*   Removed a dead audio-engine buffer field, hardened audio buffer lock errors, and named lifecycle timing constants.
+
+---
+
 ## [0.2.2] - 2026-06-15
 
 ### Added

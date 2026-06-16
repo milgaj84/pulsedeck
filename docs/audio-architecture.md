@@ -14,7 +14,8 @@ Other audio modules are implementation details and should stay private or `pub(s
 
 ## Current module map
 
-- `src/audio.rs` owns the public API, audio thread loop, playback state, command handling, and lazy output-device initialization.
+- `src/audio.rs` owns the public API and spawns the dedicated audio thread.
+- `src/audio/engine_loop.rs` owns the blocking audio loop, playback state, command handling, fade transitions, lazy output-device initialization, and guarded hardware-output recovery.
 - `src/audio/buffer.rs` owns the bounded producer-consumer byte queue used between the network downloader and decoder.
 - `src/audio/session.rs` owns stream connection, retry/backoff, downloader setup, decoder setup, and sink creation.
 - `src/audio/stream_reader.rs` owns ICY metadata boundary stripping and the `Read`/`Seek` adapter consumed by `rodio::Decoder`.
@@ -34,8 +35,9 @@ Recording capture and local file playback are outside the 0.2 audio boundary.
 - Preserve `crate::audio::{AudioCommand, AudioEngine, AudioStatus}` unless an app-level migration is planned.
 - Keep networking, decoding, playback, and UI status updates testable through small helpers where possible.
 - Prefer one subsystem movement per PR so regressions are easy to bisect.
+- Keep the engine loop internal to `src/audio/engine_loop.rs`; `src/audio.rs` should remain the public facade.
 
 ## Known follow-ups
 
-- Split the audio thread loop into a small playback state object if command handling grows further.
+- Done in 0.2.3: the audio thread loop was split into `src/audio/engine_loop.rs`.
 - Keep audio-output recovery isolated from network and decoder failure handling.

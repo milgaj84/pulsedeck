@@ -2,6 +2,7 @@ mod action;
 mod app;
 mod audio;
 mod cli;
+mod config;
 mod event;
 mod favorites;
 mod history;

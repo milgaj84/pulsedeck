@@ -1,18 +1,44 @@
 use super::*;
 use crate::audio::AudioCommand;
 
+pub struct PlaybackView {
+    pub state: PlaybackState,
+    pub playing_url: Option<String>,
+    pub current_track: Option<String>,
+    pub buffer_percent: u8,
+    pub buffer_seconds: u32,
+    pub intentional_stop: bool,
+}
+
+impl Default for PlaybackView {
+    fn default() -> Self {
+        Self {
+            state: PlaybackState::Stopped,
+            playing_url: None,
+            current_track: None,
+            buffer_percent: 0,
+            buffer_seconds: 0,
+            intentional_stop: false,
+        }
+    }
+}
+
 impl App {
     pub(super) fn play_selected(&mut self) {
-        let station = self.visible_stations().get(self.selected).copied().cloned();
+        let station = self
+            .visible_stations()
+            .get(self.nav.selected)
+            .copied()
+            .cloned();
         if let Some(station) = station {
             self.reconnect.disarm();
             let next_playback = self.playback_after_play_command();
-            self.playing_url = Some(station.url.clone());
-            self.playback = next_playback;
+            self.player.playing_url = Some(station.url.clone());
+            self.player.state = next_playback;
 
             // Persist last played station URL.
             self.library.settings.last_played_url = Some(station.url.clone());
-            self.save_library_or_notice("last played station");
+            self.mark_library_dirty();
 
             self.audio.send(AudioCommand::Play(station.url));
             self.sync_volume();
@@ -20,23 +46,23 @@ impl App {
     }
 
     pub(super) fn retry_stream(&mut self) {
-        let Some(url) = self.playing_url.clone() else {
+        let Some(url) = self.player.playing_url.clone() else {
             self.set_error_notice("No stream to retry");
             return;
         };
 
         self.reconnect.disarm();
-        self.current_track = None;
-        self.buffer_percent = 0;
-        self.buffer_seconds = 0;
-        self.playback = PlaybackState::Connecting;
+        self.player.current_track = None;
+        self.player.buffer_percent = 0;
+        self.player.buffer_seconds = 0;
+        self.player.state = PlaybackState::Connecting;
         self.audio.send(AudioCommand::Play(url));
         self.sync_volume();
         self.set_info_notice("Retrying stream");
     }
 
     pub(super) fn toggle_pause(&mut self) {
-        match self.playback.clone() {
+        match self.player.state.clone() {
             PlaybackState::Playing => {
                 self.audio.send(AudioCommand::Pause);
             }
@@ -53,24 +79,25 @@ impl App {
     }
 
     pub(super) fn stop_playback(&mut self) {
-        self.intentional_stop = true;
+        self.player.intentional_stop = true;
         self.audio.send(AudioCommand::Stop);
 
         if matches!(
-            &self.playback,
+            &self.player.state,
             PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
         ) {
-            self.playback = PlaybackState::FadingOut {
+            self.player.state = PlaybackState::FadingOut {
                 current_volume: self.current_output_volume_fraction(),
             };
         } else {
-            self.playing_url = None;
-            self.playback = PlaybackState::Stopped;
+            self.player.playing_url = None;
+            self.player.state = PlaybackState::Stopped;
         }
     }
 
     pub(super) fn stop_audio_before_quit(&mut self) {
-        self.intentional_stop = true;
+        self.player.intentional_stop = true;
+        self.flush_persistence();
         self.audio.send(AudioCommand::Stop);
     }
 
@@ -79,25 +106,25 @@ impl App {
         self.volume = self.volume.saturating_add(step).min(100);
         self.muted = false;
         self.sync_volume();
-        super::ui_state::save_ui_state_or_notice(self);
+        self.mark_ui_state_dirty();
     }
 
     pub(super) fn volume_down(&mut self) {
         let step = progressive_volume_step(self.volume);
         self.volume = self.volume.saturating_sub(step);
         self.sync_volume();
-        super::ui_state::save_ui_state_or_notice(self);
+        self.mark_ui_state_dirty();
     }
 
     pub(super) fn toggle_mute(&mut self) {
         self.muted = !self.muted;
         self.sync_volume();
-        super::ui_state::save_ui_state_or_notice(self);
+        self.mark_ui_state_dirty();
     }
 
     fn playback_after_play_command(&self) -> PlaybackState {
         if matches!(
-            &self.playback,
+            &self.player.state,
             PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
         ) {
             PlaybackState::FadingOut {
@@ -188,30 +215,30 @@ mod tests {
 
         app.play_selected();
 
-        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
+        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
         assert_eq!(
             app.library.settings.last_played_url.as_deref(),
             Some("http://a")
         );
-        assert_eq!(app.playback, PlaybackState::Connecting);
+        assert_eq!(app.player.state, PlaybackState::Connecting);
     }
 
     #[test]
     fn retry_stream_reuses_current_url_and_resets_transient_status() {
         let mut app = test_app();
-        app.playing_url = Some("http://a".to_string());
-        app.playback = PlaybackState::Error("device vanished".to_string());
-        app.current_track = Some("Old Track".to_string());
-        app.buffer_percent = 80;
-        app.buffer_seconds = 12;
+        app.player.playing_url = Some("http://a".to_string());
+        app.player.state = PlaybackState::Error("device vanished".to_string());
+        app.player.current_track = Some("Old Track".to_string());
+        app.player.buffer_percent = 80;
+        app.player.buffer_seconds = 12;
 
         app.retry_stream();
 
-        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
-        assert_eq!(app.playback, PlaybackState::Connecting);
-        assert_eq!(app.current_track, None);
-        assert_eq!(app.buffer_percent, 0);
-        assert_eq!(app.buffer_seconds, 0);
+        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
+        assert_eq!(app.player.state, PlaybackState::Connecting);
+        assert_eq!(app.player.current_track, None);
+        assert_eq!(app.player.buffer_percent, 0);
+        assert_eq!(app.player.buffer_seconds, 0);
     }
 
     #[test]
@@ -220,21 +247,24 @@ mod tests {
 
         app.retry_stream();
 
-        assert_eq!(app.playing_url, None);
-        assert_eq!(app.playback, PlaybackState::Stopped);
-        assert!(matches!(app.notice, Some(AppNotice::Error(_))));
+        assert_eq!(app.player.playing_url, None);
+        assert_eq!(app.player.state, PlaybackState::Stopped);
+        assert!(matches!(
+            app.notice.current.as_ref(),
+            Some(AppNotice::Error(_))
+        ));
     }
 
     #[test]
     fn play_selected_while_playing_enters_fading_out_state() {
         let mut app = test_app();
-        app.playback = PlaybackState::Playing;
+        app.player.state = PlaybackState::Playing;
         app.volume = 80;
 
         app.play_selected();
 
-        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
-        match app.playback {
+        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
+        match app.player.state {
             PlaybackState::FadingOut { current_volume } => {
                 assert!((current_volume - 0.8).abs() < 0.001);
             }
@@ -245,14 +275,14 @@ mod tests {
     #[test]
     fn stop_while_playing_enters_fading_out_and_keeps_station_context() {
         let mut app = test_app();
-        app.playing_url = Some("http://a".to_string());
-        app.playback = PlaybackState::Playing;
+        app.player.playing_url = Some("http://a".to_string());
+        app.player.state = PlaybackState::Playing;
         app.volume = 80;
 
         app.stop_playback();
 
-        assert_eq!(app.playing_url.as_deref(), Some("http://a"));
-        match app.playback {
+        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
+        match app.player.state {
             PlaybackState::FadingOut { current_volume } => {
                 assert!((current_volume - 0.8).abs() < 0.001);
             }
@@ -267,8 +297,8 @@ mod tests {
 
         app.toggle_pause();
 
-        assert_eq!(app.playing_url, None);
-        assert_eq!(app.playback, PlaybackState::Stopped);
+        assert_eq!(app.player.playing_url, None);
+        assert_eq!(app.player.state, PlaybackState::Stopped);
     }
 
     #[test]
@@ -373,7 +403,7 @@ mod tests {
         }
         assert!(found_m3u, "Expected .m3u export file to be created");
         assert!(matches!(
-            app.notice,
+            app.notice.current.as_ref(),
             Some(crate::app::types::AppNotice::Info(_))
         ));
 

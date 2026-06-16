@@ -14,6 +14,7 @@ history.json
 # Windows filesystem noise
 Thumbs.db
 desktop.ini
+*:Zone.Identifier
 
 # Editor directories
 .vscode/
@@ -25,3 +26,8 @@ desktop.ini
 .env
 # Local diagnostic logs
 *.log
+
+# Local planning / generated refactor artifacts
+/plan.pdf
+/repomix-output.xml
+/step*_*.sh

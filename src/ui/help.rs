@@ -39,7 +39,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .style(theme::clear());
 
     let inner_area = block.inner(popup_area);
-    let (content_area, alert_area) = critical::split_overlay_alert_area(inner_area, &app.playback);
+    let (content_area, alert_area) =
+        critical::split_overlay_alert_area(inner_area, &app.player.state);
 
     let header_row = Row::new(vec![
         Cell::from(Span::styled(
@@ -109,7 +110,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(table, content_area);
 
     if let Some(alert_area) = alert_area {
-        critical::render_engine_fault_banner(frame, alert_area, &app.playback);
+        critical::render_engine_fault_banner(frame, alert_area, &app.player.state);
     }
 }
 

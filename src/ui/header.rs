@@ -34,7 +34,7 @@ fn render_logo(frame: &mut Frame, area: Rect) {
 
 /// Now-playing status on the right side of the header.
 fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) {
-    let content = match (&app.playback, app.now_playing()) {
+    let content = match (&app.player.state, app.now_playing()) {
         (PlaybackState::Playing, Some(station)) => Line::from(vec![
             Span::styled("▶ ", theme::playing()),
             Span::styled(&station.name, theme::cyan()),

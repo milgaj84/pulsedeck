@@ -9,12 +9,13 @@ pub mod settings;
 pub mod sleep_timer;
 pub mod station_details;
 pub mod stations;
+pub mod text;
 pub mod theme;
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::{App, InputMode, LayoutMode};
+use crate::app::{ActiveOverlay, App, InputMode, LayoutMode};
 
 const MIN_REQUIRED_WIDTH: u16 = 80;
 const MIN_REQUIRED_HEIGHT: u16 = 24;
@@ -98,28 +99,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     render_separator(frame, chunks[3]);
     controls::render(frame, chunks[4], app);
 
-    // Draw context overlays before help/settings, which remain highest priority.
-    if app.show_station_details {
-        station_details::render(frame, size, app);
-    }
-
-    if app.show_recent_tracks {
-        recent_tracks::render(frame, size, app);
-    }
-
-    // Draw help modal floating overlay if enabled
-    if app.show_help {
-        help::render(frame, size, app);
-    }
-
-    // Draw settings modal floating overlay if enabled
-    if app.show_settings {
-        settings::render(frame, size, app);
-    }
-
-    // Sleep-timer overlay (own input mode); highest priority modal.
-    if app.show_sleep_timer {
-        sleep_timer::render(frame, size, app);
+    match app.overlays.active {
+        ActiveOverlay::StationDetails => station_details::render(frame, size, app),
+        ActiveOverlay::RecentTracks => recent_tracks::render(frame, size, app),
+        ActiveOverlay::Help => help::render(frame, size, app),
+        ActiveOverlay::Settings => settings::render(frame, size, app),
+        ActiveOverlay::SleepTimer => sleep_timer::render(frame, size, app),
+        ActiveOverlay::None => {}
     }
 }
 

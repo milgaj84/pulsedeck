@@ -6,25 +6,26 @@ impl App {
     pub(super) fn handle_settings_action(&mut self, action: Action) {
         match action {
             Action::NextStation => {
-                self.selected_setting_idx = (self.selected_setting_idx + 1) % SettingRow::COUNT;
+                self.overlays.selected_setting_idx =
+                    (self.overlays.selected_setting_idx + 1) % SettingRow::COUNT;
             }
             Action::PrevStation => {
-                self.selected_setting_idx = if self.selected_setting_idx == 0 {
+                self.overlays.selected_setting_idx = if self.overlays.selected_setting_idx == 0 {
                     SettingRow::COUNT - 1
                 } else {
-                    self.selected_setting_idx - 1
+                    self.overlays.selected_setting_idx - 1
                 };
             }
             Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
-                self.save_library_or_notice("settings");
+                self.mark_library_dirty();
             }
             Action::StepSettingForward if self.apply_directional_setting(true) => {
-                self.save_library_or_notice("settings");
+                self.mark_library_dirty();
             }
             Action::StepSettingBackward | Action::ToggleHelp
                 if self.apply_directional_setting(false) =>
             {
-                self.save_library_or_notice("settings");
+                self.mark_library_dirty();
             }
             Action::PlaySelected
             | Action::TogglePause
@@ -32,10 +33,10 @@ impl App {
             | Action::StepSettingBackward
             | Action::ToggleHelp => {}
             Action::ToggleSettings => {
-                self.show_settings = false;
+                self.overlays.active = ActiveOverlay::None;
             }
             Action::Quit => {
-                self.show_settings = false;
+                self.overlays.active = ActiveOverlay::None;
             }
             Action::Tick => self.tick(),
             _ => {
@@ -45,7 +46,7 @@ impl App {
     }
 
     pub(super) fn selected_setting_row(&self) -> Option<SettingRow> {
-        SettingRow::from_index(self.selected_setting_idx)
+        SettingRow::from_index(self.overlays.selected_setting_idx)
     }
 
     pub(super) fn apply_selected_setting(&mut self, forward: bool) -> bool {
@@ -183,27 +184,27 @@ mod tests {
     #[test]
     fn settings_blocks_play_selected() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::Notifications.index();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::Notifications.index();
         let before = app.library.settings.notifications_enabled;
 
         app.update(Action::PlaySelected);
 
-        assert_eq!(app.playing_url, None);
+        assert_eq!(app.player.playing_url, None);
         assert_eq!(app.library.settings.notifications_enabled, !before);
     }
 
     #[test]
     fn settings_navigation_wraps_using_row_count() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::COUNT - 1;
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::COUNT - 1;
 
         app.update(Action::NextStation);
-        assert_eq!(app.selected_setting_idx, 0);
+        assert_eq!(app.overlays.selected_setting_idx, 0);
 
         app.update(Action::PrevStation);
-        assert_eq!(app.selected_setting_idx, SettingRow::COUNT - 1);
+        assert_eq!(app.overlays.selected_setting_idx, SettingRow::COUNT - 1);
     }
 
     #[test]
@@ -217,8 +218,8 @@ mod tests {
     #[test]
     fn settings_forward_and_backward_cycle_theme() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::Theme.index();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingForward);
@@ -231,8 +232,8 @@ mod tests {
     #[test]
     fn settings_backward_wraps_theme() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::Theme.index();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingBackward);
@@ -298,55 +299,55 @@ mod tests {
     #[test]
     fn settings_h_action_steps_backward_without_closing_popup() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::Theme.index();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "CatppuccinMocha".to_string();
 
         app.update(Action::ToggleHelp);
 
-        assert!(app.show_settings);
+        assert!(app.show_settings());
         assert_eq!(app.library.settings.theme, "Retrowave");
     }
 
     #[test]
     fn settings_blocks_search_entry() {
         let mut app = test_app();
-        app.show_settings = true;
+        app.overlays.active = ActiveOverlay::Settings;
 
         app.update(Action::EnterSearch);
 
         assert_eq!(app.input_mode, InputMode::Normal);
-        assert!(app.show_settings);
+        assert!(app.show_settings());
     }
 
     #[test]
     fn settings_quit_closes_settings_without_quitting_app() {
         let mut app = test_app();
-        app.show_settings = true;
+        app.overlays.active = ActiveOverlay::Settings;
 
         app.update(Action::Quit);
 
-        assert!(!app.show_settings);
+        assert!(!app.show_settings());
         assert!(!app.should_quit);
     }
 
     #[test]
     fn settings_tick_still_polls_and_updates() {
         let mut app = test_app();
-        app.show_settings = true;
+        app.overlays.active = ActiveOverlay::Settings;
         app.set_info_notice("hello");
 
         app.update(Action::Tick);
 
         assert_eq!(app.tick_count, 1);
-        assert!(app.notice.is_some());
+        assert!(app.notice.current.is_some());
     }
 
     #[test]
     fn settings_toggle_save_history() {
         let mut app = test_app();
-        app.show_settings = true;
-        app.selected_setting_idx = SettingRow::SaveHistory.index();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::SaveHistory.index();
         assert!(!app.library.settings.save_history);
 
         app.update(Action::PlaySelected);
