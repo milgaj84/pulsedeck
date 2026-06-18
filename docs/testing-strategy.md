@@ -19,7 +19,7 @@ cargo run
 - Unit tests cover pure helpers, reducers, parsing, theme serialization, library mutation, search state, and key mapping.
 - Reducer contract tests protect behavior that previously regressed, especially settings-overlay action blocking and stale search response handling.
 - Audio unit tests avoid opening sound devices or live streams. They test deterministic math and parsing helpers.
-- Radio Browser tests avoid live network calls. They verify URL construction, fallback ordering, API mapping, and error formatting.
+- Radio Browser tests avoid live network calls. They verify URL construction, fallback ordering, structured query parsing, API mapping, identity matching, dedupe/ranking, and error formatting.
 - Runtime smoke tests cover the real terminal, audio backend, search, playback controls, settings, visualizers, and terminal restore.
 
 ## Why no live network tests by default

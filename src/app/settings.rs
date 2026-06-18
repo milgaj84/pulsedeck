@@ -168,13 +168,7 @@ mod tests {
     use crate::radio::Station;
 
     fn station(name: &str, url: &str) -> Station {
-        Station {
-            name: name.to_string(),
-            url: url.to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }
+        Station::basic(name, url, "Synthwave", "US", 128)
     }
 
     fn test_app() -> App {

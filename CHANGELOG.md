@@ -8,6 +8,23 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.3.0] - 2026-06-18
+
+### Added
+*   **Structured search prefixes**: Search now understands focused prefixes such as `tag:ambient`, `country:BA`, `lang:english`, and `codec:mp3` while preserving plain station-name search.
+*   **Richer station metadata**: Search results and saved stations now preserve Radio Browser UUIDs, country codes, languages, codec, homepage, votes, click counts, and last-check status when available.
+*   **Station trust details**: Station Details now shows richer metadata so users can inspect stream quality and reachability before saving.
+
+### Improved
+*   **Search relevance**: Results are deduplicated and locally ranked so exact name matches, reachable stations, HTTPS streams, and more popular stations are easier to find.
+*   **Saved-result detection**: Search results can match saved stations by Radio Browser UUID when available, not only exact stream URL.
+
+### Internal
+*   Split Radio Browser search code into focused query, client, mapping, and ranking modules.
+*   Added compatibility tests for old library files and richer station metadata.
+
+---
+
 ## [0.2.4] - 2026-06-18
 
 ### Fixed

@@ -13,7 +13,7 @@ git fetch --prune
 Set the release version once for the commands below:
 
 ```bash
-VERSION=0.2.4
+VERSION=0.3.0
 ```
 
 Confirm the version:

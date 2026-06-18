@@ -36,7 +36,7 @@ Think of it as: *a neon radio console for the terminal: quick to launch, easy to
 
 Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
 
-- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog by name, tag, city, or country, with mirror failover for upstream outages
+- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog by name, tag, country, language, or codec, with mirror failover and local result ranking for cleaner discovery
 - 🔊 **Smooth tuning transitions**: switching stations fades out the current stream and fades in the new one, like turning an analog dial
 - 🎧 **Preview before saving**: in search, `Space` auditions a station without saving, while `Enter` saves it to your Library and plays it
 - 🎨 **6 built-in themes**: Retrowave, all 4 Catppuccin flavors (Mocha, Macchiato, Frappé, Latte), and a Terminal theme that follows your emulator's ANSI palette
@@ -128,20 +128,32 @@ While in search, plain printable characters continue to edit the query. Use the 
 
 **Finding and adding a new station:**
 
-1. Press `/`, `Ctrl+f`, or `F3` to open search, then type a genre, city, country, or station name. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
+1. Press `/`, `Ctrl+f`, or `F3` to open search, then type a station name or focused query such as `tag:ambient`, `country:BA`, `lang:english`, or `codec:mp3`. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
 2. Use `↑` / `↓` to highlight a result.
 3. Press `Space` to audition the highlighted station without saving it. You stay in search mode and can keep browsing.
 4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
 5. Press `Esc` instead to leave search without adding anything.
 
-Search results show saved stations with a star and include compact genre/country/bitrate metadata. Long station names are truncated around the active search term when possible, so matching text stays visible even in narrow result rows. Search titles and the footer both reinforce the `Space` preview versus `Enter` save-and-play split.
+Search results show saved stations with a star and include compact genre/country/bitrate/codec/check metadata when available. Long station names are truncated around the active search term when possible, so matching text stays visible even in narrow result rows. Search titles and the footer both reinforce the `Space` preview versus `Enter` save-and-play split.
+
+Focused search prefixes:
+
+| Prefix | Example | Searches |
+| :--- | :--- | :--- |
+| `name:` | `name:lofi` | station names |
+| `tag:` | `tag:ambient` | Radio Browser tags / genres |
+| `country:` | `country:BA` or `country:Bosnia` | country code or country name |
+| `lang:` | `lang:english` | station language |
+| `codec:` | `codec:mp3` | stream codec |
+
+Plain text still searches station names, so `lofi` works exactly as before.
 
 **Managing your library:**
 
 - Your Library is the saved station list shown on launch.
 - If the Library is empty, PulseDeck shows a starter card with the most useful first actions.
 - Rows show the selected station, currently playing station, country, and bitrate without overflowing long names.
-- To inspect the highlighted station, press `i` for Station Details.
+- To inspect the highlighted station, press `i` for Station Details, including tags, country code, language, codec, bitrate, last-check status, homepage, UUID, votes, recent click count, and stream URL when available.
 - To remove a saved station, highlight it in the Library and press `f`.
 - After removal, press `u` to restore removed stations in reverse order. PulseDeck keeps a bounded history of the 10 most recent removals.
 - Switch between genre categories with `Tab` / `Shift+Tab`; PulseDeck remembers your last cursor position per category, falling back to the playing station when there is no saved position.

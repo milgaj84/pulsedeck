@@ -13,7 +13,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .search
         .results
         .get(app.nav.selected)
-        .map(|station| app.library.contains(&station.url))
+        .map(|station| app.library.contains_station(station))
         .unwrap_or(false);
 
     let api_indicator = match &app.search.status {
@@ -31,9 +31,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         SearchStatus::Ready { .. } => {
             Span::styled(format!("  {} found", result_count), theme::dim())
         }
-        SearchStatus::Empty { query } => {
-            Span::styled(format!("  No results for {}", query), theme::dim())
-        }
+        SearchStatus::Empty { query } => Span::styled(empty_search_hint(query), theme::dim()),
         SearchStatus::Error { message, .. } => {
             let message = message
                 .split('|')
@@ -87,6 +85,17 @@ fn stale_response_text(query: &str, received_stale: &str) -> String {
     )
 }
 
+fn empty_search_hint(query: &str) -> String {
+    if query.contains(':') {
+        format!(
+            "  No results for {}; try a broader value",
+            compact_search_label(query)
+        )
+    } else {
+        "  No results; try tag:ambient, country:BA, lang:english, or a shorter name".to_string()
+    }
+}
+
 fn compact_search_label(value: &str) -> String {
     const MAX_CHARS: usize = 24;
     let mut chars = value.chars();
@@ -131,6 +140,22 @@ mod tests {
         assert_eq!(
             compact_search_label("abcdefghijklmnopqrstuvwxyz"),
             "abcdefghijklmnopqrstuvwx…"
+        );
+    }
+
+    #[test]
+    fn empty_search_hint_suggests_prefixes_for_plain_query() {
+        assert_eq!(
+            empty_search_hint("zzzz"),
+            "  No results; try tag:ambient, country:BA, lang:english, or a shorter name"
+        );
+    }
+
+    #[test]
+    fn empty_search_hint_suggests_broadening_prefixed_query() {
+        assert_eq!(
+            empty_search_hint("tag:nope"),
+            "  No results for tag:nope; try a broader value"
         );
     }
 }

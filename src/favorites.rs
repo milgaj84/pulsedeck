@@ -80,6 +80,24 @@ struct SavedStation {
     genre: String,
     country: String,
     bitrate: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    station_uuid: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    country_code: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    language: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    codec: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    homepage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_check_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    votes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    click_count: Option<u32>,
 }
 
 impl From<&Station> for SavedStation {
@@ -90,6 +108,15 @@ impl From<&Station> for SavedStation {
             genre: s.genre.clone(),
             country: s.country.clone(),
             bitrate: s.bitrate,
+            station_uuid: s.station_uuid.clone(),
+            country_code: s.country_code.clone(),
+            tags: s.tags.clone(),
+            language: s.language.clone(),
+            codec: s.codec.clone(),
+            homepage: s.homepage.clone(),
+            last_check_ok: s.last_check_ok,
+            votes: s.votes,
+            click_count: s.click_count,
         }
     }
 }
@@ -102,6 +129,15 @@ impl From<SavedStation> for Station {
             genre: s.genre,
             country: s.country,
             bitrate: s.bitrate,
+            station_uuid: s.station_uuid.filter(|uuid| !uuid.trim().is_empty()),
+            country_code: s.country_code.trim().to_ascii_uppercase(),
+            tags: crate::radio::clean_tag_values(s.tags),
+            language: s.language.trim().to_string(),
+            codec: s.codec.trim().to_ascii_uppercase(),
+            homepage: s.homepage.trim().to_string(),
+            last_check_ok: s.last_check_ok,
+            votes: s.votes,
+            click_count: s.click_count,
         }
     }
 }
@@ -256,10 +292,10 @@ impl Library {
         lib
     }
 
-    /// Add a station to the library (deduplicates by URL).
+    /// Add a station to the library (deduplicates by Radio Browser UUID when present, then URL).
     /// Returns true if actually added (not a duplicate).
     pub fn add(&mut self, station: Station) -> anyhow::Result<bool> {
-        if self.stations.iter().any(|s| s.url == station.url) {
+        if self.contains_station(&station) {
             return Ok(false);
         }
         self.stations.push(station);
@@ -267,12 +303,12 @@ impl Library {
         Ok(true)
     }
 
-    /// Import a list of stations, merging by URL.
+    /// Import a list of stations, merging by Radio Browser UUID when present, then URL.
     pub fn import_stations(&mut self, stations: Vec<Station>) -> anyhow::Result<ImportSummary> {
         let mut added = 0;
         let mut skipped = 0;
         for s in stations {
-            if self.contains(&s.url) {
+            if self.contains_station(&s) {
                 skipped += 1;
             } else {
                 self.stations.push(s);
@@ -309,6 +345,13 @@ impl Library {
         sorted.sort_by_key(|a| a.to_lowercase());
         sorted.insert(0, "All".to_string());
         self.available_genres = sorted;
+    }
+
+    /// Check if a station identity is in the library, preferring Radio Browser UUID when available.
+    pub fn contains_station(&self, station: &Station) -> bool {
+        self.stations
+            .iter()
+            .any(|saved| crate::radio::station_identity_matches(saved, station))
     }
 
     /// Check if a station URL is in the library.
@@ -470,13 +513,7 @@ mod tests {
             path: None,
             load_warnings: Vec::new(),
         };
-        let station = Station {
-            name: "Test".to_string(),
-            url: "http://test".to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        };
+        let station = Station::basic("Test", "http://test", "Synthwave", "US", 128);
         assert!(lib.add(station.clone()).unwrap());
         assert!(!lib.add(station).unwrap());
         assert_eq!(lib.stations.len(), 1);
@@ -485,13 +522,13 @@ mod tests {
     #[test]
     fn test_library_remove() {
         let mut lib = Library {
-            stations: vec![Station {
-                name: "Test".to_string(),
-                url: "http://test".to_string(),
-                genre: "Synthwave".to_string(),
-                country: "US".to_string(),
-                bitrate: 128,
-            }],
+            stations: vec![Station::basic(
+                "Test",
+                "http://test",
+                "Synthwave",
+                "US",
+                128,
+            )],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
@@ -505,13 +542,13 @@ mod tests {
     #[test]
     fn test_library_contains() {
         let lib = Library {
-            stations: vec![Station {
-                name: "Test".to_string(),
-                url: "http://test".to_string(),
-                genre: "Synthwave".to_string(),
-                country: "US".to_string(),
-                bitrate: 128,
-            }],
+            stations: vec![Station::basic(
+                "Test",
+                "http://test",
+                "Synthwave",
+                "US",
+                128,
+            )],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
@@ -525,20 +562,8 @@ mod tests {
     fn test_rebuild_genres() {
         let mut lib = Library {
             stations: vec![
-                Station {
-                    name: "A".to_string(),
-                    url: "http://a".to_string(),
-                    genre: "Synthwave".to_string(),
-                    country: "US".to_string(),
-                    bitrate: 128,
-                },
-                Station {
-                    name: "B".to_string(),
-                    url: "http://b".to_string(),
-                    genre: "Ambient".to_string(),
-                    country: "US".to_string(),
-                    bitrate: 128,
-                },
+                Station::basic("A", "http://a", "Synthwave", "US", 128),
+                Station::basic("B", "http://b", "Ambient", "US", 128),
             ],
             available_genres: vec![],
             settings: Settings::default(),
@@ -553,42 +578,30 @@ mod tests {
 
     #[test]
     fn test_in_memory_library_rebuilds_genres_without_path() {
-        let lib = Library::in_memory(vec![Station {
-            name: "Test".to_string(),
-            url: "http://test".to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }]);
+        let lib = Library::in_memory(vec![Station::basic(
+            "Test",
+            "http://test",
+            "Synthwave",
+            "US",
+            128,
+        )]);
         assert!(lib.path.is_none());
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
     }
 
     #[test]
     fn test_import_stations() {
-        let mut lib = Library::in_memory(vec![Station {
-            name: "Test A".to_string(),
-            url: "http://a".to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }]);
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]);
 
         let to_import = vec![
-            Station {
-                name: "Test A".to_string(),
-                url: "http://a".to_string(),
-                genre: "Synthwave".to_string(),
-                country: "US".to_string(),
-                bitrate: 128,
-            },
-            Station {
-                name: "Test B".to_string(),
-                url: "http://b".to_string(),
-                genre: "Ambient".to_string(),
-                country: "UK".to_string(),
-                bitrate: 96,
-            },
+            Station::basic("Test A", "http://a", "Synthwave", "US", 128),
+            Station::basic("Test B", "http://b", "Ambient", "UK", 96),
         ];
 
         let summary = lib.import_stations(to_import).unwrap();

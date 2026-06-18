@@ -1,6 +1,6 @@
 [package]
 name = "pulsedeck"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 description = "A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback"
 license = "MIT"

@@ -3,6 +3,14 @@ use crate::radio::Station;
 pub fn to_m3u(stations: &[Station]) -> String {
     let mut out = String::from("#EXTM3U\n");
     for s in stations {
+        if let Some(uuid) = s
+            .station_uuid
+            .as_deref()
+            .map(str::trim)
+            .filter(|uuid| !uuid.is_empty())
+        {
+            out.push_str(&format!("#RADIOBROWSERUUID:{}\n", uuid));
+        }
         out.push_str(&format!("#EXTINF:-1,{}\n", s.name));
         out.push_str(&format!("#EXTGENRE:{}\n", s.genre));
         out.push_str(&format!("{}\n", s.url));
@@ -14,8 +22,12 @@ pub fn from_m3u(text: &str) -> Vec<Station> {
     let mut stations = Vec::new();
     let mut name = String::new();
     let mut genre = String::new();
+    let mut station_uuid: Option<String> = None;
+
     for line in text.lines().map(str::trim) {
-        if let Some(rest) = line.strip_prefix("#EXTINF:") {
+        if let Some(rest) = line.strip_prefix("#RADIOBROWSERUUID:") {
+            station_uuid = Some(rest.trim().to_string()).filter(|uuid| !uuid.is_empty());
+        } else if let Some(rest) = line.strip_prefix("#EXTINF:") {
             name = rest
                 .split_once(',')
                 .map(|x| x.1)
@@ -25,21 +37,19 @@ pub fn from_m3u(text: &str) -> Vec<Station> {
         } else if let Some(rest) = line.strip_prefix("#EXTGENRE:") {
             genre = rest.trim().to_string();
         } else if !line.is_empty() && !line.starts_with('#') {
-            stations.push(Station {
-                name: if name.is_empty() {
-                    line.to_string()
+            let mut station = Station::basic(
+                if name.is_empty() { line } else { name.as_str() },
+                line,
+                if genre.is_empty() {
+                    "Unknown"
                 } else {
-                    name.clone()
+                    genre.as_str()
                 },
-                url: line.to_string(),
-                genre: if genre.is_empty() {
-                    "Unknown".into()
-                } else {
-                    genre.clone()
-                },
-                country: String::new(),
-                bitrate: 0,
-            });
+                "",
+                0,
+            );
+            station.station_uuid = station_uuid.take();
+            stations.push(station);
             name.clear();
             genre.clear();
         }
@@ -80,20 +90,8 @@ mod tests {
     #[test]
     fn test_m3u_roundtrip() {
         let stations = vec![
-            Station {
-                name: "Station A".to_string(),
-                url: "http://a".to_string(),
-                genre: "Synthwave".to_string(),
-                country: "US".to_string(),
-                bitrate: 128,
-            },
-            Station {
-                name: "Station B".to_string(),
-                url: "http://b".to_string(),
-                genre: "Ambient".to_string(),
-                country: "UK".to_string(),
-                bitrate: 96,
-            },
+            Station::basic("Station A", "http://a", "Synthwave", "US", 128),
+            Station::basic("Station B", "http://b", "Ambient", "UK", 96),
         ];
 
         let m3u = to_m3u(&stations);
@@ -120,6 +118,33 @@ mod tests {
     }
 
     #[test]
+    fn m3u_export_includes_radiobrowser_uuid_when_present() {
+        let mut station = Station::basic("Station A", "http://a", "Synthwave", "US", 128);
+        station.station_uuid = Some("uuid-a".to_string());
+
+        let m3u = to_m3u(&[station]);
+        assert!(m3u.contains("#RADIOBROWSERUUID:uuid-a"));
+    }
+
+    #[test]
+    fn m3u_import_reads_radiobrowser_uuid() {
+        let text = "#EXTM3U\n#RADIOBROWSERUUID:uuid-a\n#EXTINF:-1,Station A\nhttp://a\n";
+        let parsed = from_m3u(text);
+
+        assert_eq!(parsed[0].station_uuid.as_deref(), Some("uuid-a"));
+    }
+
+    #[test]
+    fn m3u_import_does_not_leak_uuid_to_next_station() {
+        let text =
+            "#EXTM3U\n#RADIOBROWSERUUID:uuid-a\n#EXTINF:-1,A\nhttp://a\n#EXTINF:-1,B\nhttp://b\n";
+        let parsed = from_m3u(text);
+
+        assert_eq!(parsed[0].station_uuid.as_deref(), Some("uuid-a"));
+        assert_eq!(parsed[1].station_uuid, None);
+    }
+
+    #[test]
     fn test_format_for_path() {
         assert_eq!(format_for_path("foo.json"), PlaylistFormat::Json);
         assert_eq!(format_for_path("foo.JSON"), PlaylistFormat::Json);
@@ -130,16 +155,31 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
-        let stations = vec![Station {
-            name: "Station A".to_string(),
-            url: "http://a".to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }];
+        let mut station = Station::basic("Station A", "http://a", "Synthwave", "US", 128);
+        station.station_uuid = Some("uuid-a".to_string());
+        station.country_code = "US".to_string();
+        station.codec = "MP3".to_string();
 
-        let json = to_json(&stations).unwrap();
+        let json = to_json(&[station.clone()]).unwrap();
         let parsed = from_json(&json).unwrap();
-        assert_eq!(parsed, stations);
+        assert_eq!(parsed, vec![station]);
+    }
+
+    #[test]
+    fn json_import_accepts_old_station_shape() {
+        let json = r#"[
+            {
+                "name": "Old Station",
+                "url": "http://old",
+                "genre": "Ambient",
+                "country": "US",
+                "bitrate": 128
+            }
+        ]"#;
+
+        let parsed = from_json(json).unwrap();
+        assert_eq!(parsed[0].station_uuid, None);
+        assert_eq!(parsed[0].country_code, "");
+        assert_eq!(parsed[0].codec, "");
     }
 }

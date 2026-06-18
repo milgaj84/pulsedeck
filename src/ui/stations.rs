@@ -57,7 +57,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
             let is_selected = app.nav.selected == idx;
             let is_saved_search_result =
-                app.input_mode == InputMode::Search && app.library.contains(&station.url);
+                app.input_mode == InputMode::Search && app.library.contains_station(station);
 
             let cursor = station_cursor(is_playing, is_selected);
             let cursor_style = if is_playing {
@@ -84,12 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 theme::dim()
             };
 
-            let meta = station_meta_label(
-                &app.input_mode,
-                station.genre.as_str(),
-                station.country.as_str(),
-                station.bitrate,
-            );
+            let meta = station_meta_label(&app.input_mode, station);
             let meta_chip = format!(" {} ", meta);
             let fixed_width = crate::ui::text::visible_len(cursor)
                 + crate::ui::text::visible_len(save_marker)
@@ -205,15 +200,66 @@ fn station_name_style(is_playing: bool, is_selected: bool, idx: usize) -> Style 
     }
 }
 
-fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrate: u32) -> String {
-    let genre = empty_fallback(genre, "Other");
-    let country = empty_fallback(country, "??");
-
+fn station_meta_label(input_mode: &InputMode, station: &crate::radio::Station) -> String {
     if *input_mode == InputMode::Search {
-        format!("{} · {} · {}k", genre, country, bitrate)
+        search_station_meta_label(station)
     } else {
-        format!("{} · {}k", country, bitrate)
+        library_station_meta_label(station)
     }
+}
+
+fn search_station_meta_label(station: &crate::radio::Station) -> String {
+    join_non_empty([
+        empty_fallback(&station.genre, "Other").to_string(),
+        station_country_chip(station),
+        bitrate_chip(station.bitrate),
+        codec_chip(station),
+        check_chip(station),
+    ])
+}
+
+fn library_station_meta_label(station: &crate::radio::Station) -> String {
+    format!(
+        "{} · {}",
+        station_country_chip(station),
+        bitrate_chip(station.bitrate)
+    )
+}
+
+fn station_country_chip(station: &crate::radio::Station) -> String {
+    if !station.country_code.trim().is_empty() {
+        station.country_code.trim().to_ascii_uppercase()
+    } else {
+        empty_fallback(&station.country, "??").to_string()
+    }
+}
+
+fn bitrate_chip(bitrate: u32) -> String {
+    if bitrate == 0 {
+        "?k".to_string()
+    } else {
+        format!("{bitrate}k")
+    }
+}
+
+fn codec_chip(station: &crate::radio::Station) -> String {
+    station.codec.trim().to_ascii_uppercase()
+}
+
+fn check_chip(station: &crate::radio::Station) -> String {
+    match station.last_check_ok {
+        Some(true) => "OK".to_string(),
+        Some(false) => "down?".to_string(),
+        None => String::new(),
+    }
+}
+
+fn join_non_empty<const N: usize>(parts: [String; N]) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn station_list_title(app: &App, visible_count: usize) -> String {
@@ -221,13 +267,17 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
         if app.search.query.is_empty() {
             " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
         } else if app.search.searching_api {
-            format!(" 🔍 Tuning query \"{}\"... ", app.search.query)
+            format!(" 🔍 Tuning {}... ", search_title_label(&app.search.query))
         } else if visible_count == 0 {
-            format!(" 🔍 No signal for \"{}\" ", app.search.query)
+            format!(
+                " 🔍 No signal for {} ",
+                search_title_label(&app.search.query)
+            )
         } else {
             format!(
-                " 🔍 Search Results ({}) · Space preview · Enter save ",
-                visible_count
+                " 🔍 Search Results ({}) · {} · Space preview · Enter save ",
+                visible_count,
+                search_title_label(&app.search.query)
             )
         }
     } else if visible_count == 0 {
@@ -241,6 +291,13 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
             .unwrap_or("All");
         format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
     }
+}
+
+fn search_title_label(raw_query: &str) -> String {
+    crate::ui::text::truncate_with_ellipsis(
+        &crate::radio::StationSearchQuery::parse(raw_query).display_label(),
+        32,
+    )
 }
 
 fn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
@@ -337,16 +394,18 @@ mod tests {
 
     #[test]
     fn station_meta_search_includes_genre_country_and_bitrate() {
+        let station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
         assert_eq!(
-            station_meta_label(&InputMode::Search, "Synthwave", "US", 128),
+            station_meta_label(&InputMode::Search, &station),
             "Synthwave · US · 128k"
         );
     }
 
     #[test]
     fn station_meta_normal_keeps_library_rows_compact() {
+        let station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
         assert_eq!(
-            station_meta_label(&InputMode::Normal, "Synthwave", "US", 128),
+            station_meta_label(&InputMode::Normal, &station),
             "US · 128k"
         );
     }

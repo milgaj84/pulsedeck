@@ -14,7 +14,7 @@ PulseDeck routes input through a small action pipeline:
 - `src/app/lifecycle.rs` owns app construction, notices, and audio status polling.
 - `src/app/nav.rs` owns navigation state, including visible selection, search snapshots, and per-genre cursor memory.
 - `src/app/selectors.rs` owns read-only station selectors, selected-station lookup, and currently-playing lookup.
-- `src/app/search.rs` owns `SearchState`, search mode, debounce state, stale-response handling, auditioning, and search confirmation.
+- `src/app/search.rs` owns `SearchState`, search mode, debounce state, stale-response handling, auditioning, search confirmation, and saved-result identity checks.
 - `src/app/playback.rs` owns `PlaybackView`, playback commands, stream retry, and volume/mute state.
 - `src/app/settings.rs` owns settings overlay behavior and action blocking while settings are open.
 - `src/app/library.rs` owns library removal, genre navigation, and persistence notices.

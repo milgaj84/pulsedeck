@@ -174,13 +174,7 @@ mod tests {
     use crate::radio::Station;
 
     fn station(name: &str, url: &str, genre: &str) -> Station {
-        Station {
-            name: name.to_string(),
-            url: url.to_string(),
-            genre: genre.to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }
+        Station::basic(name, url, genre, "US", 128)
     }
 
     fn notice_text(app: &App) -> Option<&str> {
