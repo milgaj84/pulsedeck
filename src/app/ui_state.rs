@@ -32,13 +32,25 @@ impl Default for UiState {
 
 impl UiState {
     #[cfg(not(test))]
+    #[allow(dead_code)]
     pub(super) fn load() -> Self {
-        crate::config::load_json::<Self>(UI_STATE_FILE).sanitized()
+        Self::load_with_warning().0
     }
 
     #[cfg(test)]
     pub(super) fn load() -> Self {
         Self::default()
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn load_with_warning() -> (Self, Option<String>) {
+        let (state, warning) = crate::config::load_json_with_warning::<Self>(UI_STATE_FILE);
+        (state.sanitized(), warning)
+    }
+
+    #[cfg(test)]
+    pub(super) fn load_with_warning() -> (Self, Option<String>) {
+        (Self::default(), None)
     }
 
     pub(super) fn from_app_values(
@@ -129,6 +141,14 @@ mod tests {
         assert!(!state.muted());
         assert_eq!(state.layout_mode(), LayoutMode::Split);
         assert_eq!(state.visualizer_mode(), 0);
+    }
+
+    #[test]
+    fn test_load_with_warning_uses_defaults_in_tests() {
+        let (state, warning) = UiState::load_with_warning();
+
+        assert_eq!(state.volume(), 80);
+        assert!(warning.is_none());
     }
 
     #[test]

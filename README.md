@@ -101,7 +101,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `u` | Library only | Undo the most recent station removal |
 | `Tab` / `Shift+Tab` | Library | Switch genre categories |
 | `i` | Library | Show details for the highlighted station |
-| `g` | Library | Show recent stream-provided track titles for this session |
+| `g` | Library | Show Recent Tracks, or persistent Listening History when history saving is enabled |
 | `e` | Library | Export saved library to M3U format |
 | `Space` | Playback | Pause / resume |
 | `s` | Playback | Stop playback |
@@ -166,7 +166,8 @@ Search results show saved stations with a star and include compact genre/country
 
 - PulseDeck remembers your library between sessions.
 - PulseDeck also remembers your volume, mute state, layout mode, visualizer mode, and selected theme in config files.
-- Settings such as auto-resume, audio output, notifications, and theme are saved automatically.
+- Settings such as auto-resume, audio output, notifications, history persistence, and theme are saved automatically.
+- If *Save song history* is enabled, the `g` panel becomes persistent Listening History backed by `history.json`; when it is disabled, `g` remains a session-only Recent Tracks list.
 - Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
 
 ---
@@ -203,7 +204,7 @@ Press `,` to open the settings panel. Current options:
 
 - **Desktop notifications**: show current track changes while you listen. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
 - **Auto-resume last station on startup**: start the previous station automatically on launch.
-- **Save song history**: toggles persistent track history (saved to `history.json` and viewable via `g`).
+- **Save song history**: when enabled, the `g` panel shows persistent Listening History saved to `history.json`; when disabled, `g` shows session-only Recent Tracks.
 - **Audio Output**: choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
 - **Theme**: cycle between Retrowave, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, Catppuccin Latte, and Terminal. The Terminal theme uses reset backgrounds and ANSI colors so PulseDeck follows your terminal emulator palette.
 

@@ -14,10 +14,10 @@ pub struct NoticeState {
 
 impl App {
     pub fn new(library: Library) -> Self {
-        let ui_state = super::ui_state::UiState::load();
+        let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
-        let history = crate::history::History::load();
+        let (history, history_warning) = crate::history::History::load_with_warning();
 
         let mut app = Self {
             library,
@@ -47,8 +47,20 @@ impl App {
         app.sync_output_device();
         app.sync_volume();
 
-        if let Some(warning) = app.library.load_warnings.first().cloned() {
-            app.set_error_notice(warning);
+        let mut startup_warnings = app.library.load_warnings.clone();
+        if let Some(warning) = ui_state_warning {
+            startup_warnings.push(warning);
+        }
+        if let Some(warning) = history_warning {
+            startup_warnings.push(warning);
+        }
+
+        match startup_warnings.len() {
+            0 => {}
+            1 => app.set_error_notice(startup_warnings.remove(0)),
+            count => app.set_error_notice(format!(
+                "{count} config files had load warnings; using safe defaults where needed"
+            )),
         }
 
         if app.library.settings.autoplay_last {

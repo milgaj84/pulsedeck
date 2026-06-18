@@ -36,15 +36,27 @@ pub fn migrate_legacy(file: &str) {
 }
 
 #[cfg_attr(test, allow(dead_code))]
-pub fn load_json<T: DeserializeOwned + Default>(file: &str) -> T {
+pub fn load_json_with_warning<T: DeserializeOwned + Default>(file: &str) -> (T, Option<String>) {
     let Some(path) = config_path(file) else {
-        return T::default();
+        return (T::default(), None);
     };
 
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|contents| serde_json::from_str::<T>(&contents).ok())
-        .unwrap_or_default()
+    if !path.exists() {
+        return (T::default(), None);
+    }
+
+    match fs::read_to_string(&path) {
+        Ok(contents) => parse_json_with_warning(file, &contents),
+        Err(err) => (
+            T::default(),
+            Some(format!("Could not read {file}; using defaults: {err}")),
+        ),
+    }
+}
+
+#[allow(dead_code)]
+pub fn load_json<T: DeserializeOwned + Default>(file: &str) -> T {
+    load_json_with_warning(file).0
 }
 
 #[cfg_attr(test, allow(dead_code))]
@@ -62,9 +74,29 @@ pub fn path_for(base: &Path, config_dir: &str, file: &str) -> PathBuf {
     base.join(config_dir).join(file)
 }
 
+fn parse_json_with_warning<T: DeserializeOwned + Default>(
+    file: &str,
+    contents: &str,
+) -> (T, Option<String>) {
+    match serde_json::from_str::<T>(contents) {
+        Ok(value) => (value, None),
+        Err(err) => (
+            T::default(),
+            Some(format!("Could not parse {file}; using defaults: {err}")),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+    struct TestConfig {
+        #[serde(default)]
+        value: u8,
+    }
 
     #[test]
     fn path_for_uses_requested_config_dir_and_file() {
@@ -78,5 +110,24 @@ mod tests {
             path_for(&base, OLD_CONFIG_DIR, "history.json"),
             PathBuf::from("/tmp/config/driftfm/history.json")
         );
+    }
+
+    #[test]
+    fn parse_json_with_warning_accepts_valid_json() {
+        let (value, warning) =
+            parse_json_with_warning::<TestConfig>("ui-state.json", "{\"value\":7}");
+
+        assert_eq!(value, TestConfig { value: 7 });
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn parse_json_with_warning_returns_default_and_warning_for_malformed_json() {
+        let (value, warning) = parse_json_with_warning::<TestConfig>("history.json", "{not json");
+
+        assert_eq!(value, TestConfig::default());
+        assert!(warning
+            .unwrap()
+            .contains("Could not parse history.json; using defaults"));
     }
 }

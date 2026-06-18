@@ -41,7 +41,9 @@ impl BufferStatusMeter {
         capacity: usize,
         status_tx: &mpsc::Sender<AudioStatus>,
     ) {
-        let mut state = self.state.lock().unwrap();
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
         let (percent, seconds) = buffer_status_from_velocity(
             len,
             capacity,
@@ -63,7 +65,9 @@ impl BufferStatusMeter {
             return;
         }
 
-        let mut state = self.state.lock().unwrap();
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
         let now = Instant::now();
         let delta_t = state
             .last_consumed_at

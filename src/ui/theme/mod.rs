@@ -16,14 +16,18 @@ static ACTIVE_PALETTE: RwLock<Option<ThemePalette>> = RwLock::new(None);
 /// Initialize or change the active theme.
 pub fn set_active(name: ThemeName) {
     let palette = name.palette();
-    let mut lock = ACTIVE_PALETTE.write().unwrap();
-    *lock = Some(palette);
+    if let Ok(mut lock) = ACTIVE_PALETTE.write() {
+        *lock = Some(palette);
+    }
 }
 
 /// Read the current active palette (falls back to Retrowave).
 fn active() -> ThemePalette {
-    let lock = ACTIVE_PALETTE.read().unwrap();
-    lock.clone().unwrap_or_else(palette_retrowave)
+    ACTIVE_PALETTE
+        .read()
+        .ok()
+        .and_then(|lock| (*lock).clone())
+        .unwrap_or_else(palette_retrowave)
 }
 
 // ── Semantic Color Accessors ─────────────────────────────────────────

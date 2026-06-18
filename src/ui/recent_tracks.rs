@@ -28,7 +28,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(Span::styled(" ✦ Recent Tracks ✦ ", theme::title()))
+        .title(Span::styled(
+            recent_panel_title(app.library.settings.save_history),
+            theme::title(),
+        ))
         .borders(Borders::ALL)
         .border_style(
             Style::default()
@@ -54,6 +57,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
 fn recent_area_is_compact(area: Rect) -> bool {
     area.width < MIN_RECENT_WIDTH || area.height < MIN_RECENT_HEIGHT
+}
+
+fn recent_panel_title(save_history: bool) -> &'static str {
+    if save_history {
+        " ✦ Listening History ✦ "
+    } else {
+        " ✦ Recent Tracks ✦ "
+    }
 }
 
 fn format_relative_time(entry_at_str: &str) -> String {
@@ -106,7 +117,7 @@ fn recent_track_lines(app: &App) -> Vec<Line<'static>> {
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Persistent history enabled; saved to history.json.",
+            "Listening History enabled; saved to history.json.",
             theme::dim(),
         )));
         lines.push(close_hint());
@@ -142,7 +153,7 @@ fn recent_track_lines(app: &App) -> Vec<Line<'static>> {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Session-only list; nothing is recorded or archived.",
+        "Recent Tracks is session-only; nothing is saved while history is off.",
         theme::dim(),
     )));
     lines.push(close_hint());
@@ -171,5 +182,11 @@ mod tests {
     #[test]
     fn recent_overlay_accepts_minimum_area() {
         assert!(!recent_area_is_compact(Rect::new(0, 0, 56, 12)));
+    }
+
+    #[test]
+    fn recent_title_reflects_history_persistence() {
+        assert_eq!(recent_panel_title(false), " ✦ Recent Tracks ✦ ");
+        assert_eq!(recent_panel_title(true), " ✦ Listening History ✦ ");
     }
 }

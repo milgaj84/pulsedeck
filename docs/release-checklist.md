@@ -10,10 +10,16 @@ git pull origin master
 git fetch --prune
 ```
 
+Set the release version once for the commands below:
+
+```bash
+VERSION=0.2.4
+```
+
 Confirm the version:
 
 ```bash
-grep -n 'version = "0.1.7"' Cargo.toml
+grep -n "version = \"$VERSION\"" Cargo.toml
 grep -A2 -n 'name = "pulsedeck"' Cargo.lock
 ```
 
@@ -29,29 +35,31 @@ cargo run
 
 ## Visual release smoke check
 
-For the 0.1.7 visual-enchantments release, manually check:
+For a visual smoke pass, manually check:
 
 ```text
 Split layout: cassette stays stable while reels animate
-Right-only Bento layout: stable cassette, status strip, and framed signal screen compose cleanly
-Visualizer modes: Spectrum, Real Oscilloscope, and Simulated Oscilloscope show framed mode titles
+Library Focus and Signal Focus layouts compose cleanly at common terminal sizes
+Visualizer modes: RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope show framed mode titles
 Spectrum analyzer: high-frequency bars do not show an artificial final-bin spike or deep treble valley
-Footer status row: playback, volume, layout, and scope labels stay readable at common terminal widths
-Shortcut row: normal mode shows Layout, Scope, Search, Remove, Undo, Config, Help, and Quit
-Help overlay: Deck & Visuals section mentions deck layout and all scope modes
+Footer status row: playback, volume, layout, visualizer, and notice labels stay readable at common terminal widths
+Shortcut row: normal mode shows the most relevant actions for the current state
+Help overlay: shortcut sections match the current keymap
+Settings overlay: rows, descriptions, and saved-automatically guidance are readable
+Recent Tracks / Listening History overlay: title and footer match the history persistence setting
 Library rows: selected/playing markers, country, and bitrate remain readable without long-name overflow
 Search rows: saved-result stars and genre/country/bitrate metadata display cleanly
-Deck page: title uses PulseDeck control-surface language
-Theme cycling: Retrowave and all Catppuccin themes keep deck, footer, help, library/search rows, and visualizer colors consistent
+Theme cycling: Retrowave, Catppuccin themes, and Terminal theme keep deck, footer, help, library/search rows, and visualizer colors consistent
 ```
 
 Use these in-app keys during the smoke pass:
 
 ```text
-b   cycle split / library-only / full-deck Bento layout
+b   cycle Split View / Library Focus / Signal Focus
 v   cycle visualizer modes
 /   check search row metadata and saved-result stars
-h   check updated help overlay wording
+g   check Recent Tracks / Listening History copy
+h   check help overlay wording
 ,   switch themes in settings
 ```
 
@@ -90,18 +98,18 @@ cargo publish
 After crates.io accepts the package, tag the exact commit that was published:
 
 ```bash
-git tag -a v0.1.7 -m "PulseDeck 0.1.7"
-git push origin v0.1.7
+git tag -a "v$VERSION" -m "PulseDeck $VERSION"
+git push origin "v$VERSION"
 ```
 
 ## GitHub release
 
-Create a GitHub release from tag `v0.1.7` and paste the notes from the `0.1.7` section of `CHANGELOG.md`.
+Create a GitHub release from tag `v$VERSION` and paste the notes from the matching section of `CHANGELOG.md`.
 
 ## Post-release sanity check
 
 ```bash
-cargo install pulsedeck --version 0.1.7
+cargo install pulsedeck --version "$VERSION"
 pulsedeck
 ```
 

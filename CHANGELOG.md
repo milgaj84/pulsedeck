@@ -8,6 +8,23 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.2.4] - 2026-06-18
+
+### Fixed
+*   **CLI command handling**: Unknown CLI commands now report a clear error instead of silently launching the TUI.
+*   **Release checklist**: Updated stale release commands and version references so future patch releases do not inherit 0.1.x examples.
+*   **History wording**: Clarified Recent Tracks and persistent Listening History wording in user-facing docs and panel copy.
+
+### Improved
+*   **CLI export paths**: Export now creates missing parent directories for nested output paths.
+*   **Config load warnings**: Malformed or unreadable persisted config now surfaces a startup warning while PulseDeck keeps running with safe defaults.
+*   **Runtime hardening**: Buffer telemetry and theme palette access now avoid panics on poisoned locks.
+
+### Internal
+*   Added regression coverage for CLI unknown-command handling, nested export paths, config warning parsing, and history panel titling.
+
+---
+
 ## [0.2.3] - 2026-06-16
 
 ### Changed

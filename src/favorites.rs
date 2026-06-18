@@ -154,9 +154,19 @@ impl Library {
                             }
                             (stations, settings)
                         }
-                        Err(_) => (seed_stations, Settings::default()), // corrupt file → use seeds
+                        Err(err) => {
+                            load_warnings.push(format!(
+                                "Could not parse library.json; using starter stations: {err}"
+                            ));
+                            (seed_stations, Settings::default())
+                        }
                     },
-                    Err(_) => (seed_stations, Settings::default()),
+                    Err(err) => {
+                        load_warnings.push(format!(
+                            "Could not read library.json; using starter stations: {err}"
+                        ));
+                        (seed_stations, Settings::default())
+                    }
                 }
             } else {
                 // First launch — seed and save
@@ -194,13 +204,29 @@ impl Library {
     pub fn load_existing() -> Self {
         let path = config_path();
 
+        let mut load_warnings = Vec::new();
         let (stations, settings) = match path.as_ref() {
             Some(p) if p.exists() => match fs::read_to_string(p) {
                 Ok(contents) => match parse_library_file(&contents) {
-                    Ok((stations, settings, _warning)) => (stations, settings),
-                    Err(_) => (Vec::new(), Settings::default()),
+                    Ok((stations, settings, warning)) => {
+                        if let Some(warning) = warning {
+                            load_warnings.push(warning);
+                        }
+                        (stations, settings)
+                    }
+                    Err(err) => {
+                        load_warnings.push(format!(
+                            "Could not parse library.json; using empty library: {err}"
+                        ));
+                        (Vec::new(), Settings::default())
+                    }
                 },
-                Err(_) => (Vec::new(), Settings::default()),
+                Err(err) => {
+                    load_warnings.push(format!(
+                        "Could not read library.json; using empty library: {err}"
+                    ));
+                    (Vec::new(), Settings::default())
+                }
             },
             _ => (Vec::new(), Settings::default()),
         };
@@ -210,7 +236,7 @@ impl Library {
             available_genres: Vec::new(),
             settings,
             path,
-            load_warnings: Vec::new(),
+            load_warnings,
         };
         lib.rebuild_genres();
         lib
