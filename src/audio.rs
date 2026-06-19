@@ -1,5 +1,3 @@
-mod buffer;
-mod buffer_meter;
 mod engine_loop;
 mod metadata;
 mod output;
@@ -31,6 +29,7 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     SetOutputDevice(Option<String>),
+    SetStreamMetadata(bool),
 }
 
 /// Status updates sent from the audio thread back to the UI.
@@ -43,7 +42,6 @@ pub enum AudioStatus {
     Connecting,
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
-    BufferLevel { percent: u8, seconds: u32 },
 }
 
 /// Handle to communicate with the audio engine running on a background thread.

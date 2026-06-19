@@ -21,6 +21,7 @@ pub(super) fn audio_loop(
     let mut output_stream: Option<OutputStream> = None;
     let mut output_handle: Option<rodio::OutputStreamHandle> = None;
     let mut preferred_output_device_name: Option<String> = None;
+    let mut stream_metadata_enabled = true;
     let mut reopen_output_on_next_connection = false;
 
     let mut current_sink: Option<Sink> = None;
@@ -65,6 +66,7 @@ pub(super) fn audio_loop(
                                     status_tx: &status_tx,
                                     sample_buffer: &sample_buffer,
                                     preferred_output_device_name: &preferred_output_device_name,
+                                    stream_metadata_enabled,
                                     reopen_output_on_next_connection:
                                         &mut reopen_output_on_next_connection,
                                 },
@@ -117,6 +119,9 @@ pub(super) fn audio_loop(
                             reopen_output_on_next_connection = false;
                         }
                     }
+                    AudioCommand::SetStreamMetadata(enabled) => {
+                        stream_metadata_enabled = enabled;
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -146,6 +151,7 @@ pub(super) fn audio_loop(
                             status_tx: &status_tx,
                             sample_buffer: &sample_buffer,
                             preferred_output_device_name: &preferred_output_device_name,
+                            stream_metadata_enabled,
                             reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
                         },
                     );
@@ -174,6 +180,7 @@ pub(super) fn audio_loop(
                         status_tx: &status_tx,
                         sample_buffer: &sample_buffer,
                         preferred_output_device_name: &preferred_output_device_name,
+                        stream_metadata_enabled,
                         reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
                     },
                 );
@@ -237,6 +244,7 @@ pub(super) fn audio_loop(
                                             sample_buffer: &sample_buffer,
                                             preferred_output_device_name:
                                                 &preferred_output_device_name,
+                                            stream_metadata_enabled,
                                             reopen_output_on_next_connection:
                                                 &mut reopen_output_on_next_connection,
                                         },
@@ -281,7 +289,9 @@ fn handle_test_audio_command(cmd: AudioCommand, status_tx: &mpsc::Sender<AudioSt
         AudioCommand::Stop => {
             let _ = status_tx.send(AudioStatus::Stopped);
         }
-        AudioCommand::SetVolume(_) | AudioCommand::SetOutputDevice(_) => {}
+        AudioCommand::SetVolume(_)
+        | AudioCommand::SetOutputDevice(_)
+        | AudioCommand::SetStreamMetadata(_) => {}
     }
 }
 
@@ -368,6 +378,7 @@ struct SpawnConnectionState<'a> {
     status_tx: &'a mpsc::Sender<AudioStatus>,
     sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
     preferred_output_device_name: &'a Option<String>,
+    stream_metadata_enabled: bool,
     reopen_output_on_next_connection: &'a mut bool,
 }
 
@@ -411,6 +422,7 @@ fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
         conn_id,
         active_conn_id: state.active_ref.clone(),
         sample_buffer: state.sample_buffer.clone(),
+        request_stream_metadata: state.stream_metadata_enabled,
     };
 
     drop(state.connect_ref.take());

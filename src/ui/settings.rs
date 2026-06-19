@@ -6,7 +6,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 const MIN_SETTINGS_WIDTH: u16 = 60;
-const MIN_SETTINGS_HEIGHT: u16 = 16;
+const MIN_SETTINGS_HEIGHT: u16 = 18;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let popup_area = super::centered_rect(54, 64, area);
@@ -128,6 +128,9 @@ fn setting_description(row: SettingRow) -> &'static str {
         SettingRow::Theme => {
             "Change PulseDeck's color palette instantly; settings save automatically."
         }
+        SettingRow::StreamMetadata => {
+            "Request stream song-title metadata when stations support it."
+        }
         SettingRow::SaveHistory => {
             "Save played tracks to history.json so they persist across restarts."
         }
@@ -171,6 +174,11 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                 Span::styled("(Space/Right forward, Left back)", theme::dim()),
             ]
         }
+        SettingRow::StreamMetadata => checkbox_row(
+            app.library.settings.stream_metadata_enabled,
+            "Stream Song Info Metadata",
+            label_style,
+        ),
         SettingRow::SaveHistory => checkbox_row(
             app.library.settings.save_history,
             "Save Track History (g Overlay)",
@@ -274,12 +282,12 @@ mod tests {
 
     #[test]
     fn settings_overlay_rejects_tiny_area() {
-        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 16)));
-        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 15)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 18)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 17)));
     }
 
     #[test]
     fn settings_overlay_accepts_minimum_area() {
-        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 16)));
+        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 18)));
     }
 }

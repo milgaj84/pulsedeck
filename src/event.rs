@@ -24,6 +24,7 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
     match mode {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
+        InputMode::CommandPalette => map_command_palette(key),
         InputMode::SleepTimer => map_sleep_timer(key),
     }
 }
@@ -43,12 +44,16 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
             Some(Action::EnterSearch)
         }
 
+        // Command palette
+        (_, KeyCode::Char(':')) => Some(Action::OpenCommandPalette),
+        (mods, KeyCode::Char('p')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::OpenCommandPalette)
+        }
+
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => Some(Action::NextStation),
-        (_, KeyCode::Right) | (_, KeyCode::Char('l')) | (_, KeyCode::Char('d')) => {
-            Some(Action::StepSettingForward)
-        }
+        (_, KeyCode::Right) | (_, KeyCode::Char('l')) => Some(Action::StepSettingForward),
         (_, KeyCode::Left) | (_, KeyCode::Char('a')) => Some(Action::StepSettingBackward),
 
         // Playback
@@ -81,6 +86,11 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
             if allows_normal_shortcut_modifier(mods) =>
         {
             Some(Action::ToggleRecentTracks)
+        }
+        (mods, KeyCode::Char('d') | KeyCode::Char('D'))
+            if allows_normal_shortcut_modifier(mods) =>
+        {
+            Some(Action::TogglePlaybackDoctor)
         }
 
         // Bento layout cycle
@@ -150,6 +160,19 @@ fn map_search(key: KeyEvent) -> Option<Action> {
 
 fn has_search_escape_modifier(modifiers: KeyModifiers) -> bool {
     modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
+fn map_command_palette(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Esc) => Some(Action::CommandPaletteClose),
+        (_, KeyCode::Enter) => Some(Action::CommandPaletteConfirm),
+        (_, KeyCode::Backspace) => Some(Action::CommandPaletteBackspace),
+        (_, KeyCode::Up) => Some(Action::CommandPalettePrev),
+        (_, KeyCode::Down) => Some(Action::CommandPaletteNext),
+        (_, KeyCode::Char(c)) => Some(Action::CommandPaletteInput(c)),
+        _ => None,
+    }
 }
 
 /// Key mapping for the sleep-timer overlay.
@@ -400,6 +423,41 @@ mod tests {
     }
 
     #[test]
+    fn normal_mode_command_palette_shortcuts_open_palette() {
+        assert_eq!(
+            map_key(key(KeyCode::Char(':')), &InputMode::Normal),
+            Some(Action::OpenCommandPalette),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('p'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            Some(Action::OpenCommandPalette),
+        );
+    }
+
+    #[test]
+    fn command_palette_mode_maps_text_navigation_and_close() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('s')), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteInput('s')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Down), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteNext),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Up), &InputMode::CommandPalette),
+            Some(Action::CommandPalettePrev),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Esc), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteClose),
+        );
+    }
+
+    #[test]
     fn normal_mode_right_steps_setting_forward() {
         assert_eq!(
             map_key(key(KeyCode::Right), &InputMode::Normal),
@@ -416,13 +474,9 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_l_and_d_step_setting_forward() {
+    fn normal_mode_l_steps_setting_forward() {
         assert_eq!(
             map_key(key(KeyCode::Char('l')), &InputMode::Normal),
-            Some(Action::StepSettingForward),
-        );
-        assert_eq!(
-            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
             Some(Action::StepSettingForward),
         );
     }
@@ -465,6 +519,10 @@ mod tests {
             map_key(key(KeyCode::Char('r')), &InputMode::Normal),
             Some(Action::RetryStream),
         );
+        assert_eq!(
+            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
+            Some(Action::TogglePlaybackDoctor),
+        );
     }
 
     #[test]
@@ -490,6 +548,13 @@ mod tests {
             ),
             Some(Action::RetryStream),
         );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('D'), KeyModifiers::SHIFT),
+                &InputMode::Normal
+            ),
+            Some(Action::TogglePlaybackDoctor),
+        );
     }
 
     #[test]
@@ -511,6 +576,13 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('d'), KeyModifiers::CONTROL),
                 &InputMode::Normal
             ),
             None,
@@ -555,7 +627,6 @@ mod tests {
             KeyCode::Char('n'),
             KeyCode::Char('K'),
             KeyCode::Char('T'),
-            KeyCode::Char('D'),
             KeyCode::Delete,
         ];
 

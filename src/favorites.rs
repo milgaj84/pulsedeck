@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::radio::{
     clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
-    sanitize_bitrate, station_identity_matches, Station,
+    sanitize_bitrate, station_identity_matches, Station, StationHealth,
 };
 
 const LIBRARY_FILE: &str = "library.json";
@@ -30,6 +30,8 @@ pub struct Settings {
     pub output_device_name: Option<String>,
     #[serde(default)]
     pub save_history: bool,
+    #[serde(default = "default_true")]
+    pub stream_metadata_enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -49,6 +51,7 @@ impl Default for Settings {
             theme: "Retrowave".to_string(),
             output_device_name: None,
             save_history: false,
+            stream_metadata_enabled: true,
         }
     }
 }
@@ -101,6 +104,8 @@ struct SavedStation {
     votes: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     click_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "StationHealth::is_empty")]
+    health: StationHealth,
 }
 
 impl From<&Station> for SavedStation {
@@ -120,6 +125,7 @@ impl From<&Station> for SavedStation {
             last_check_ok: s.last_check_ok,
             votes: s.votes,
             click_count: s.click_count,
+            health: s.health.clone(),
         }
     }
 }
@@ -141,6 +147,7 @@ impl From<SavedStation> for Station {
             last_check_ok: s.last_check_ok,
             votes: s.votes,
             click_count: s.click_count,
+            health: s.health,
         }
     }
 }
@@ -173,6 +180,53 @@ pub fn resolve_parent_genre(subgenre: &str) -> &'static str {
 pub struct ImportSummary {
     pub added: usize,
     pub skipped: usize,
+    pub enriched: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MetadataRefreshSummary {
+    pub checked: usize,
+    pub enriched: usize,
+    pub unchanged: usize,
+    pub failed: usize,
+}
+
+impl MetadataRefreshSummary {
+    pub fn notice(self) -> String {
+        format!(
+            "Metadata refresh: {} checked, {} enriched, {} unchanged, {} failed",
+            self.checked, self.enriched, self.unchanged, self.failed
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportPreview {
+    pub new_stations: Vec<Station>,
+    pub duplicates: Vec<Station>,
+    pub enrichments: Vec<Station>,
+    pub skipped: Vec<ImportSkip>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSkip {
+    pub name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportMode {
+    All,
+    EnrichExistingOnly,
+}
+
+impl ImportPreview {
+    pub fn is_empty(&self) -> bool {
+        self.new_stations.is_empty()
+            && self.duplicates.is_empty()
+            && self.enrichments.is_empty()
+            && self.skipped.is_empty()
+    }
 }
 
 impl Library {
@@ -308,21 +362,119 @@ impl Library {
 
     /// Import a list of stations, merging by Radio Browser UUID when present, then URL.
     pub fn import_stations(&mut self, stations: Vec<Station>) -> anyhow::Result<ImportSummary> {
-        let mut added = 0;
-        let mut skipped = 0;
-        for s in stations {
-            if self.contains_station(&s) {
-                self.enrich_matching_station(&s);
-                skipped += 1;
+        let preview = self.preview_import(stations);
+        self.apply_import_preview(preview, ImportMode::All)
+    }
+
+    pub fn preview_import(&self, stations: Vec<Station>) -> ImportPreview {
+        let mut preview = ImportPreview {
+            new_stations: Vec::new(),
+            duplicates: Vec::new(),
+            enrichments: Vec::new(),
+            skipped: Vec::new(),
+        };
+        let mut virtual_library = self.stations.clone();
+
+        for station in stations {
+            if let Some(reason) = import_skip_reason(&station) {
+                preview.skipped.push(ImportSkip {
+                    name: import_skip_name(&station),
+                    reason,
+                });
+                continue;
+            }
+
+            if let Some(existing) = virtual_library
+                .iter_mut()
+                .find(|saved| station_identity_matches(saved, &station))
+            {
+                let mut enriched = existing.clone();
+                if enriched.enrich_from(&station) {
+                    *existing = enriched;
+                    preview.enrichments.push(station);
+                } else {
+                    preview.duplicates.push(station);
+                }
             } else {
-                self.stations.push(s);
-                added += 1;
+                virtual_library.push(station.clone());
+                preview.new_stations.push(station);
             }
         }
-        if added > 0 {
+
+        preview
+    }
+
+    pub fn apply_import_preview(
+        &mut self,
+        preview: ImportPreview,
+        mode: ImportMode,
+    ) -> anyhow::Result<ImportSummary> {
+        let mut added = 0;
+        let mut skipped = preview.duplicates.len() + preview.skipped.len();
+        let mut enriched = 0;
+
+        for station in preview.enrichments {
+            if self.enrich_matching_station(&station) {
+                enriched += 1;
+            } else if mode == ImportMode::All && !self.contains_station(&station) {
+                self.stations.push(station);
+                added += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+
+        if mode == ImportMode::All {
+            for station in preview.new_stations {
+                if self.contains_station(&station) {
+                    skipped += 1;
+                } else {
+                    self.stations.push(station);
+                    added += 1;
+                }
+            }
+        } else {
+            skipped += preview.new_stations.len();
+        }
+
+        if added > 0 || enriched > 0 {
             self.rebuild_genres();
         }
-        Ok(ImportSummary { added, skipped })
+
+        Ok(ImportSummary {
+            added,
+            skipped,
+            enriched,
+        })
+    }
+
+    pub fn apply_metadata_refresh_results(
+        &mut self,
+        checked: usize,
+        matches: Vec<Station>,
+        failed: usize,
+    ) -> MetadataRefreshSummary {
+        let mut summary = MetadataRefreshSummary {
+            checked,
+            failed,
+            ..MetadataRefreshSummary::default()
+        };
+
+        for station in matches {
+            if self.enrich_matching_station(&station) {
+                summary.enriched += 1;
+            } else {
+                summary.unchanged += 1;
+            }
+        }
+
+        summary.unchanged += checked.saturating_sub(summary.enriched + summary.unchanged + failed);
+
+        if summary.enriched > 0 {
+            self.rebuild_genres();
+        }
+
+        summary
     }
 
     /// Remove a station by URL. Returns true if removed.
@@ -366,6 +518,39 @@ impl Library {
             .is_some_and(|saved| saved.enrich_from(station))
     }
 
+    pub fn mark_station_success(&mut self, url: &str, now: String) -> bool {
+        if let Some(station) = self
+            .stations
+            .iter_mut()
+            .find(|station| normalized_url_match(&station.url, url))
+        {
+            station.health.last_success_at = Some(now);
+            station.health.last_error_summary.clear();
+            return true;
+        }
+        false
+    }
+
+    pub fn mark_station_failure(&mut self, url: &str, now: String, error: &str) -> bool {
+        if let Some(station) = self
+            .stations
+            .iter_mut()
+            .find(|station| normalized_url_match(&station.url, url))
+        {
+            station.health.last_failure_at = Some(now);
+            station.health.failure_count = Some(
+                station
+                    .health
+                    .failure_count
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            );
+            station.health.last_error_summary = compact_error_summary(error);
+            return true;
+        }
+        false
+    }
+
     /// Check if a station URL is in the library.
     pub fn contains(&self, url: &str) -> bool {
         self.stations.iter().any(|s| s.url == url)
@@ -400,6 +585,33 @@ impl Library {
 /// copy the old file into the new config directory so users keep their library.
 fn config_path() -> Option<PathBuf> {
     crate::config::config_path(LIBRARY_FILE)
+}
+
+fn normalized_url_match(left: &str, right: &str) -> bool {
+    left.trim().trim_end_matches('/').eq_ignore_ascii_case(right.trim().trim_end_matches('/'))
+}
+
+fn compact_error_summary(error: &str) -> String {
+    crate::ui::text::truncate_with_ellipsis(error.trim(), 96)
+}
+
+fn import_skip_reason(station: &Station) -> Option<String> {
+    if station.url.trim().is_empty() {
+        Some("missing stream URL".to_string())
+    } else if station.name.trim().is_empty() {
+        Some("missing station name".to_string())
+    } else {
+        None
+    }
+}
+
+fn import_skip_name(station: &Station) -> String {
+    let name = station.name.trim();
+    if name.is_empty() {
+        "Unnamed station".to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 fn parse_library_file(
@@ -605,6 +817,206 @@ mod tests {
         let summary = lib.import_stations(to_import).unwrap();
         assert_eq!(summary.added, 1);
         assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.enriched, 0);
         assert_eq!(lib.stations.len(), 2);
     }
+
+    #[test]
+    fn preview_import_classifies_new_duplicate_enrichment_and_skip() {
+        let mut saved = station("Saved", "http://saved", "Synthwave", "US", 0);
+        saved.station_uuid = Some("uuid-saved".to_string());
+        let lib = Library::in_memory(vec![saved]);
+
+        let duplicate = station("Saved", "http://saved", "Synthwave", "US", 0);
+        let mut enrichment = station("Saved Rich", "http://saved", "Synthwave", "US", 128);
+        enrichment.station_uuid = Some("uuid-saved".to_string());
+        enrichment.codec = "MP3".to_string();
+        let new_station = station("New", "http://new", "Ambient", "UK", 96);
+        let broken = station("Broken", "", "Ambient", "UK", 96);
+
+        let preview = lib.preview_import(vec![duplicate, enrichment, new_station, broken]);
+
+        assert_eq!(preview.duplicates.len(), 1);
+        assert_eq!(preview.enrichments.len(), 1);
+        assert_eq!(preview.new_stations.len(), 1);
+        assert_eq!(preview.skipped.len(), 1);
+        assert_eq!(preview.skipped[0].reason, "missing stream URL");
+    }
+
+    #[test]
+    fn empty_import_preview_reports_empty() {
+        let lib = Library::in_memory(vec![]);
+
+        assert!(lib.preview_import(vec![]).is_empty());
+    }
+
+    #[test]
+    fn preview_import_does_not_write_library() {
+        let lib = Library::in_memory(vec![station(
+            "Saved",
+            "http://saved",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let preview = lib.preview_import(vec![station("New", "http://new", "Ambient", "UK", 96)]);
+
+        assert_eq!(preview.new_stations.len(), 1);
+        assert_eq!(lib.stations.len(), 1);
+    }
+
+    #[test]
+    fn apply_import_preview_enrich_only_does_not_add_new_stations() {
+        let mut saved = station("Saved", "http://saved", "Synthwave", "US", 0);
+        saved.station_uuid = Some("uuid-saved".to_string());
+        let mut lib = Library::in_memory(vec![saved]);
+
+        let mut enrichment = station("Saved Rich", "http://saved", "Synthwave", "US", 128);
+        enrichment.station_uuid = Some("uuid-saved".to_string());
+        enrichment.codec = "MP3".to_string();
+        let preview = lib.preview_import(vec![
+            enrichment,
+            station("New", "http://new", "Ambient", "UK", 96),
+        ]);
+
+        let summary = lib
+            .apply_import_preview(preview, ImportMode::EnrichExistingOnly)
+            .unwrap();
+
+        assert_eq!(summary.added, 0);
+        assert_eq!(summary.enriched, 1);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(lib.stations.len(), 1);
+        assert_eq!(lib.stations[0].bitrate, 128);
+        assert_eq!(lib.stations[0].codec, "MP3");
+    }
+
+    #[test]
+    fn apply_import_preview_all_adds_new_and_preserves_saved_identity_fields() {
+        let mut saved = station("Saved Name", "http://saved", "Synthwave", "US", 0);
+        saved.station_uuid = Some("uuid-saved".to_string());
+        let mut lib = Library::in_memory(vec![saved]);
+
+        let mut enrichment = station("Incoming Name", "http://saved", "Ambient", "CA", 128);
+        enrichment.station_uuid = Some("uuid-saved".to_string());
+        enrichment.codec = "AAC".to_string();
+        let preview = lib.preview_import(vec![
+            enrichment,
+            station("New", "http://new", "Ambient", "UK", 96),
+        ]);
+
+        let summary = lib.apply_import_preview(preview, ImportMode::All).unwrap();
+
+        assert_eq!(summary.added, 1);
+        assert_eq!(summary.enriched, 1);
+        assert_eq!(summary.skipped, 0);
+        assert_eq!(lib.stations.len(), 2);
+        assert_eq!(lib.stations[0].name, "Saved Name");
+        assert_eq!(lib.stations[0].url, "http://saved");
+        assert_eq!(lib.stations[0].genre, "Synthwave");
+        assert_eq!(lib.stations[0].codec, "AAC");
+    }
+
+    #[test]
+    fn preview_import_deduplicates_incoming_stations_against_each_other() {
+        let lib = Library::in_memory(vec![]);
+
+        let preview = lib.preview_import(vec![
+            station("A", "http://same", "Synthwave", "US", 128),
+            station("A Copy", "http://same/", "Ambient", "UK", 96),
+        ]);
+
+        assert_eq!(preview.new_stations.len(), 1);
+        assert_eq!(preview.duplicates.len(), 1);
+    }
+
+    #[test]
+    fn import_skip_name_uses_stable_fallback_for_blank_names() {
+        let station = station("   ", "http://blank-name", "Ambient", "UK", 96);
+
+        assert_eq!(import_skip_reason(&station), Some("missing station name".to_string()));
+        assert_eq!(import_skip_name(&station), "Unnamed station");
+    }
+
+    #[test]
+    fn metadata_refresh_summary_counts_changed_unchanged_and_failed() {
+        let mut saved = station("Saved", "http://saved", "Synthwave", "US", 0);
+        saved.station_uuid = Some("uuid-saved".to_string());
+        let mut lib = Library::in_memory(vec![saved]);
+
+        let mut changed = station("Incoming", "http://saved", "Ambient", "CA", 128);
+        changed.station_uuid = Some("uuid-saved".to_string());
+        changed.codec = "MP3".to_string();
+        let unchanged = station("Missing Match", "http://missing", "Ambient", "UK", 96);
+
+        let summary = lib.apply_metadata_refresh_results(3, vec![changed, unchanged], 1);
+
+        assert_eq!(summary.checked, 3);
+        assert_eq!(summary.enriched, 1);
+        assert_eq!(summary.unchanged, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.notice(), "Metadata refresh: 3 checked, 1 enriched, 1 unchanged, 1 failed");
+        assert_eq!(lib.stations[0].name, "Saved");
+        assert_eq!(lib.stations[0].url, "http://saved");
+        assert_eq!(lib.stations[0].genre, "Synthwave");
+        assert_eq!(lib.stations[0].codec, "MP3");
+    }
+
+    #[test]
+    fn metadata_refresh_summary_counts_no_match_as_unchanged() {
+        let mut lib = Library::in_memory(vec![station(
+            "Saved",
+            "http://saved",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let summary = lib.apply_metadata_refresh_results(1, Vec::new(), 0);
+
+        assert_eq!(summary.enriched, 0);
+        assert_eq!(summary.unchanged, 1);
+        assert_eq!(summary.failed, 0);
+    }
+
+    #[test]
+    fn station_health_deserializes_missing_fields() {
+        let json = r#"{
+            "version": 1,
+            "stations": [{
+                "name": "Old FM",
+                "url": "http://old",
+                "genre": "Radio",
+                "country": "US",
+                "bitrate": 128
+            }],
+            "settings": {}
+        }"#;
+
+        let (stations, _, _) = parse_library_file(json).unwrap();
+
+        assert!(stations[0].health.is_empty());
+    }
+
+    #[test]
+    fn mark_station_success_and_failure_update_saved_health() {
+        let mut lib = Library::in_memory(vec![station(
+            "Test A",
+            "http://a/",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        assert!(lib.mark_station_failure(" HTTP://A ", "10".to_string(), "network timeout"));
+        assert_eq!(lib.stations[0].health.failure_count, Some(1));
+        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("10"));
+        assert_eq!(lib.stations[0].health.last_error_summary, "network timeout");
+
+        assert!(lib.mark_station_success("http://a", "11".to_string()));
+        assert_eq!(lib.stations[0].health.last_success_at.as_deref(), Some("11"));
+        assert!(lib.stations[0].health.last_error_summary.is_empty());
+    }
 }
+

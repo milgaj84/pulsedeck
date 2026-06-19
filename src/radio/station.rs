@@ -1,4 +1,8 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+
+const MAX_REASONABLE_BITRATE: u32 = 1024;
 
 /// A radio station with display, playback, and optional Radio Browser trust metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,6 +31,29 @@ pub struct Station {
     pub votes: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub click_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "StationHealth::is_empty")]
+    pub health: StationHealth,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StationHealth {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub last_error_summary: String,
+}
+
+impl StationHealth {
+    pub fn is_empty(&self) -> bool {
+        self.last_success_at.is_none()
+            && self.last_failure_at.is_none()
+            && self.failure_count.unwrap_or(0) == 0
+            && self.last_error_summary.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,6 +85,7 @@ impl Station {
             last_check_ok: None,
             votes: None,
             click_count: None,
+            health: StationHealth::default(),
         }
     }
 
@@ -68,6 +96,61 @@ impl Station {
             .filter(|uuid| !uuid.is_empty())
             .map(|uuid| StationIdentity::Uuid(uuid.to_ascii_lowercase()))
             .unwrap_or_else(|| StationIdentity::Url(normalized_station_url(&self.url)))
+    }
+
+    /// Fill missing metadata from a richer Radio Browser station while preserving
+    /// the user's saved-facing station name, stream URL, and genre label.
+    pub fn enrich_from(&mut self, incoming: &Station) -> bool {
+        let mut changed = false;
+
+        if self.station_uuid.is_none() && incoming.station_uuid.is_some() {
+            self.station_uuid = incoming.station_uuid.clone();
+            changed = true;
+        }
+
+        changed |= fill_string(&mut self.country_code, &incoming.country_code);
+        changed |= fill_string(&mut self.language, &incoming.language);
+        changed |= fill_string(&mut self.codec, &incoming.codec);
+        changed |= fill_string(&mut self.homepage, &incoming.homepage);
+
+        if self.tags.is_empty() && !incoming.tags.is_empty() {
+            self.tags = incoming.tags.clone();
+            changed = true;
+        }
+
+        if self.bitrate == 0 && incoming.bitrate > 0 {
+            self.bitrate = incoming.bitrate;
+            changed = true;
+        }
+
+        if self.country.trim().is_empty() && !incoming.country.trim().is_empty() {
+            self.country = incoming.country.trim().to_string();
+            changed = true;
+        }
+
+        changed |= set_option_if_some(&mut self.last_check_ok, incoming.last_check_ok);
+        changed |= set_option_if_some(&mut self.votes, incoming.votes);
+        changed |= set_option_if_some(&mut self.click_count, incoming.click_count);
+
+        changed
+    }
+}
+
+fn fill_string(target: &mut String, incoming: &str) -> bool {
+    if target.trim().is_empty() && !incoming.trim().is_empty() {
+        *target = incoming.trim().to_string();
+        true
+    } else {
+        false
+    }
+}
+
+fn set_option_if_some<T: Copy + PartialEq>(target: &mut Option<T>, incoming: Option<T>) -> bool {
+    if incoming.is_some() && *target != incoming {
+        *target = incoming;
+        true
+    } else {
+        false
     }
 }
 
@@ -81,11 +164,47 @@ pub fn station_identity_matches(a: &Station, b: &Station) -> bool {
 }
 
 pub fn clean_tag_values(values: Vec<String>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect()
+    let mut seen = HashSet::new();
+    let mut tags = Vec::new();
+
+    for value in values {
+        let tag = value.trim();
+        if tag.is_empty() {
+            continue;
+        }
+        if seen.insert(tag.to_ascii_lowercase()) {
+            tags.push(tag.to_string());
+        }
+    }
+
+    tags
+}
+
+pub fn normalize_station_uuid(value: String) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+pub fn normalize_country_code(value: &str) -> String {
+    value.trim().to_ascii_uppercase()
+}
+
+pub fn normalize_codec(value: &str) -> String {
+    let normalized = value.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "AUDIO/MPEG" | "MPEG" => "MP3".to_string(),
+        "AAC+" | "HE-AAC" | "HEAAC" => "AAC".to_string(),
+        "OGG VORBIS" | "VORBIS" => "OGG".to_string(),
+        _ => normalized,
+    }
+}
+
+pub fn sanitize_bitrate(value: u32) -> u32 {
+    if value > MAX_REASONABLE_BITRATE {
+        0
+    } else {
+        value
+    }
 }
 
 fn normalized_station_url(value: &str) -> String {

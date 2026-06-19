@@ -25,6 +25,15 @@ pub enum Action {
     SearchConfirm,
     SearchAudition,
 
+    /// Command palette
+    OpenCommandPalette,
+    CommandPaletteConfirm,
+    CommandPaletteClose,
+    CommandPaletteInput(char),
+    CommandPaletteBackspace,
+    CommandPaletteNext,
+    CommandPalettePrev,
+
     /// Library management
     RemoveLibrarySelection,
     UndoRemoveLibrarySelection,
@@ -36,9 +45,13 @@ pub enum Action {
     ToggleHelp,
     ToggleStationDetails,
     ToggleRecentTracks,
+    TogglePlaybackDoctor,
     StepSettingForward,
     StepSettingBackward,
     ToggleSettings,
+    CycleThemeSetting,
+    ToggleStreamMetadata,
+    RefreshLibraryMetadata,
     ToggleVisualizerMode,
 
     /// App lifecycle

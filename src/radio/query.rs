@@ -10,6 +10,72 @@ pub enum SearchField {
     Codec,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchPrefixHelp {
+    pub prefix: &'static str,
+    pub aliases: &'static [&'static str],
+    pub label: &'static str,
+    pub example: &'static str,
+}
+
+pub const SEARCH_PREFIX_HELP: &[SearchPrefixHelp] = &[
+    SearchPrefixHelp {
+        prefix: "name",
+        aliases: &["station"],
+        label: "station name",
+        example: "name:lofi",
+    },
+    SearchPrefixHelp {
+        prefix: "tag",
+        aliases: &["genre"],
+        label: "genre or tag",
+        example: "tag:ambient",
+    },
+    SearchPrefixHelp {
+        prefix: "country",
+        aliases: &["cc"],
+        label: "country name or two-letter code",
+        example: "country:BA",
+    },
+    SearchPrefixHelp {
+        prefix: "lang",
+        aliases: &["language"],
+        label: "station language",
+        example: "lang:english",
+    },
+    SearchPrefixHelp {
+        prefix: "codec",
+        aliases: &["format"],
+        label: "stream codec",
+        example: "codec:mp3",
+    },
+];
+
+pub fn prefix_examples_inline() -> &'static str {
+    "try tag:ambient, country:BA, lang:english, codec:mp3, or name:lofi"
+}
+
+pub fn known_search_prefix(prefix: &str) -> bool {
+    SEARCH_PREFIX_HELP.iter().any(|help| {
+        help.prefix.eq_ignore_ascii_case(prefix.trim())
+            || help
+                .aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(prefix.trim()))
+    })
+}
+
+pub fn query_prefix(raw: &str) -> Option<String> {
+    raw.trim()
+        .split_once(':')
+        .map(|(prefix, _)| prefix.trim().to_string())
+        .filter(|prefix| !prefix.is_empty())
+}
+
+pub fn has_unknown_prefix(raw: &str) -> bool {
+    query_prefix(raw).is_some_and(|prefix| !known_search_prefix(&prefix))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StationSearchQuery {
     raw: String,
@@ -26,9 +92,9 @@ impl StationSearchQuery {
 
         let value = value.trim().to_string();
         match prefix.trim().to_ascii_lowercase().as_str() {
-            "name" => Self::with_field(raw_trimmed, SearchField::Name, value),
+            "name" | "station" => Self::with_field(raw_trimmed, SearchField::Name, value),
             "tag" | "genre" => Self::with_field(raw_trimmed, SearchField::Tag, value),
-            "country" => {
+            "country" | "cc" => {
                 if is_country_code(&value) {
                     Self::with_field(
                         raw_trimmed,
@@ -40,7 +106,7 @@ impl StationSearchQuery {
                 }
             }
             "lang" | "language" => Self::with_field(raw_trimmed, SearchField::Language, value),
-            "codec" => Self::with_field(raw_trimmed, SearchField::Codec, value),
+            "codec" | "format" => Self::with_field(raw_trimmed, SearchField::Codec, value),
             _ => Self::plain(raw_trimmed),
         }
     }

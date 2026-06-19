@@ -3,7 +3,10 @@ use ratatui::widgets::Paragraph;
 
 use super::theme;
 use crate::app::{App, SearchStatus};
-use crate::radio::{has_unknown_prefix, prefix_examples_inline, SearchField, StationSearchQuery};
+use crate::radio::{
+    explain_station_match, has_unknown_prefix, prefix_examples_inline, rank_explanation_label,
+    SearchField, StationSearchQuery,
+};
 
 const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -26,11 +29,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             format!("  ◌ searching {}...", query),
             Style::default().fg(theme::warm()),
         ),
-        SearchStatus::Ready { .. } if selected_saved => {
-            Span::styled("  ★ Saved to library", Style::default().fg(theme::warm()))
-        }
         SearchStatus::Ready { .. } => {
-            Span::styled(format!("  {} found", result_count), theme::dim())
+            let status = highlighted_result_explanation(app)
+                .unwrap_or_else(|| format!("{} found", result_count));
+            let style = if selected_saved {
+                Style::default().fg(theme::warm())
+            } else {
+                theme::dim()
+            };
+            Span::styled(format!("  {status}"), style)
         }
         SearchStatus::Empty { query } => Span::styled(empty_search_hint(query), theme::dim()),
         SearchStatus::Error { message, .. } => Span::styled(
@@ -58,6 +65,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let search_bar = Paragraph::new(vec![line]).style(Style::default().bg(theme::surface_color()));
 
     frame.render_widget(search_bar, area);
+}
+
+fn highlighted_result_explanation(app: &App) -> Option<String> {
+    let station = app.search.results.get(app.nav.selected)?;
+    let query = StationSearchQuery::parse(&app.search.query);
+    let is_saved = app.library.contains_station(station);
+    let explanation = explain_station_match(&query, station, is_saved);
+    Some(compact_explanation_label(&rank_explanation_label(&explanation)))
+}
+
+fn compact_explanation_label(value: &str) -> String {
+    const MAX_CHARS: usize = 72;
+    let mut chars = value.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
 }
 
 fn debounce_indicator_text(query: &str, tick_count: u64) -> String {
@@ -171,5 +197,13 @@ mod tests {
             compact_search_label("abcdefghijklmnopqrstuvwxyz"),
             "abcdefghijklmnopqrstuvwx…"
         );
+    }
+
+    #[test]
+    fn compact_explanation_label_truncates_safely() {
+        let long = "Signal ".repeat(20);
+
+        assert!(compact_explanation_label(&long).ends_with('…'));
+        assert!(compact_explanation_label("Exact tag").contains("Exact tag"));
     }
 }

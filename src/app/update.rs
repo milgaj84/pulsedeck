@@ -4,6 +4,11 @@ use crate::action::Action;
 impl App {
     /// Process an action and update state accordingly.
     pub fn update(&mut self, action: Action) {
+        if self.input_mode == InputMode::CommandPalette {
+            self.handle_command_palette_action(action);
+            return;
+        }
+
         match self.overlays.active {
             ActiveOverlay::Settings if self.show_settings() => {
                 self.handle_settings_action(action);
@@ -36,6 +41,14 @@ impl App {
             Action::SearchConfirm => self.confirm_search(),
             Action::SearchAudition => self.audition_search_result(),
 
+            Action::OpenCommandPalette => self.open_command_palette(),
+            Action::CommandPaletteConfirm
+            | Action::CommandPaletteClose
+            | Action::CommandPaletteInput(_)
+            | Action::CommandPaletteBackspace
+            | Action::CommandPaletteNext
+            | Action::CommandPalettePrev => {}
+
             Action::RemoveLibrarySelection => self.remove_library_selection(),
             Action::UndoRemoveLibrarySelection => self.undo_remove_library_selection(),
             Action::NextGenre => self.next_genre(),
@@ -44,8 +57,12 @@ impl App {
             Action::ToggleHelp => self.toggle_help(),
             Action::ToggleStationDetails => self.toggle_station_details(),
             Action::ToggleRecentTracks => self.toggle_recent_tracks(),
+            Action::TogglePlaybackDoctor => self.toggle_playback_doctor(),
             Action::StepSettingForward | Action::StepSettingBackward => {}
             Action::ToggleSettings => self.toggle_settings(),
+            Action::CycleThemeSetting => self.cycle_theme_setting(),
+            Action::ToggleStreamMetadata => self.toggle_stream_metadata_setting(),
+            Action::RefreshLibraryMetadata => self.request_metadata_refresh(),
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),

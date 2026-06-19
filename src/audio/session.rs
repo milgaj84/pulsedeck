@@ -1,21 +1,15 @@
-use super::buffer::BufferQueue;
-use super::buffer_meter::BufferStatusMeter;
 use super::stream_reader::{StreamReader, StreamReaderConfig};
 use super::visualizer::VisualizerSource;
 use super::AudioStatus;
 
 use rodio::{Decoder, Sink};
 use std::collections::VecDeque;
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-const STREAM_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
-const DECODER_READ_BUFFER_SIZE: usize = 64 * 1024;
-const MIN_PREBUFFER_SECONDS: usize = 2;
-const MIN_PREBUFFER_BYTES: usize = 32 * 1024;
-const MAX_PREBUFFER_WAIT: Duration = Duration::from_secs(2);
+const DECODER_READ_BUFFER_SIZE: usize = 16 * 1024;
 
 #[derive(Clone)]
 pub(super) struct ConnectionContext {
@@ -23,62 +17,24 @@ pub(super) struct ConnectionContext {
     pub(super) conn_id: u64,
     pub(super) active_conn_id: Arc<AtomicU64>,
     pub(super) sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+    pub(super) request_stream_metadata: bool,
 }
 
-/// Connect to a stream URL and create a playable Sink, with automatic backoff retries.
+/// Connect to a stream URL and create a playable Sink.
+///
+/// This intentionally avoids an internal retry/backoff loop. Initial decode
+/// failures should surface immediately so the app can show a real error instead
+/// of sitting in Connecting while repeated decoder attempts burn time.
 pub(super) fn connect_and_decode(
     url: String,
     handle: rodio::OutputStreamHandle,
     context: ConnectionContext,
 ) -> Result<Sink, String> {
-    let mut retries = 0;
-    let max_retries = 5;
-    let mut backoff = Duration::from_secs(1);
-
-    loop {
-        if context.active_conn_id.load(Ordering::SeqCst) != context.conn_id {
-            return Err("Abandoned".into());
-        }
-
-        match try_connect_and_decode_once(&url, &handle, context.clone()) {
-            Ok(sink) => return Ok(sink),
-            Err(err) => {
-                if err == "Abandoned" {
-                    return Err("Abandoned".into());
-                }
-
-                retries += 1;
-                if retries >= max_retries {
-                    return Err(format!("Failed after {max_retries} retries: {err}"));
-                }
-
-                let _ = context.status_tx.send(AudioStatus::Connecting);
-
-                let sleep_step = Duration::from_millis(100);
-                let steps = (backoff.as_millis() / sleep_step.as_millis()) as usize;
-                for _ in 0..steps {
-                    if context.active_conn_id.load(Ordering::SeqCst) != context.conn_id {
-                        return Err("Abandoned".into());
-                    }
-                    std::thread::sleep(sleep_step);
-                }
-
-                backoff = (backoff * 2).min(Duration::from_secs(8));
-            }
-        }
+    if context.active_conn_id.load(Ordering::SeqCst) != context.conn_id {
+        return Err("Abandoned".into());
     }
-}
 
-fn prebuffer_stream(queue: &BufferQueue, bytes_per_sec: usize) {
-    let target = prebuffer_target_bytes(queue.capacity, bytes_per_sec);
-    let _ = queue.wait_until_at_least(target, MAX_PREBUFFER_WAIT);
-}
-
-fn prebuffer_target_bytes(capacity: usize, bytes_per_sec: usize) -> usize {
-    bytes_per_sec
-        .saturating_mul(MIN_PREBUFFER_SECONDS)
-        .max(MIN_PREBUFFER_BYTES)
-        .min(capacity / 2)
+    try_connect_and_decode_once(&url, &handle, context)
 }
 
 fn try_connect_and_decode_once(
@@ -97,8 +53,12 @@ fn try_connect_and_decode_once(
         return Err("Abandoned".into());
     }
 
-    let response = client
-        .get(url)
+    let mut request = client.get(url);
+    if context.request_stream_metadata {
+        request = request.header("Icy-MetaData", "1");
+    }
+
+    let response = request
         .send()
         .map_err(|err| format!("Connection failed: {err}"))?;
 
@@ -110,60 +70,20 @@ fn try_connect_and_decode_once(
         return Err("Abandoned".into());
     }
 
-    let metaint = None;
+    let metaint = if context.request_stream_metadata {
+        response
+            .headers()
+            .get("icy-metaint")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok())
+    } else {
+        None
+    };
 
-    let bitrate_kbps = response
-        .headers()
-        .get("icy-br")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(128);
-    let bytes_per_sec = (bitrate_kbps * 1000 / 8).max(1) as usize;
-
-    let buffer_capacity = STREAM_BUFFER_CAPACITY;
-    let queue = Arc::new(BufferQueue::new(buffer_capacity));
-    let buffer_meter = Arc::new(BufferStatusMeter::new(bytes_per_sec));
-
-    let queue_clone = queue.clone();
-    let buffer_meter_clone = buffer_meter.clone();
-    let active_conn_id_clone = context.active_conn_id.clone();
-    let conn_id = context.conn_id;
-    let status_tx_clone = context.status_tx.clone();
-    let mut response_reader = response;
-
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            if active_conn_id_clone.load(Ordering::SeqCst) != conn_id {
-                queue_clone.set_disconnected(true);
-                break;
-            }
-            match response_reader.read(&mut buf) {
-                Ok(0) => {
-                    queue_clone.set_disconnected(true);
-                    break;
-                }
-                Ok(n) => {
-                    queue_clone.push(&buf[..n]);
-
-                    let len = queue_clone.len();
-                    let cap = queue_clone.capacity;
-                    buffer_meter_clone.report_fill_level(len, cap, &status_tx_clone);
-                }
-                Err(_) => {
-                    queue_clone.set_disconnected(true);
-                    break;
-                }
-            }
-        }
-    });
-
-    prebuffer_stream(&queue, bytes_per_sec);
-
+    let _ = context.status_tx.send(AudioStatus::Connecting);
     let reader = StreamReader::new(StreamReaderConfig {
         url: url.to_string(),
-        queue,
-        buffer_meter,
+        inner: response,
         status_tx: context.status_tx,
         conn_id: context.conn_id,
         active_conn_id: context.active_conn_id,
@@ -171,7 +91,7 @@ fn try_connect_and_decode_once(
     });
 
     let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, reader);
-    let source = Decoder::new(buffered_reader).map_err(|err| format!("Decode error: {err}"))?;
+    let source = Decoder::new_mp3(buffered_reader).map_err(|err| format!("Decode error: {err}"))?;
     let wrapped_source = VisualizerSource::new(source, context.sample_buffer);
     let sink = Sink::try_new(handle)
         .map_err(|err| super::hardware_output_error(format!("Sink error: {err}")))?;
@@ -182,17 +102,20 @@ fn try_connect_and_decode_once(
 }
 
 #[cfg(test)]
-mod prebuffer_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn prebuffer_target_uses_two_seconds_at_common_radio_bitrates() {
-        assert_eq!(prebuffer_target_bytes(4 * 1024 * 1024, 16 * 1024), 32 * 1024);
-        assert_eq!(prebuffer_target_bytes(4 * 1024 * 1024, 40 * 1024), 80 * 1024);
-    }
+    fn connection_context_defaults_to_requesting_stream_metadata_when_configured() {
+        let (status_tx, _status_rx) = mpsc::channel();
+        let context = ConnectionContext {
+            status_tx,
+            conn_id: 1,
+            active_conn_id: Arc::new(AtomicU64::new(1)),
+            sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            request_stream_metadata: true,
+        };
 
-    #[test]
-    fn prebuffer_target_is_capped_by_half_capacity() {
-        assert_eq!(prebuffer_target_bytes(64 * 1024, 512 * 1024), 32 * 1024);
+        assert!(context.request_stream_metadata);
     }
 }

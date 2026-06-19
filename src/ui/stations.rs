@@ -219,11 +219,38 @@ fn search_station_meta_label(station: &crate::radio::Station) -> String {
 }
 
 fn library_station_meta_label(station: &crate::radio::Station) -> String {
-    format!(
-        "{} · {}",
+    join_non_empty([
+        station_health_chip(station),
         station_country_chip(station),
-        bitrate_chip(station.bitrate)
-    )
+        bitrate_chip(station.bitrate),
+    ])
+}
+
+fn station_health_chip(station: &crate::radio::Station) -> String {
+    let failure_count = station.health.failure_count.unwrap_or(0);
+    if failure_count > 0
+        && station_health_failure_is_current(
+            station.health.last_success_at.as_deref(),
+            station.health.last_failure_at.as_deref(),
+        )
+    {
+        return format!("⚠{failure_count}x");
+    }
+    if station.health.last_success_at.is_some() {
+        return "✓".to_string();
+    }
+    String::new()
+}
+
+fn station_health_failure_is_current(success: Option<&str>, failure: Option<&str>) -> bool {
+    match (success, failure) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(success), Some(failure)) => match (success.parse::<u64>(), failure.parse::<u64>()) {
+            (Ok(success), Ok(failure)) => failure > success,
+            _ => failure > success,
+        },
+    }
 }
 
 fn station_country_chip(station: &crate::radio::Station) -> String {
@@ -408,6 +435,31 @@ mod tests {
             station_meta_label(&InputMode::Normal, &station),
             "US · 128k"
         );
+    }
+
+    #[test]
+    fn station_meta_normal_includes_health_badge() {
+        let mut station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        station.health.last_failure_at = Some("20".to_string());
+        station.health.failure_count = Some(2);
+
+        assert_eq!(
+            station_meta_label(&InputMode::Normal, &station),
+            "⚠2x · US · 128k"
+        );
+
+        station.health.last_success_at = Some("21".to_string());
+        assert_eq!(station_health_chip(&station), "✓");
+    }
+
+    #[test]
+    fn station_health_badge_compares_numeric_timestamps() {
+        let mut station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        station.health.last_success_at = Some("99".to_string());
+        station.health.last_failure_at = Some("100".to_string());
+        station.health.failure_count = Some(1);
+
+        assert_eq!(station_health_chip(&station), "⚠1x");
     }
 
     #[test]

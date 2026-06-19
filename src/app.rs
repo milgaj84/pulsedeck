@@ -1,9 +1,11 @@
+mod command_palette;
 mod idle;
 mod library;
 mod lifecycle;
 mod nav;
 mod notifier;
 mod overlays;
+mod playback_error;
 mod persist;
 mod playback;
 mod reconnect;
@@ -22,14 +24,19 @@ use crate::radio::Station;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+pub use command_palette::{command_label, CommandPaletteState};
 pub use lifecycle::NoticeState;
 pub use nav::Navigation;
 pub use overlays::{ActiveOverlay, Overlays};
 pub use playback::PlaybackView;
+pub use playback_error::playback_error_action_hint;
 pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
-pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
+pub use types::{
+    AppNotice, DecoderState, InputMode, LayoutMode, PlaybackDiagnostics, PlaybackState,
+    SearchStatus, SettingRow,
+};
 
 /// Core application state.
 pub struct App {
@@ -38,6 +45,7 @@ pub struct App {
 
     pub nav: Navigation,
     pub search: SearchState,
+    pub command_palette: CommandPaletteState,
     pub player: PlaybackView,
     pub volume: u8, // 0-100
     pub muted: bool,
@@ -56,8 +64,11 @@ pub struct App {
     pub undo_history: VecDeque<(Station, usize, String)>,
 
     pub reconnect: Reconnect,
+    pub diagnostics: PlaybackDiagnostics,
     pub sleep_timer: SleepTimer,
     pub history: crate::history::History,
+    metadata_refresh_pending: bool,
+    metadata_refresh_running: bool,
     persist: persist::PersistFlags,
     audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,

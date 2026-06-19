@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::station::clean_tag_values;
-use super::Station;
+use super::{Station, StationHealth};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ApiBrowseStation {
@@ -59,6 +59,7 @@ pub(super) fn map_api_station(api: ApiBrowseStation) -> Option<Station> {
         last_check_ok: api.lastcheckok.map(|value| value == 1),
         votes: api.votes,
         click_count: api.clickcount,
+        health: StationHealth::default(),
     })
 }
 

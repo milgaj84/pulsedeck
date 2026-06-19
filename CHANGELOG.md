@@ -8,6 +8,40 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.0] - Unreleased
+
+### Added
+*   **Command palette**: Added `:` / `Ctrl+p` command search for common actions including station search, retry, stop, settings, theme changes, song-info metadata toggle, Playback Doctor, library metadata refresh, export, and help.
+*   **Playback Doctor**: Added a diagnostics overlay for playback state, output device, song-info metadata mode, reconnect attempts, decoder state, recent events, and error hints.
+*   **Stream Song Info Metadata setting**: Added a settings row for ICY now-playing metadata. It remains default-on and can be disabled per user preference.
+*   **Library metadata refresh**: Added a command-palette-triggered refresh that enriches older saved stations with missing Radio Browser metadata while preserving saved-facing names, stream URLs, and genres.
+*   **Import preview and enrich-only modes**: Added CLI import preview and enrich-only flows so users can inspect new stations, duplicates, enrichments, and skipped entries before saving.
+*   **Station health memory**: Added local success/failure memory for saved stations, compact health badges in the library, and local health details in Station Details.
+
+### Changed
+*   **Direct MP3 live-stream playback path**: Playback now reads the HTTP response directly through the ICY-aware `StreamReader`, uses a small `BufReader`, and calls Rodio's MP3 decoder directly instead of the generic format-probing decoder.
+*   **No internal playback queue in the active path**: The active module graph no longer includes the previous stream byte queue, buffer meter, prebuffer, downloader thread, or probe replay shim.
+*   **Codec support is honest**: Search can still show codec metadata, but the active playback path is currently optimized for MP3 streams until explicit non-MP3 decoder selection is added.
+
+### Improved
+*   **Search explainability**: Highlighted search results now explain the strongest matching signals, such as exact tag, country code, codec, saved status, check health, HTTPS, votes, or clicks.
+*   **Station Details organization**: Station Details now groups fields into Identity, Playback, Catalog, and Health sections with safer fallbacks for missing metadata.
+*   **Playback diagnostics and recovery copy**: Playback errors now include more actionable retry, stop, output, metadata, decoder, and search guidance.
+*   **CLI import reporting**: Import summaries now report added, enriched, and skipped counts separately.
+
+### Fixed
+*   **Slow or stuck stream startup on MP3 stations**: Bypassed Rodio's generic decoder probing path for the active stream path, avoiding the long-load/stutter behavior seen when live streams were treated too much like probeable files.
+*   **Live-stream seek semantics**: The active stream reader still refuses real seeks instead of consuming or discarding live audio bytes.
+*   **Health timestamp ordering**: Local station health compares numeric timestamps correctly, so newer failures and successes are classified accurately.
+*   **Import duplicate handling**: Incoming import files are deduplicated against themselves as well as against the existing library.
+*   **Metadata refresh safety**: Refresh matching rejects name-only candidates to avoid enriching a saved station from a similarly named Radio Browser neighbor.
+
+### Internal
+*   Added regression coverage for command palette routing, import preview, metadata refresh summaries, Playback Doctor rendering, station health, stream-reader metadata stripping, live-stream seek refusal, and grouped Station Details.
+*   Stale audio experiment files still exist in the repository but are not wired into `src/audio.rs`; they should not be described as active playback behavior.
+
+---
+
 ## [0.3.1] - 2026-06-18
 
 ### Added

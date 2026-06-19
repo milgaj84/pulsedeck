@@ -9,6 +9,7 @@ pub enum ActiveOverlay {
     StationDetails,
     RecentTracks,
     Settings,
+    PlaybackDoctor,
     SleepTimer,
 }
 
@@ -52,6 +53,10 @@ impl App {
 
     pub(super) fn toggle_recent_tracks(&mut self) {
         self.set_overlay(ActiveOverlay::RecentTracks);
+    }
+
+    pub(super) fn toggle_playback_doctor(&mut self) {
+        self.set_overlay(ActiveOverlay::PlaybackDoctor);
     }
 
     pub(super) fn close_any_overlay(&mut self) -> bool {
@@ -152,6 +157,21 @@ mod tests {
         app.toggle_recent_tracks();
         assert!(!app.show_station_details());
         assert!(app.show_recent_tracks());
+    }
+
+    #[test]
+    fn playback_doctor_is_mutually_exclusive() {
+        let mut app = test_app();
+
+        app.toggle_station_details();
+        assert!(app.show_station_details());
+
+        app.toggle_playback_doctor();
+        assert!(!app.show_station_details());
+        assert_eq!(app.overlays.active, ActiveOverlay::PlaybackDoctor);
+
+        app.toggle_playback_doctor();
+        assert_eq!(app.overlays.active, ActiveOverlay::None);
     }
 
     #[test]

@@ -1,1957 +1,1408 @@
-# PulseDeck 0.3.1 Release Plan
+# PulseDeck 0.4.0 Implementation Plan
 
-Target release: `0.3.1`
-Base branch: `feature/0.3.0-radio-prefixes`
-SemVer scope: patch release for the `0.3.0` structured-search upgrade
-Date drafted: 2026-06-18
+Release theme: **Playback Confidence, Search Confidence, UI Explainability**.
 
-## Release theme
+PulseDeck 0.4.0 should make focused internet radio feel stable, inspectable, and recoverable. This is not the release for recording, local tape playback, plugins, accounts, podcasts, cloud sync, or a broad media-suite turn. The app should stay small, sharp, and radio-first.
 
-PulseDeck `0.3.1` should polish the structured Radio Browser search work introduced in `0.3.0` without turning into a disguised `0.4.0` feature crate. The release theme is:
-
-> Structured search, now smoother.
-
-`0.3.0` introduced:
-
-- Structured search prefixes such as `tag:ambient`, `country:BA`, `lang:english`, `codec:mp3`, and `name:lofi`.
-- Richer station metadata from Radio Browser.
-- Station Details trust metadata.
-- Result deduplication and ranking.
-- UUID-aware saved station detection.
-- A split radio module structure: query parsing, client, mapping, ranking, station model.
-
-`0.3.1` should make those same features more robust, more discoverable, and safer around odd real-world API data. No recording features, no new playback architecture, no multi-filter query language, and no new major UX surface.
-
-## Non-goals
-
-Keep these out of `0.3.1` unless they are strictly necessary to fix a regression:
-
-- Multi-prefix search such as `tag:jazz country:BA codec:mp3`.
-- Boolean search syntax.
-- Search history.
-- Filter sidebars or new settings panels.
-- Recording or local tape workflows.
-- Audio engine rewrites.
-- Breaking changes to `library.json`.
-- A schema version bump unless absolutely required.
-
-If any implementation starts requiring broad behavior changes, split it into a later `0.4.0` plan.
-
-## Current 0.3.0 code map
-
-Important files on the `feature/0.3.0-radio-prefixes` branch:
+Current branch observed during planning:
 
 ```text
-Cargo.toml                         version = 0.3.0
-CHANGELOG.md                       0.3.0 changelog exists, Unreleased is empty
-docs/releases/0.3.0.md             0.3.0 release notes
-src/radio.rs                       public search entrypoint and server fallback orchestration
-src/radio/query.rs                 StationSearchQuery parser and API parameter builder
-src/radio/client.rs                reqwest client and mirror search attempts
-src/radio/map.rs                   Radio Browser API model to Station mapping
-src/radio/rank.rs                  dedupe and local ranking
-src/radio/station.rs               Station model, identity matching, fallback stations
-src/favorites.rs                   Library persistence, add/import/remove, contains_station
-src/app/search.rs                  search input lifecycle, confirm, audition, response application
-src/ui/search.rs                   search overlay rendering and empty/error hints
-src/ui/station_details.rs          metadata/trust rendering
-src/ui/help.rs                     in-app help overlay
-README.md                          user docs
+feature/0.3.0-radio-prefixes...origin/feature/0.3.0-radio-prefixes
 ```
 
-Current `0.3.0` search flow:
+Recent groundwork already implemented in this workspace:
 
 ```text
-User types in search
-    -> src/app/search.rs refresh_search_state
-    -> debounce marks pending query
-    -> event loop calls radio::search_stations(raw_query)
-    -> src/radio.rs parses StationSearchQuery
-    -> src/radio/client.rs tries HTTPS mirrors, then HTTP mirrors
-    -> src/radio/map.rs maps API rows to Station
-    -> src/radio/rank.rs dedupes and ranks
-    -> App::apply_search_response stores results or error/empty status
-    -> src/ui/search.rs renders list, saved stars, hints, errors
+src/favorites.rs          Settings::stream_metadata_enabled, default true
+src/app/types.rs          SettingRow::StreamMetadata
+src/app/settings.rs       toggles and syncs stream metadata
+src/app/lifecycle.rs      syncs stream metadata on startup
+src/audio.rs              AudioCommand::SetStreamMetadata(bool)
+src/audio/engine_loop.rs  forwards metadata setting into ConnectionContext
+src/audio/session.rs      requests/parses ICY metadata only when enabled
+src/ui/settings.rs        renders Stream Song Info Metadata row
 ```
 
-Current persistence flow:
+Validation after metadata groundwork:
 
 ```text
-Search result selected
-    -> App::confirm_search
-    -> Library::add(station)
-    -> Library::contains_station checks UUID first, then normalized URL
-    -> mark_library_dirty if newly added
-    -> background/debounced persistence writes library.json
+cargo test                 272 passed
+cargo clippy --all-targets passed
 ```
 
-The `0.3.1` work should mostly refine the edges of those flows.
+Important merge caveat: this branch had a mismatch where `favorites.rs` and `radio.rs` expected richer Radio Browser helpers that were missing in `src/radio/query.rs` and `src/radio/station.rs`. These were restored here. Before merging into a 0.4.0 branch, verify the intended base already contains or receives:
 
-## Implementation order
-
-Recommended order keeps risk low and makes tests useful quickly:
-
-1. Extend query parsing metadata and aliases in `src/radio/query.rs`.
-2. Improve empty-result and prefix guidance in `src/ui/search.rs`, `src/ui/help.rs`, and README.
-3. Harden station metadata normalization in `src/radio/station.rs` and `src/radio/map.rs`.
-4. Add saved-station metadata enrichment in `src/radio/station.rs`, `src/favorites.rs`, and `src/app/search.rs`.
-5. Tune ranking in `src/radio/rank.rs`.
-6. Improve Radio Browser error presentation in `src/radio/client.rs`, `src/radio.rs`, and `src/ui/search.rs`.
-7. Add compatibility and regression tests across query, map, rank, favorites, app search, and UI helper modules.
-8. Update docs, changelog, release notes, and version number.
-9. Run release checks.
-
-## Global acceptance criteria
-
-`0.3.1` is done when:
-
-- `cargo fmt --check` passes.
-- `cargo clippy --all-targets -- -D warnings` passes, or existing warnings are documented if clippy is not currently clean.
-- `cargo test` passes.
-- Old `library.json` files without new metadata still load.
-- New saved stations preserve metadata across save/load.
-- Existing saved stations can be enriched from matching search results.
-- Prefixes are easier to discover from the app, README, and release notes.
-- Failed search mirrors produce friendly user-facing messages without deleting detailed debugging context from code/tests.
+```rust
+has_unknown_prefix
+prefix_examples_inline
+normalize_codec
+normalize_country_code
+normalize_station_uuid
+sanitize_bitrate
+Station::enrich_from
+```
 
 ---
 
-# 1. Better prefix guidance in the UI
+## Release principles
 
-## Goal
+### Preserve
 
-Make structured search self-teaching. Users should not need to read the release notes to guess that `tag:`, `country:`, `lang:`, `codec:`, and `name:` exist.
+- Focused terminal public-radio playback.
+- No API keys.
+- No cloud dependency.
+- No fake file semantics for live streams.
+- Optional song metadata, never mandatory for playback.
+- Simple search for casual users, powerful prefixes for advanced users.
+- Compact terminal protection.
+- Testable pure helpers wherever possible.
 
-## Files
+### Avoid
+
+- Reintroducing a separate decoded-PCM playback queue.
+- Reintroducing fake forward seeking that consumes live stream bytes.
+- Treating ICY metadata as the audio problem.
+- Turning settings into a giant cockpit.
+- Letting docs describe abandoned implementation attempts.
+
+---
+
+## Phase 0: repository cleanup
+
+### Goal
+
+Remove stale experiments so future audio work starts from a clear map instead of a haunted drawer.
+
+### Remove unused files
+
+These files are not included by `src/audio.rs` and should be removed from the repository:
 
 ```text
-src/radio/query.rs
-src/ui/search.rs
-src/ui/help.rs
-README.md
-docs/releases/0.3.1.md
+src/audio/decoded_source.rs
+src/audio/pcm_buffer.rs
+src/audio/pcm_buffer2.rs
 ```
 
-## Design
+Keep this file, `plan.md`, as the 0.4.0 implementation plan.
 
-Add a tiny query help model in `src/radio/query.rs` so UI and docs can reuse canonical prefix labels instead of scattering strings.
+Do not remove:
 
-Suggested API:
+```text
+src/radio/
+```
+
+That directory is intentional and is wired through `src/radio.rs`.
+
+### Verify module graph
+
+`src/audio.rs` should only include active audio modules:
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SearchPrefixHelp {
-    pub prefix: &'static str,
-    pub aliases: &'static [&'static str],
-    pub label: &'static str,
-    pub example: &'static str,
-}
-
-pub const SEARCH_PREFIX_HELP: &[SearchPrefixHelp] = &[
-    SearchPrefixHelp {
-        prefix: "name",
-        aliases: &["station"],
-        label: "station name",
-        example: "name:lofi",
-    },
-    SearchPrefixHelp {
-        prefix: "tag",
-        aliases: &["genre"],
-        label: "genre or tag",
-        example: "tag:ambient",
-    },
-    SearchPrefixHelp {
-        prefix: "country",
-        aliases: &["cc"],
-        label: "country name or code",
-        example: "country:BA",
-    },
-    SearchPrefixHelp {
-        prefix: "lang",
-        aliases: &["language"],
-        label: "language",
-        example: "lang:english",
-    },
-    SearchPrefixHelp {
-        prefix: "codec",
-        aliases: &["format"],
-        label: "stream codec",
-        example: "codec:mp3",
-    },
-];
-
-pub fn prefix_examples_inline() -> &'static str {
-    "Try tag:ambient, country:BA, lang:english, codec:mp3, or name:lofi"
-}
+mod buffer;
+mod buffer_meter;
+mod engine_loop;
+mod metadata;
+mod output;
+mod session;
+mod stream_reader;
+mod visualizer;
 ```
 
-Use this in `src/ui/search.rs` instead of hardcoded examples.
-
-Suggested footer copy while search input is active:
-
-```text
-Search prefixes: tag:ambient  country:BA  lang:english  codec:mp3
-```
-
-If the footer is already crowded, use a compact version in the search title or empty-result area.
-
-## Implementation notes
-
-Current `src/ui/search.rs` already has `empty_search_hint(query: &str)`. Move prefix examples behind a helper in `src/radio/query.rs` and import it:
+`src/radio.rs` should include:
 
 ```rust
-use crate::radio::{prefix_examples_inline, StationSearchQuery};
+mod client;
+mod map;
+mod query;
+mod rank;
+mod station;
 ```
 
-If `prefix_examples_inline` feels too UI-specific for `radio`, put it in `src/ui/search.rs`, but keep a single canonical list of prefixes in `query.rs` so future docs and UI do not drift apart.
+### Tests
 
-## Help overlay
-
-Add a short section to `src/ui/help.rs` near search controls:
+Run after cleanup:
 
 ```text
-Search prefixes
-  tag:ambient       find stations by genre/tag
-  country:BA        country name or two-letter code
-  lang:english      station language
-  codec:mp3         stream codec
-  name:lofi         station name search
+cargo test
+cargo clippy --all-targets
 ```
 
-Keep the wording compact. Help already has many shortcuts, so this should be a small block rather than a tutorial mural.
+---
 
-## Pitfalls
+## Phase 1: Stream Song Info Metadata setting
 
-- Do not add a new input mode or settings row just for prefix help.
-- Do not show a huge prefix wall in tiny terminals. Compact-screen protection already exists, but the normal UI still needs restraint.
-- Do not duplicate prefix lists manually in many files. One canonical list, small formatting helpers.
+### Status
 
-## Edge cases
+Already implemented as groundwork. Keep it in 0.4.0 and document it.
 
-- Empty library plus search open: onboarding card should not fight the search help.
-- Very narrow terminals: hints must truncate cleanly.
-- Prefix examples should not imply multi-prefix support yet.
+### Behavior
 
-## Tests
+Default is on.
 
-Add tests around helper formatting if non-trivial:
+When enabled:
+
+- `src/audio/session.rs` sends `Icy-MetaData: 1`.
+- `icy-metaint` response header is parsed.
+- `StreamReader` strips metadata blocks from audio bytes.
+- `AudioStatus::TrackChanged` updates current track, recent tracks, saved history, and notifications.
+
+When disabled:
+
+- No metadata request header is sent.
+- `metaint` is `None`.
+- Playback receives clean stream bytes only.
+
+### Important files
+
+```text
+src/favorites.rs
+src/app/types.rs
+src/app/settings.rs
+src/app/lifecycle.rs
+src/audio.rs
+src/audio/engine_loop.rs
+src/audio/session.rs
+src/audio/stream_reader.rs
+src/ui/settings.rs
+```
+
+### Current connection path
+
+```rust
+// src/app/lifecycle.rs
+app.sync_output_device();
+app.sync_stream_metadata();
+app.sync_volume();
+```
+
+```rust
+// src/audio.rs
+pub enum AudioCommand {
+    Play(String),
+    Pause,
+    Resume,
+    Stop,
+    SetVolume(f32),
+    SetOutputDevice(Option<String>),
+    SetStreamMetadata(bool),
+}
+```
+
+```rust
+// src/audio/session.rs
+let mut request = client.get(url);
+if context.request_stream_metadata {
+    request = request.header("Icy-MetaData", "1");
+}
+
+let metaint = if context.request_stream_metadata {
+    response
+        .headers()
+        .get("icy-metaint")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+} else {
+    None
+};
+```
+
+### Follow-up tests to add
+
+Add direct settings serialization tests in `src/favorites.rs`:
 
 ```rust
 #[test]
-fn prefix_examples_include_all_supported_prefixes() {
-    let examples = prefix_examples_inline();
-    for expected in ["tag:", "country:", "lang:", "codec:", "name:"] {
-        assert!(examples.contains(expected));
-    }
+fn settings_default_enables_stream_metadata() {
+    assert!(Settings::default().stream_metadata_enabled);
 }
+
+#[test]
+fn settings_deserializes_missing_stream_metadata_as_enabled() {
+    let json = r#"{"notifications_enabled":true}"#;
+    let settings: Settings = serde_json::from_str(json).unwrap();
+    assert!(settings.stream_metadata_enabled);
+}
+```
+
+Pitfall: do not call this setting only “metadata” in UI. Users may confuse Radio Browser station metadata with ICY song-title metadata. Preferred UI label:
+
+```text
+Stream Song Info Metadata
 ```
 
 ---
 
-# 2. More forgiving prefix aliases
+## Phase 2: Playback Doctor overlay
 
-## Goal
+### Goal
 
-Accept natural alias guesses without changing the core search model.
+Add a diagnostic overlay that explains current playback state and recovery options.
 
-New aliases proposed for `0.3.1`:
+### User experience
 
-```text
-station:lofi   -> name:lofi
-cc:BA          -> country:BA / countrycode
-format:mp3     -> codec:mp3
-```
+Open with `d` in normal mode.
 
-Already supported in `0.3.0`:
+Example overlay:
 
 ```text
-genre:jazz     -> tag:jazz
-language:en    -> lang:en / language
+Playback Doctor
+
+State: Playing
+Station: SomaFM: Groove Salad
+Track: Tycho - Awake
+URL: https://ice2.somafm.com/groovesalad-128-mp3
+Output: Default
+Song info metadata: On
+Decoder: Playing
+Buffer: 68% / 4s
+Reconnects: 0 / 3
+Last event: Playback started
+Last error: N/A
+Last recovery: N/A
+
+Actions: r retry  s stop  , output  / search  Esc close
 ```
 
-## Files
+### New app state
 
-```text
-src/radio/query.rs
-src/radio.rs
-README.md
-src/ui/help.rs
-```
-
-## Current parser
-
-`StationSearchQuery::parse` currently does:
+File: `src/app/types.rs`
 
 ```rust
-match prefix.trim().to_ascii_lowercase().as_str() {
-    "name" => Self::with_field(raw_trimmed, SearchField::Name, value),
-    "tag" | "genre" => Self::with_field(raw_trimmed, SearchField::Tag, value),
-    "country" => { ... }
-    "lang" | "language" => Self::with_field(raw_trimmed, SearchField::Language, value),
-    "codec" => Self::with_field(raw_trimmed, SearchField::Codec, value),
-    _ => Self::plain(raw_trimmed),
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaybackDiagnostics {
+    pub output_device: String,
+    pub metadata_enabled: bool,
+    pub reconnect_attempts: u8,
+    pub reconnect_limit: u8,
+    pub buffer_percent: u8,
+    pub buffer_seconds: u32,
+    pub last_event: Option<String>,
+    pub last_error: Option<String>,
+    pub last_recovery: Option<String>,
+    pub decoder_state: DecoderState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecoderState {
+    Idle,
+    Connecting,
+    Probing,
+    Playing,
+    Ended,
+    Failed,
+}
+
+impl Default for DecoderState {
+    fn default() -> Self {
+        Self::Idle
+    }
 }
 ```
 
-## Suggested change
+File: `src/app.rs`
 
 ```rust
-match prefix.trim().to_ascii_lowercase().as_str() {
-    "name" | "station" => Self::with_field(raw_trimmed, SearchField::Name, value),
-    "tag" | "genre" => Self::with_field(raw_trimmed, SearchField::Tag, value),
-    "country" | "cc" => {
-        if is_country_code(&value) {
-            Self::with_field(raw_trimmed, SearchField::CountryCode, value.to_ascii_uppercase())
-        } else {
-            Self::with_field(raw_trimmed, SearchField::Country, value)
+pub diagnostics: PlaybackDiagnostics,
+```
+
+File: `src/app/lifecycle.rs`
+
+Initialize in `App::new`:
+
+```rust
+diagnostics: PlaybackDiagnostics::default(),
+```
+
+Update in `poll_audio_status()`:
+
+```rust
+AudioStatus::BufferLevel { percent, seconds } => {
+    self.player.buffer_percent = percent;
+    self.player.buffer_seconds = seconds;
+    self.diagnostics.buffer_percent = percent;
+    self.diagnostics.buffer_seconds = seconds;
+}
+AudioStatus::Connecting => {
+    self.player.current_track = None;
+    self.player.state = PlaybackState::Connecting;
+    self.diagnostics.decoder_state = DecoderState::Connecting;
+    self.diagnostics.last_event = Some("Connecting to stream".to_string());
+}
+AudioStatus::Playing => {
+    self.player.state = PlaybackState::Playing;
+    self.reconnect.disarm();
+    self.diagnostics.decoder_state = DecoderState::Playing;
+    self.diagnostics.last_event = Some("Playback started".to_string());
+}
+AudioStatus::Error(error) => {
+    self.diagnostics.decoder_state = DecoderState::Failed;
+    self.diagnostics.last_error = Some(error.clone());
+    self.handle_audio_error(error);
+}
+```
+
+### Optional audio diagnostics event
+
+File: `src/audio.rs`
+
+```rust
+#[derive(Debug, Clone)]
+pub enum AudioStatus {
+    Playing,
+    Paused,
+    Stopped,
+    Error(String),
+    Connecting,
+    FadingOut { current_volume: f32 },
+    TrackChanged { url: String, title: String },
+    BufferLevel { percent: u8, seconds: u32 },
+    Diagnostic(AudioDiagnostic),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioDiagnostic {
+    OutputSelected { name: String },
+    StreamConnected { url: String },
+    DecoderProbing,
+    DecoderReady,
+    HardwareRecoveryAttempt { attempt: u8, limit: u8 },
+    MetadataMode { enabled: bool },
+}
+```
+
+Pitfall: diagnostics must never be required for playback. If a diagnostic send fails, ignore it.
+
+### Overlay routing
+
+Add `PlaybackDoctor` to the active overlay enum, likely in `src/app/overlays.rs` or `src/app/types.rs`, depending where `ActiveOverlay` lives.
+
+Add action:
+
+```rust
+// src/action.rs
+TogglePlaybackDoctor,
+```
+
+Map key:
+
+```rust
+// src/event.rs, normal mode
+KeyCode::Char('d') => Some(Action::TogglePlaybackDoctor),
+```
+
+Pitfall: `d` may already mean directional forward inside settings. That is fine if routed only in normal mode.
+
+### UI module
+
+Create:
+
+```text
+src/ui/playback_doctor.rs
+```
+
+Register in `src/ui/mod.rs`:
+
+```rust
+pub mod playback_doctor;
+```
+
+Render in overlay match:
+
+```rust
+ActiveOverlay::PlaybackDoctor => playback_doctor::render(frame, size, app),
+```
+
+Skeleton:
+
+```rust
+use crate::app::{App, PlaybackState};
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use super::theme;
+
+const MIN_DOCTOR_WIDTH: u16 = 64;
+const MIN_DOCTOR_HEIGHT: u16 = 18;
+
+pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+    let popup_area = super::centered_rect(64, 72, area);
+    frame.render_widget(Clear, popup_area);
+
+    if popup_area.width < MIN_DOCTOR_WIDTH || popup_area.height < MIN_DOCTOR_HEIGHT {
+        super::render_boundary_warning(
+            frame,
+            popup_area,
+            "Playback Doctor Too Compact",
+            format!("Expand terminal or close doctor (overlay: {}x{})", popup_area.width, popup_area.height),
+        );
+        return;
+    }
+
+    let block = Block::default()
+        .title(Span::styled(" Playback Doctor ", theme::title()))
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(theme::highlight()))
+        .style(theme::clear());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let station = app.now_playing().map(|s| s.name.as_str()).unwrap_or("N/A");
+    let url = app.player.playing_url.as_deref().unwrap_or("N/A");
+    let track = app.player.current_track.as_deref().unwrap_or("N/A");
+
+    let lines = vec![
+        row("State", playback_state_label(&app.player.state)),
+        row("Station", station),
+        row("Track", track),
+        row("URL", url),
+        row("Buffer", &format!("{}% / {}s", app.player.buffer_percent, app.player.buffer_seconds)),
+        row("Metadata", if app.library.settings.stream_metadata_enabled { "On" } else { "Off" }),
+        row("Last error", app.diagnostics.last_error.as_deref().unwrap_or("N/A")),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" r ", theme::cyan()), Span::raw("retry  "),
+            Span::styled(" s ", theme::cyan()), Span::raw("stop  "),
+            Span::styled(" , ", theme::cyan()), Span::raw("output  "),
+            Span::styled(" / ", theme::cyan()), Span::raw("search  "),
+            Span::styled(" Esc ", theme::cyan()), Span::raw("close"),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(lines).style(theme::clear()), inner);
+}
+
+fn row(label: &'static str, value: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:>12}: "), theme::dim()),
+        Span::styled(value.to_string(), theme::text()),
+    ])
+}
+
+fn playback_state_label(state: &PlaybackState) -> &'static str {
+    match state {
+        PlaybackState::Stopped => "Stopped",
+        PlaybackState::Connecting => "Connecting",
+        PlaybackState::Playing => "Playing",
+        PlaybackState::FadingOut { .. } => "Fading out",
+        PlaybackState::Paused => "Paused",
+        PlaybackState::Error(_) => "Error",
+    }
+}
+```
+
+Pitfall: if `app.now_playing()` is not public to UI modules, expose an existing selector through `src/app/selectors.rs` instead of duplicating station lookup.
+
+### Tests
+
+- `event::tests::normal_mode_d_opens_playback_doctor`
+- `app::overlays::tests::playback_doctor_is_mutually_exclusive`
+- `ui::playback_doctor::tests::doctor_overlay_rejects_tiny_area`
+- `ui::playback_doctor::tests::playback_state_label_formats_all_states`
+
+---
+
+## Phase 3: actionable playback errors
+
+### Goal
+
+Error messages should guide recovery. Different failures need different next actions.
+
+### Error classification
+
+Create:
+
+```text
+src/app/playback_error.rs
+```
+
+Register in `src/app.rs` or module tree:
+
+```rust
+mod playback_error;
+pub use playback_error::{classify_playback_error, playback_error_action_hint, PlaybackErrorKind};
+```
+
+Implementation:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackErrorKind {
+    Network,
+    Http,
+    Decode,
+    Output,
+    Timeout,
+    Unknown,
+}
+
+pub fn classify_playback_error(error: &str) -> PlaybackErrorKind {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("soundcard") || lower.contains("hardware output") || lower.contains("sink error") {
+        PlaybackErrorKind::Output
+    } else if lower.contains("decode") || lower.contains("unsupported") {
+        PlaybackErrorKind::Decode
+    } else if lower.contains("http ") {
+        PlaybackErrorKind::Http
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        PlaybackErrorKind::Timeout
+    } else if lower.contains("connection") || lower.contains("network") {
+        PlaybackErrorKind::Network
+    } else {
+        PlaybackErrorKind::Unknown
+    }
+}
+
+pub fn playback_error_action_hint(error: &str) -> &'static str {
+    match classify_playback_error(error) {
+        PlaybackErrorKind::Output => "r retry output  , choose device  s stop",
+        PlaybackErrorKind::Decode => "r retry  / search alternatives  s stop",
+        PlaybackErrorKind::Http | PlaybackErrorKind::Network | PlaybackErrorKind::Timeout => {
+            "r retry  / search alternatives  d inspect"
+        }
+        PlaybackErrorKind::Unknown => "r retry  d inspect  s stop",
+    }
+}
+```
+
+### UI integration
+
+Files likely involved:
+
+```text
+src/ui/controls.rs
+src/ui/header.rs
+src/ui/critical.rs
+```
+
+Wherever `PlaybackState::Error(e)` is rendered, append or replace generic hints with:
+
+```rust
+let hint = crate::app::playback_error_action_hint(error);
+```
+
+Pitfall: keep the hint short and truncate on compact widths. Use `src/ui/text.rs` helpers if available.
+
+### Tests
+
+- output errors classify as `Output`.
+- decode errors classify as `Decode`.
+- HTTP errors classify as `Http`.
+- timeout and connection errors classify separately.
+- footer/critical hint remains compact.
+
+---
+
+## Phase 4: initial probe replay buffer
+
+### Goal
+
+Improve decoder compatibility without bringing back fake seek.
+
+0.3.1 fixed a major bug by refusing to seek through live audio. For 0.4.0, support limited decoder probe rewinds inside an initial byte window.
+
+### New module
+
+Create:
+
+```text
+src/audio/probe_reader.rs
+```
+
+Register in `src/audio.rs`:
+
+```rust
+mod probe_reader;
+```
+
+### Rules
+
+- Buffer first 256 KiB of stream bytes.
+- Allow `SeekFrom::Start(n)` only when `n <= buffered_len`.
+- Allow `SeekFrom::Current(0)` as position report.
+- Allow small seeks only inside replay buffer.
+- Refuse `SeekFrom::End`.
+- Refuse seeks beyond buffered bytes.
+- Never implement seeking by reading and discarding live bytes.
+
+### Sketch
+
+```rust
+use std::io::{Read, Seek, SeekFrom};
+
+const INITIAL_PROBE_BYTES: usize = 256 * 1024;
+
+pub struct ProbeReplayReader<R> {
+    inner: R,
+    replay: Vec<u8>,
+    pos: u64,
+}
+
+impl<R: Read> ProbeReplayReader<R> {
+    pub fn new(inner: R) -> Self {
+        Self {
+            inner,
+            replay: Vec::with_capacity(INITIAL_PROBE_BYTES),
+            pos: 0,
         }
     }
-    "lang" | "language" => Self::with_field(raw_trimmed, SearchField::Language, value),
-    "codec" | "format" => Self::with_field(raw_trimmed, SearchField::Codec, value),
-    _ => Self::plain(raw_trimmed),
 }
-```
 
-## Optional parser metadata
+impl<R: Read> Read for ProbeReplayReader<R> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let replay_len = self.replay.len() as u64;
+        if self.pos < replay_len {
+            let available = (replay_len - self.pos) as usize;
+            let n = available.min(out.len());
+            let start = self.pos as usize;
+            out[..n].copy_from_slice(&self.replay[start..start + n]);
+            self.pos += n as u64;
+            return Ok(n);
+        }
 
-It may be useful to preserve whether a prefix was recognized so the UI can explain unknown prefixes:
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StationSearchQuery {
-    raw: String,
-    value: String,
-    field: SearchField,
-    recognized_prefix: Option<String>,
-    unknown_prefix: Option<String>,
+        let n = self.inner.read(out)?;
+        if n > 0 && self.replay.len() < INITIAL_PROBE_BYTES {
+            let remaining = INITIAL_PROBE_BYTES - self.replay.len();
+            self.replay.extend_from_slice(&out[..n.min(remaining)]);
+        }
+        self.pos += n as u64;
+        Ok(n)
+    }
 }
-```
 
-But avoid overengineering. A simpler helper is enough:
+impl<R: Read> Seek for ProbeReplayReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let target = match pos {
+            SeekFrom::Start(n) => n,
+            SeekFrom::Current(0) => return Ok(self.pos),
+            SeekFrom::Current(offset) if offset < 0 => {
+                self.pos.checked_sub(offset.unsigned_abs()).ok_or_else(unsupported_seek)?
+            }
+            SeekFrom::Current(offset) => self.pos.saturating_add(offset as u64),
+            SeekFrom::End(_) => return Err(unsupported_seek()),
+        };
 
-```rust
-pub fn known_search_prefix(prefix: &str) -> bool {
-    matches!(
-        prefix.trim().to_ascii_lowercase().as_str(),
-        "name" | "station" | "tag" | "genre" | "country" | "cc" |
-        "lang" | "language" | "codec" | "format"
+        if target <= self.replay.len() as u64 {
+            self.pos = target;
+            Ok(self.pos)
+        } else {
+            Err(unsupported_seek())
+        }
+    }
+}
+
+fn unsupported_seek() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "live radio stream can only seek inside the initial probe buffer",
     )
 }
 ```
 
-Then UI can detect `foo:bar` where `foo` is not known.
+Pitfall: this sketch needs careful review. The invariant is: seeking must never advance the live stream by consuming bytes. It may only replay bytes that were already captured.
 
-## Pitfalls
+### Integration
 
-- `cc:` should not map to country name for a long value unless intentionally allowed. Either support both or document that `cc:` is for two-letter country code. Recommendation: allow both for simplicity, but if value is not two letters, map to `Country` exactly like `country:`.
-- Do not parse every colon as structured syntax if the prefix is unknown. Current fallback to plain search is good.
-- Keep plain text search unchanged.
-- Do not make prefix names case-sensitive.
+File: `src/audio/session.rs`
 
-## Edge cases
-
-Add tests for:
-
-```text
-station:lofi
-STATION:lofi
-cc:ba
-cc:Bosnia
-format:mp3
-FORMAT:AAC
-unknown:value
-http://example  // should remain plain name search if typed somehow
-```
-
-## Tests
-
-Add to `src/radio/query.rs`:
+Current:
 
 ```rust
-#[test]
-fn station_alias_maps_to_name() {
-    let query = StationSearchQuery::parse("station:lofi");
-    assert_eq!(query.field(), SearchField::Name);
-    assert_eq!(param_value(&query, "name").as_deref(), Some("lofi"));
-}
-
-#[test]
-fn cc_alias_maps_to_country_code_when_two_letters() {
-    let query = StationSearchQuery::parse("cc:ba");
-    assert_eq!(query.field(), SearchField::CountryCode);
-    assert_eq!(query.value(), "BA");
-    assert_eq!(param_value(&query, "countrycode").as_deref(), Some("BA"));
-}
-
-#[test]
-fn format_alias_maps_to_codec() {
-    let query = StationSearchQuery::parse("format:mp3");
-    assert_eq!(query.field(), SearchField::Codec);
-    assert_eq!(param_value(&query, "codec").as_deref(), Some("mp3"));
-}
+let reader = StreamReader::new(...);
+let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, reader);
+let source = Decoder::new(buffered_reader)?;
 ```
+
+Target:
+
+```rust
+let reader = StreamReader::new(...);
+let probe_reader = ProbeReplayReader::new(reader);
+let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, probe_reader);
+let source = Decoder::new(buffered_reader)?;
+```
+
+### Tests
+
+- replay reader can read bytes, seek to 0, read same bytes again.
+- seeking beyond replay returns `Unsupported`.
+- `SeekFrom::End` returns `Unsupported`.
+- forward seek beyond replay does not consume inner reader bytes.
+- integration test preserves old `StreamReader` live seek refusal.
 
 ---
 
-# 3. Improve empty-result messages
+## Phase 5: station health memory
 
-## Goal
+### Goal
 
-Make empty search results actionable and prefix-aware.
+Saved stations should remember local playback reliability.
 
-`0.3.0` added a basic hint:
+### Data model
 
-```text
-No results; try tag:ambient, country:BA, lang:english, or a shorter name
-```
-
-For `0.3.1`, tailor the hint to the active field.
-
-## Files
-
-```text
-src/ui/search.rs
-src/radio/query.rs
-```
-
-## Suggested UI helper
-
-In `src/ui/search.rs`:
+Prefer nested health struct in `src/radio/station.rs`:
 
 ```rust
-fn empty_search_hint(query: &str) -> String {
-    let parsed = StationSearchQuery::parse(query);
-    let value = compact_search_label(parsed.value());
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StationHealth {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub last_error_summary: String,
+}
 
-    match parsed.field() {
-        SearchField::Name => {
-            if query.contains(':') && !known_search_prefix_before_colon(query) {
-                format!(
-                    "  No results for {}; unknown prefix, treated as station name",
-                    compact_search_label(query)
-                )
-            } else {
-                "  No results; try tag:ambient, country:BA, lang:english, codec:mp3, or a shorter name".to_string()
-            }
-        }
-        SearchField::Tag => format!("  No tag results for {value}; try a broader genre"),
-        SearchField::Country => format!("  No country results for {value}; try a country code like country:BA"),
-        SearchField::CountryCode => format!("  No country results for {value}; try the full country name"),
-        SearchField::Language => format!("  No language results for {value}; try english, bosnian, or serbian"),
-        SearchField::Codec => format!("  No codec results for {value}; try codec:MP3, codec:AAC, or codec:OGG"),
+impl StationHealth {
+    pub fn is_empty(&self) -> bool {
+        self.last_success_at.is_none()
+            && self.last_failure_at.is_none()
+            && self.failure_count.unwrap_or(0) == 0
+            && self.last_error_summary.is_empty()
     }
 }
 ```
 
-This requires re-exporting `SearchField` from `src/radio.rs`:
+In `Station`:
 
 ```rust
-pub use query::{SearchField, StationSearchQuery};
+#[serde(default, skip_serializing_if = "StationHealth::is_empty")]
+pub health: StationHealth,
 ```
 
-## Unknown prefix helper
-
-In `src/radio/query.rs`:
+Update `Station::basic`:
 
 ```rust
-pub fn query_prefix(raw: &str) -> Option<&str> {
-    raw.trim().split_once(':').map(|(prefix, _)| prefix.trim())
-}
-
-pub fn has_unknown_prefix(raw: &str) -> bool {
-    query_prefix(raw).is_some_and(|prefix| !known_search_prefix(prefix))
-}
+health: StationHealth::default(),
 ```
 
-If lifetime complexity annoys the compiler, return `Option<String>` instead. This helper is not performance-sensitive.
+### Library update helpers
 
-## Pitfalls
-
-- Avoid making the hint too long. Search status text appears inside a constrained TUI line.
-- Do not hardcode country-specific examples everywhere. `country:BA` is fine as one example, but do not make it look like the app is Bosnia-only.
-- Do not produce scary wording for unknown prefixes. It should be helpful, not punitive.
-
-## Edge cases
-
-- `tag:` and `tag:a` are currently considered short. They should stay in waiting state or show a short-input hint, not send API requests.
-- A value containing a colon after a known prefix, such as `name:http://radio`, should preserve the value after the first colon.
-- Unknown prefixes remain plain search. That is compatibility-friendly.
-
-## Tests
-
-In `src/ui/search.rs`:
-
-```rust
-#[test]
-fn empty_search_hint_suggests_country_code_for_country_name() {
-    assert_eq!(
-        empty_search_hint("country:Bosna"),
-        "  No country results for Bosna; try a country code like country:BA"
-    );
-}
-
-#[test]
-fn empty_search_hint_suggests_codec_values_for_codec_query() {
-    assert_eq!(
-        empty_search_hint("codec:aacplus"),
-        "  No codec results for aacplus; try codec:MP3, codec:AAC, or codec:OGG"
-    );
-}
-
-#[test]
-fn empty_search_hint_explains_unknown_prefix_fallback() {
-    assert_eq!(
-        empty_search_hint("mood:rain"),
-        "  No results for mood:rain; unknown prefix, treated as station name"
-    );
-}
-```
-
-Use `compact_search_label` in tests when strings may truncate.
-
----
-
-# 4. Harden station metadata mapping
-
-## Goal
-
-Radio Browser data is useful, but it can be messy. Normalize and guard metadata so station rows, details, ranking, saving, and import/export stay stable.
-
-## Files
-
-```text
-src/radio/station.rs
-src/radio/map.rs
-src/ui/station_details.rs
-src/ui/stations.rs
-src/favorites.rs
-```
-
-## Current station fields
-
-`src/radio/station.rs`:
-
-```rust
-pub struct Station {
-    pub name: String,
-    pub url: String,
-    pub genre: String,
-    pub country: String,
-    pub bitrate: u32,
-    pub station_uuid: Option<String>,
-    pub country_code: String,
-    pub tags: Vec<String>,
-    pub language: String,
-    pub codec: String,
-    pub homepage: String,
-    pub last_check_ok: Option<bool>,
-    pub votes: Option<u32>,
-    pub click_count: Option<u32>,
-}
-```
-
-## Add normalization helpers
-
-In `src/radio/station.rs`:
-
-```rust
-const MAX_REASONABLE_BITRATE: u32 = 1024;
-
-pub fn normalize_station_uuid(value: String) -> Option<String> {
-    let trimmed = value.trim().to_string();
-    (!trimmed.is_empty()).then_some(trimmed)
-}
-
-pub fn normalize_country_code(value: &str) -> String {
-    value.trim().to_ascii_uppercase()
-}
-
-pub fn normalize_codec(value: &str) -> String {
-    let normalized = value.trim().to_ascii_uppercase();
-    match normalized.as_str() {
-        "AUDIO/MPEG" | "MPEG" => "MP3".to_string(),
-        "AAC+" | "HE-AAC" | "HEAAC" => "AAC".to_string(),
-        "OGG VORBIS" | "VORBIS" => "OGG".to_string(),
-        _ => normalized,
-    }
-}
-
-pub fn sanitize_bitrate(value: u32) -> u32 {
-    if value > MAX_REASONABLE_BITRATE {
-        0
-    } else {
-        value
-    }
-}
-
-pub fn clean_tag_values(values: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut tags = Vec::new();
-
-    for value in values {
-        let tag = value.trim();
-        if tag.is_empty() {
-            continue;
-        }
-        let key = tag.to_ascii_lowercase();
-        if seen.insert(key) {
-            tags.push(tag.to_string());
-        }
-    }
-
-    tags
-}
-```
-
-Note: `clean_tag_values` already exists. Change it in place and update its tests.
-
-## Harden API mapping
-
-In `src/radio/map.rs`, replace scattered normalization with helpers:
-
-```rust
-use super::station::{
-    clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
-    sanitize_bitrate,
-};
-```
-
-Then map fields:
-
-```rust
-Some(Station {
-    name: fallback_trimmed(api.name, "Unnamed station"),
-    url,
-    genre,
-    country: api.country.trim().to_string(),
-    bitrate: sanitize_bitrate(api.bitrate),
-    station_uuid: normalize_station_uuid(api.stationuuid),
-    country_code: normalize_country_code(&api.countrycode),
-    tags,
-    language: api.language.trim().to_string(),
-    codec: normalize_codec(&api.codec),
-    homepage: api.homepage.trim().to_string(),
-    last_check_ok: normalize_last_check_ok(api.lastcheckok),
-    votes: api.votes,
-    click_count: api.clickcount,
-})
-```
-
-Add:
-
-```rust
-fn normalize_last_check_ok(value: Option<u8>) -> Option<bool> {
-    match value {
-        Some(1) => Some(true),
-        Some(0) => Some(false),
-        _ => None,
-    }
-}
-```
-
-## Station Details layout safety
-
-Inspect `src/ui/station_details.rs` before editing. Make sure long fields use existing truncation helpers from `src/ui/text.rs` if available. If not, add local helpers.
-
-Example:
-
-```rust
-fn detail_value(value: &str, max_chars: usize) -> String {
-    crate::ui::text::truncate_graphemes(value, max_chars)
-}
-```
-
-If no grapheme helper exists, use a char-based helper consistent with the rest of the UI. Do not hand-roll several different truncators.
-
-Fields that must not overflow:
-
-- `station.homepage`
-- `station.url`
-- `station.station_uuid`
-- tags joined as comma-separated string
-- language strings with multiple comma-separated values
-
-## Pitfalls
-
-- Do not strip useful metadata just because it is unusual. Normalize only obvious cases.
-- Do not mutate URLs beyond trim and identity normalization. Playback URLs should remain exactly what the API resolved.
-- Do not make bitrate clamping too aggressive. Some streams report 320 kbps, which is fine. Values above 1024 kbps for internet radio are suspicious.
-- Preserve old library compatibility. New fields must remain serde-defaulted.
-
-## Edge cases
-
-- Duplicate tags with different case: `Jazz,jazz,JAZZ` should become one tag.
-- Empty tags between commas: `jazz, ,pop,,rock` should drop empties.
-- Codecs: `mp3`, `MP3`, `audio/mpeg`, `aac+`, `ogg vorbis`.
-- `lastcheckok = 2` or `255` should become `None`, not true.
-- Blank UUID should be `None`.
-- Very long homepage should display safely but save fully.
-
-## Tests
-
-In `src/radio/station.rs`:
-
-```rust
-#[test]
-fn clean_tag_values_dedupes_case_insensitively() {
-    assert_eq!(
-        clean_tag_values(vec![" Jazz ".into(), "jazz".into(), "ROCK".into()]),
-        vec!["Jazz".to_string(), "ROCK".to_string()]
-    );
-}
-
-#[test]
-fn normalize_codec_cleans_common_values() {
-    assert_eq!(normalize_codec("mp3"), "MP3");
-    assert_eq!(normalize_codec("audio/mpeg"), "MP3");
-    assert_eq!(normalize_codec("aac+"), "AAC");
-}
-
-#[test]
-fn sanitize_bitrate_drops_absurd_values() {
-    assert_eq!(sanitize_bitrate(128), 128);
-    assert_eq!(sanitize_bitrate(9999), 0);
-}
-```
-
-In `src/radio/map.rs`:
-
-```rust
-#[test]
-fn map_api_station_ignores_unknown_lastcheckok_values() {
-    let mut api = api_station("Meta", "http://stream", "jazz");
-    api.lastcheckok = Some(2);
-
-    let station = map_api_station(api).expect("station should map");
-    assert_eq!(station.last_check_ok, None);
-}
-```
-
----
-
-# 5. Saved-station metadata enrichment
-
-## Goal
-
-When a search result matches an existing saved station by Radio Browser UUID or normalized URL, enrich the saved station with new metadata without duplicating it.
-
-This helps older libraries benefit from the `0.3.0` metadata model.
-
-## Files
-
-```text
-src/radio/station.rs
-src/favorites.rs
-src/app/search.rs
-src/playlist.rs
-src/ui/search.rs
-```
-
-## Design
-
-Add a merge method to `Station`. It should copy missing or stale metadata from a richer station while preserving user-important basics.
-
-Rules:
-
-- Preserve saved station `name`, `url`, and `genre` by default. Users may recognize their saved labels.
-- Fill missing metadata fields from the incoming search result.
-- Update trust/popularity fields because they are fresh API observations.
-- Do not replace a working saved URL just because Radio Browser returned a different resolved URL, unless there is a future explicit migration design.
-- Return `true` only if something changed, so callers can mark the library dirty.
-
-## Suggested `Station` method
-
-In `src/radio/station.rs`:
-
-```rust
-impl Station {
-    pub fn enrich_from(&mut self, incoming: &Station) -> bool {
-        let mut changed = false;
-
-        changed |= fill_option(&mut self.station_uuid, incoming.station_uuid.clone());
-        changed |= fill_string(&mut self.country_code, &incoming.country_code);
-        changed |= fill_string(&mut self.language, &incoming.language);
-        changed |= fill_string(&mut self.codec, &incoming.codec);
-        changed |= fill_string(&mut self.homepage, &incoming.homepage);
-
-        if self.tags.is_empty() && !incoming.tags.is_empty() {
-            self.tags = incoming.tags.clone();
-            changed = true;
-        }
-
-        if self.bitrate == 0 && incoming.bitrate > 0 {
-            self.bitrate = incoming.bitrate;
-            changed = true;
-        }
-
-        if self.country.trim().is_empty() && !incoming.country.trim().is_empty() {
-            self.country = incoming.country.clone();
-            changed = true;
-        }
-
-        // Trust and popularity are observations from Radio Browser. Refresh them.
-        changed |= set_if_different(&mut self.last_check_ok, incoming.last_check_ok);
-        changed |= set_if_different(&mut self.votes, incoming.votes);
-        changed |= set_if_different(&mut self.click_count, incoming.click_count);
-
-        changed
-    }
-}
-
-fn fill_string(target: &mut String, incoming: &str) -> bool {
-    if target.trim().is_empty() && !incoming.trim().is_empty() {
-        *target = incoming.trim().to_string();
-        true
-    } else {
-        false
-    }
-}
-
-fn fill_option<T: PartialEq>(target: &mut Option<T>, incoming: Option<T>) -> bool {
-    if target.is_none() && incoming.is_some() {
-        *target = incoming;
-        true
-    } else {
-        false
-    }
-}
-
-fn set_if_different<T: PartialEq + Copy>(target: &mut Option<T>, incoming: Option<T>) -> bool {
-    if incoming.is_some() && *target != incoming {
-        *target = incoming;
-        true
-    } else {
-        false
-    }
-}
-```
-
-If helper generics get noisy, write simple explicit blocks. Clarity beats trait gymnastics here.
-
-## Library API
-
-In `src/favorites.rs`:
+File: `src/favorites.rs`
 
 ```rust
 impl Library {
-    pub fn enrich_matching_station(&mut self, station: &Station) -> bool {
-        if let Some(saved) = self
-            .stations
-            .iter_mut()
-            .find(|saved| crate::radio::station_identity_matches(saved, station))
-        {
-            return saved.enrich_from(station);
+    pub fn mark_station_success(&mut self, url: &str, now: String) -> bool {
+        if let Some(station) = self.stations.iter_mut().find(|s| normalized_url_match(&s.url, url)) {
+            station.health.last_success_at = Some(now);
+            station.health.last_error_summary.clear();
+            return true;
+        }
+        false
+    }
+
+    pub fn mark_station_failure(&mut self, url: &str, now: String, error: &str) -> bool {
+        if let Some(station) = self.stations.iter_mut().find(|s| normalized_url_match(&s.url, url)) {
+            station.health.last_failure_at = Some(now);
+            station.health.failure_count = Some(station.health.failure_count.unwrap_or(0).saturating_add(1));
+            station.health.last_error_summary = compact_error_summary(error);
+            return true;
         }
         false
     }
 }
 ```
 
-## App connection
+Pitfall: if URL has been resolved differently since save, URL matching may miss. Later improvement can mark by station UUID if the audio layer carries UUID. For 0.4.0, URL is acceptable.
 
-In `src/app/search.rs`, update `confirm_search`.
+### UI badges
 
-Current behavior:
+File: `src/ui/stations.rs`
 
-```rust
-match self.library.add(station.clone()) {
-    Ok(true) => {
-        self.mark_library_dirty();
-        self.set_info_notice("Station saved to library");
-    }
-    Ok(false) => {}
-    Err(err) => self.set_error_notice(format!("Could not add station: {err}")),
-}
+Add compact labels:
+
+```text
+OK
+FAIL
+NEW
 ```
 
-Suggested behavior:
+Keep visual noise low. Health should be a hint, not a siren.
 
-```rust
-match self.library.add(station.clone()) {
-    Ok(true) => {
-        self.mark_library_dirty();
-        self.set_info_notice("Station saved to library");
-    }
-    Ok(false) => {
-        if self.library.enrich_matching_station(&station) {
-            self.mark_library_dirty();
-            self.set_info_notice("Saved station metadata refreshed");
-        }
-    }
-    Err(err) => self.set_error_notice(format!("Could not add station: {err}")),
-}
-```
+### Tests
 
-Alternative: enrich inside `Library::add` when duplicate found. That can be cleaner:
-
-```rust
-pub fn add(&mut self, station: Station) -> anyhow::Result<AddOutcome> {
-    if let Some(saved) = self.matching_station_mut(&station) {
-        return Ok(if saved.enrich_from(&station) {
-            AddOutcome::Enriched
-        } else {
-            AddOutcome::Duplicate
-        });
-    }
-    self.stations.push(station);
-    self.rebuild_genres();
-    Ok(AddOutcome::Added)
-}
-```
-
-But this changes the return type from `bool` to enum and touches more callers. For `0.3.1`, prefer adding `enrich_matching_station` separately to reduce blast radius.
-
-## Import behavior
-
-Consider enrichment during CLI import too. Current `import_stations` counts duplicates as skipped. For `0.3.1`, keep the summary stable unless changing it is worth the docs change.
-
-Minimal option:
-
-```rust
-if self.contains_station(&s) {
-    if self.enrich_matching_station(&s) {
-        // Still count as skipped to avoid changing CLI semantics.
-    }
-    skipped += 1;
-} else {
-    self.stations.push(s);
-    added += 1;
-}
-```
-
-If enrichment happens in import, make sure the library saves even when `added == 0` but enrichment changed data. The current `import_stations` rebuilds genres only when added. It returns only added/skipped, so callers may save regardless. Verify `src/cli.rs` or equivalent import command path before relying on that.
-
-## Pitfalls
-
-- Do not auto-enrich on every search response unless you are ready to mark the library dirty during browsing. That could cause unexpected disk writes while users merely search.
-- Do not change saved URLs silently.
-- Do not replace user-facing names without a deliberate migration policy.
-- Do not rebuild genres when only metadata changed, unless `genre` changes. The proposed merge preserves genre.
-- Avoid borrow checker tangles by cloning the selected station before mutating library, which `confirm_search` already does.
-
-## Edge cases
-
-- Existing saved station has UUID, incoming has same UUID but different URL. Enrich metadata, preserve saved URL.
-- Existing saved station has no UUID, incoming has same normalized URL and a UUID. Fill UUID.
-- Existing saved station has a custom name. Preserve it.
-- Incoming trust data says `last_check_ok = false`. Refreshing that is useful, but it may surprise users. The Station Details panel can explain reachability.
-- Incoming tags are empty. Do not clear saved tags.
-
-## Tests
-
-In `src/radio/station.rs`:
-
-```rust
-#[test]
-fn enrich_from_fills_missing_metadata_without_replacing_name_or_url() {
-    let mut saved = Station::basic("My Label", "http://old", "Radio", "", 0);
-    let mut incoming = Station::basic("API Label", "http://new", "Jazz", "Bosnia", 128);
-    incoming.station_uuid = Some("uuid-1".to_string());
-    incoming.country_code = "BA".to_string();
-    incoming.tags = vec!["jazz".to_string()];
-    incoming.codec = "MP3".to_string();
-    incoming.last_check_ok = Some(true);
-
-    assert!(saved.enrich_from(&incoming));
-    assert_eq!(saved.name, "My Label");
-    assert_eq!(saved.url, "http://old");
-    assert_eq!(saved.station_uuid.as_deref(), Some("uuid-1"));
-    assert_eq!(saved.country_code, "BA");
-    assert_eq!(saved.tags, vec!["jazz".to_string()]);
-    assert_eq!(saved.codec, "MP3");
-    assert_eq!(saved.last_check_ok, Some(true));
-}
-```
-
-In `src/favorites.rs`:
-
-```rust
-#[test]
-fn library_enriches_matching_station_by_normalized_url() {
-    let mut lib = Library::in_memory(vec![Station::basic(
-        "Saved", " HTTP://STREAM/ ", "Radio", "", 0,
-    )]);
-    let mut incoming = Station::basic("API", "http://stream", "Radio", "US", 128);
-    incoming.station_uuid = Some("uuid".to_string());
-
-    assert!(lib.enrich_matching_station(&incoming));
-    assert_eq!(lib.stations[0].station_uuid.as_deref(), Some("uuid"));
-}
-```
-
-In `src/app/search.rs`:
-
-```rust
-#[test]
-fn search_confirm_refreshes_metadata_for_existing_station() {
-    let saved = Station::basic("Saved", "http://stream", "Radio", "US", 0);
-    let mut app = App::new(Library::in_memory(vec![saved]));
-    let mut result = Station::basic("Result", "http://stream", "Radio", "US", 128);
-    result.codec = "MP3".to_string();
-
-    app.update(Action::EnterSearch);
-    app.search.results = vec![result];
-    app.nav.selected = 0;
-    app.update(Action::SearchConfirm);
-
-    assert_eq!(app.library.stations[0].codec, "MP3");
-}
-```
+- old libraries without health load.
+- success stores timestamp and clears error.
+- failure increments count.
+- compact row stays inside width.
 
 ---
 
-# 6. Ranking tune-up
+## Phase 6: search result explanations
 
-## Goal
+### Goal
 
-Keep local ranking deterministic, but make prefixed searches prefer exact field matches over vague popularity.
+A highlighted result should explain why it ranks well.
 
-## Files
+### Add explanation model
 
-```text
-src/radio/rank.rs
-src/radio/query.rs
-```
-
-## Current ranking
-
-Current `SearchScore`:
+File: `src/radio/rank.rs`
 
 ```rust
-struct SearchScore {
-    name_exact: u8,
-    name_prefix: u8,
-    field_match: u8,
-    checked_ok: u8,
-    https: u8,
-    known_codec: u8,
-    known_bitrate: u8,
-    click_count: u32,
-    votes: u32,
-}
-```
-
-This is good for general results, but prefixed searches need sharper field relevance.
-
-## Suggested score fields
-
-Replace `field_match: u8` with a more expressive set:
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct SearchScore {
-    exact_field_match: u8,
-    prefix_field_match: u8,
-    partial_field_match: u8,
-    name_exact: u8,
-    name_prefix: u8,
-    checked_ok: u8,
-    https: u8,
-    known_codec: u8,
-    known_bitrate: u8,
-    click_count: u32,
-    votes: u32,
-}
-```
-
-Then calculate field quality:
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FieldMatchQuality {
-    None,
-    Partial,
-    Prefix,
-    Exact,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RankExplanation {
+    pub signals: Vec<RankSignal>,
 }
 
-fn field_match_quality(query: &StationSearchQuery, station: &Station) -> FieldMatchQuality {
-    let value = query.value().trim().to_lowercase();
-    if value.is_empty() {
-        return FieldMatchQuality::None;
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RankSignal {
+    ExactName,
+    ExactTag,
+    CountryCode,
+    Language,
+    Codec,
+    LastCheckOk,
+    HighVotes,
+    HighClicks,
+    AlreadySaved,
+    Https,
+}
+
+pub fn explain_station_match(
+    query: &StationSearchQuery,
+    station: &Station,
+    is_saved: bool,
+) -> RankExplanation {
+    let mut signals = Vec::new();
 
     match query.field() {
-        SearchField::Name => text_quality(&station.name, &value),
-        SearchField::Tag => station
-            .tags
-            .iter()
-            .map(|tag| text_quality(tag, &value))
-            .chain(std::iter::once(text_quality(&station.genre, &value)))
-            .max_by_key(|quality| match quality {
-                FieldMatchQuality::None => 0,
-                FieldMatchQuality::Partial => 1,
-                FieldMatchQuality::Prefix => 2,
-                FieldMatchQuality::Exact => 3,
-            })
-            .unwrap_or(FieldMatchQuality::None),
-        SearchField::Country => text_quality(&station.country, &value),
-        SearchField::CountryCode => {
-            if station.country_code.eq_ignore_ascii_case(query.value()) {
-                FieldMatchQuality::Exact
-            } else {
-                FieldMatchQuality::None
-            }
+        SearchField::Tag if station.tags.iter().any(|t| t.eq_ignore_ascii_case(query.value())) => {
+            signals.push(RankSignal::ExactTag);
         }
-        SearchField::Language => text_quality(&station.language, &value),
-        SearchField::Codec => {
-            if station.codec.eq_ignore_ascii_case(query.value()) {
-                FieldMatchQuality::Exact
-            } else {
-                FieldMatchQuality::None
-            }
+        SearchField::CountryCode if station.country_code.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::CountryCode);
         }
+        SearchField::Language if station.language.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::Language);
+        }
+        SearchField::Codec if station.codec.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::Codec);
+        }
+        SearchField::Name if station.name.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::ExactName);
+        }
+        _ => {}
     }
-}
 
-fn text_quality(text: &str, lowered_query: &str) -> FieldMatchQuality {
-    let value = text.trim().to_lowercase();
-    if value == lowered_query {
-        FieldMatchQuality::Exact
-    } else if value.starts_with(lowered_query) {
-        FieldMatchQuality::Prefix
-    } else if value.contains(lowered_query) {
-        FieldMatchQuality::Partial
-    } else {
-        FieldMatchQuality::None
+    if station.last_check_ok == Some(true) {
+        signals.push(RankSignal::LastCheckOk);
     }
+    if station.url.starts_with("https://") {
+        signals.push(RankSignal::Https);
+    }
+    if is_saved {
+        signals.push(RankSignal::AlreadySaved);
+    }
+
+    RankExplanation { signals }
 }
 ```
 
-Then in `station_score`:
+### UI display
+
+File: `src/ui/search.rs`
 
 ```rust
-let quality = field_match_quality(query, station);
-
-SearchScore {
-    exact_field_match: u8::from(quality == FieldMatchQuality::Exact),
-    prefix_field_match: u8::from(quality == FieldMatchQuality::Prefix),
-    partial_field_match: u8::from(quality == FieldMatchQuality::Partial),
-    name_exact: u8::from(name == value),
-    name_prefix: u8::from(name.starts_with(&value)),
-    checked_ok: u8::from(station.last_check_ok == Some(true)),
-    https: u8::from(station.url.starts_with("https://")),
-    known_codec: u8::from(!station.codec.trim().is_empty()),
-    known_bitrate: u8::from(station.bitrate > 0),
-    click_count: station.click_count.unwrap_or(0),
-    votes: station.votes.unwrap_or(0),
+fn highlighted_result_explanation(app: &App) -> Option<String> {
+    let station = app.search.results.get(app.nav.selected)?;
+    let query = StationSearchQuery::parse(&app.search.query);
+    let is_saved = app.library.contains_station(station);
+    let explanation = crate::radio::explain_station_match(&query, station, is_saved);
+    Some(explanation_label(&explanation))
 }
 ```
 
-## Exact match examples
+Example labels:
 
 ```text
-tag:jazz
-  exact: tag "jazz"
-  prefix: tag "jazz fusion"
-  partial: tag "smooth jazz"
-
-country:Bosnia
-  exact: country "Bosnia"
-  prefix: country "Bosnia and Herzegovina"
-  partial: country "Federation of Bosnia..." if ever present
-
-country:BA
-  exact: country_code "BA"
-
-codec:mp3
-  exact: codec "MP3"
+Exact tag + Last check OK + Saved
+Country BA + MP3 + High clicks
 ```
 
-## Pitfalls
+Pitfall: keep explanation one line. The search list already carries metadata.
 
-- `SearchScore` field order matters because derived `Ord` compares fields in struct order. Put semantic relevance before popularity.
-- Do not let `click_count` beat exact `codec`, `countrycode`, or tag matches.
-- Keep deterministic tie-breakers:
+### Tests
 
-```rust
-.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-.then_with(|| a.url.cmp(&b.url))
-```
-
-- Do not overfit to one prefix. All search fields should share the same ranking logic where possible.
-
-## Edge cases
-
-- Stations with no tags but matching `genre` should still rank for `tag:`.
-- `codec:mp3` should not prefer an AAC station just because it has high clicks.
-- `country:BA` should not match unrelated text containing `ba`.
-- Empty query values should never rank everything as exact.
-
-## Tests
-
-In `src/radio/rank.rs`:
-
-```rust
-#[test]
-fn tag_search_prefers_exact_tag_over_partial_popular_tag() {
-    let query = StationSearchQuery::parse("tag:jazz");
-
-    let mut exact = station("Exact", "http://exact");
-    exact.tags = vec!["jazz".to_string()];
-    exact.click_count = Some(1);
-
-    let mut partial = station("Partial", "http://partial");
-    partial.tags = vec!["smooth jazz lounge".to_string()];
-    partial.click_count = Some(10_000);
-
-    let ranked = rank_search_results(&query, vec![partial, exact]);
-    assert_eq!(ranked[0].url, "http://exact");
-}
-
-#[test]
-fn codec_search_prefers_exact_codec_over_popularity() {
-    let query = StationSearchQuery::parse("codec:mp3");
-
-    let mut mp3 = station("MP3", "http://mp3");
-    mp3.codec = "MP3".to_string();
-    mp3.click_count = Some(1);
-
-    let mut aac = station("AAC", "http://aac");
-    aac.codec = "AAC".to_string();
-    aac.click_count = Some(9999);
-
-    let ranked = rank_search_results(&query, vec![aac, mp3]);
-    assert_eq!(ranked[0].url, "http://mp3");
-}
-
-#[test]
-fn country_code_search_requires_exact_code_match() {
-    let query = StationSearchQuery::parse("country:BA");
-
-    let mut ba = station("Bosnia", "http://ba");
-    ba.country_code = "BA".to_string();
-
-    let mut other = station("Contains ba", "http://other");
-    other.country = "Barbados".to_string();
-    other.country_code = "BB".to_string();
-    other.click_count = Some(9999);
-
-    let ranked = rank_search_results(&query, vec![other, ba]);
-    assert_eq!(ranked[0].url, "http://ba");
-}
-```
+- exact tag explanation.
+- country-code explanation.
+- saved explanation.
+- explanation label truncates safely.
 
 ---
 
-# 7. Better error messages for Radio Browser mirror failures
+## Phase 7: command palette
 
-## Goal
+### Goal
 
-Keep detailed mirror diagnostics available, but show friendly search errors in the TUI.
+Make features discoverable without adding permanent UI clutter.
 
-Current client behavior gathers server errors and joins them with `|`, then `src/radio.rs` may return:
+### User story
 
-```text
-HTTPS search failed: ...; HTTP fallback failed: ...
-```
+Press `:` or `Ctrl+p`. Type a command. Press Enter.
 
-Current `src/ui/search.rs` truncates by splitting at `|`, which is a brittle little gremlin in the wires.
-
-## Files
+Commands:
 
 ```text
-src/radio/client.rs
-src/radio.rs
-src/ui/search.rs
-src/app/search.rs
+search stations
+retry stream
+stop playback
+open settings
+change theme
+toggle song info metadata
+open playback doctor
+export library
+open help
 ```
 
-## Design option A, minimal string cleanup
+### State and actions
 
-Keep `anyhow::Result<Vec<Station>>`, but make errors start with a friendly summary and put details after a delimiter.
-
-In `src/radio/client.rs`:
+File: `src/app/types.rs`
 
 ```rust
-pub(super) struct SearchServerErrors {
-    attempted: usize,
-    details: Vec<String>,
-}
-
-impl SearchServerErrors {
-    fn friendly_message(&self) -> String {
-        format!(
-            "Search temporarily unavailable. Tried {} Radio Browser mirrors.",
-            self.attempted
-        )
-    }
-
-    fn detailed_message(&self) -> String {
-        self.details.join(" | ")
-    }
+pub enum InputMode {
+    Normal,
+    Search,
+    SleepTimer,
+    CommandPalette,
 }
 ```
 
-But if you still return `anyhow`, wrap as:
+File: `src/app/command_palette.rs`
 
 ```rust
-anyhow::bail!(
-    "{} Details: {}",
-    report.friendly_message(),
-    report.detailed_message()
-)
-```
-
-Then UI can display the first sentence:
-
-```rust
-fn public_search_error_message(message: &str) -> String {
-    message
-        .split("Details:")
-        .next()
-        .unwrap_or(message)
-        .trim()
-        .to_string()
+#[derive(Default)]
+pub struct CommandPaletteState {
+    pub query: String,
+    pub selected: usize,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteCommand {
+    SearchStations,
+    RetryStream,
+    StopPlayback,
+    OpenSettings,
+    ToggleHelp,
+    TogglePlaybackDoctor,
+    ToggleHistory,
+    ToggleMetadata,
+    CycleTheme,
+    ExportLibrary,
+}
+
+pub fn command_label(cmd: PaletteCommand) -> &'static str { ... }
+pub fn command_action(cmd: PaletteCommand) -> Action { ... }
+pub fn filtered_commands(query: &str, app: &App) -> Vec<PaletteCommand> { ... }
 ```
 
-## Design option B, typed error
-
-Better long-term but slightly larger:
+File: `src/action.rs`
 
 ```rust
-#[derive(Debug)]
-pub struct SearchError {
-    pub public_message: String,
-    pub details: String,
-}
+OpenCommandPalette,
+CommandPaletteConfirm,
+CommandPaletteClose,
+CommandPaletteBackspace,
+CommandPaletteInput(char),
 ```
 
-This requires changing `search_stations` result type or converting to `anyhow` at the boundary. For `0.3.1`, option A is likely enough.
+Pitfall: commands like retry should be hidden or disabled when unavailable. Do not let the palette execute nonsense.
 
-## Suggested UI helper
+### UI
 
-In `src/ui/search.rs`:
+Create:
 
-```rust
-fn public_search_error_message(message: &str) -> String {
-    let trimmed = message.trim();
-    trimmed
-        .split("Details:")
-        .next()
-        .unwrap_or(trimmed)
-        .split('|')
-        .next()
-        .unwrap_or(trimmed)
-        .trim()
-        .to_string()
-}
+```text
+src/ui/command_palette.rs
 ```
 
-Then render:
+Render input and filtered list in centered overlay.
 
-```rust
-SearchStatus::Error { message, .. } => {
-    Span::styled(format!("  {}", public_search_error_message(message)), theme::error())
-}
-```
+### Tests
 
-## Preserve detail in tests
-
-The lower-level client tests should still prove server context exists:
-
-```rust
-#[test]
-fn format_search_errors_keeps_server_context() {
-    let errors = vec![
-        "https://de1.api.radio-browser.info: timeout".to_string(),
-        "https://de2.api.radio-browser.info: tls".to_string(),
-    ];
-
-    assert!(format_search_errors(&errors).contains("de1"));
-    assert!(format_search_errors(&errors).contains("de2"));
-}
-```
-
-## Pitfalls
-
-- Do not hide all details from logs/tests. Search outages are hard to diagnose without server names.
-- Do not show raw TLS/reqwest errors as the main TUI message.
-- Do not accidentally remove HTTP fallback behavior.
-- Keep timeout unchanged unless there is a separate reason. `0.3.1` should not tune networking broadly.
-
-## Edge cases
-
-- HTTPS all fail, HTTP succeeds: no error shown.
-- HTTPS succeeds with empty results: show empty-result hint, not mirror failure.
-- All mirrors fail: show friendly summary.
-- One mirror returns non-JSON: continue fallback and include detail.
-- DNS outage: attempted count should still be correct.
-
-## Tests
-
-In `src/ui/search.rs`:
-
-```rust
-#[test]
-fn public_search_error_message_hides_details() {
-    assert_eq!(
-        public_search_error_message(
-            "Search temporarily unavailable. Tried 8 Radio Browser mirrors. Details: de1: timeout | de2: tls"
-        ),
-        "Search temporarily unavailable. Tried 8 Radio Browser mirrors."
-    );
-}
-```
-
-In `src/radio/client.rs`:
-
-```rust
-#[test]
-fn friendly_error_mentions_attempted_mirrors() {
-    let errors = vec!["server-a: timeout".to_string(), "server-b: tls".to_string()];
-    let message = friendly_search_error(errors.len());
-    assert!(message.contains("2"));
-    assert!(message.contains("Radio Browser mirrors"));
-}
-```
+- opens only in normal mode.
+- filters commands case-insensitively.
+- Enter executes selected command.
+- Esc closes cleanly.
+- disabled context commands are not executed.
 
 ---
 
-# 8. More compatibility and regression tests
+## Phase 8: library metadata refresh
 
-## Goal
+### Goal
 
-Lock down the new `0.3.0` behavior before polishing it. The tests should protect old libraries, new metadata, query aliases, ranking, saved detection, and UI hints.
+Users with older saved stations can enrich metadata without re-adding stations.
 
-## Files
+### Radio lookup function
 
-```text
-src/radio/query.rs
-src/radio/map.rs
-src/radio/rank.rs
-src/radio/station.rs
-src/favorites.rs
-src/app/search.rs
-src/ui/search.rs
-src/ui/station_details.rs
-```
-
-## Test checklist
-
-### Query parsing
-
-Add or verify tests for:
-
-```text
-plain name search
-name:lofi
-station:lofi
-tag:ambient
-genre:ambient
-country:ba
-country:Bosnia
-cc:BA
-lang:english
-language:serbian
-codec:mp3
-format:aac
-unknown prefix fallback
-empty prefix values are short
-uppercase prefixes
-whitespace around prefix and value
-```
-
-Potential whitespace trap:
+File: `src/radio.rs`
 
 ```rust
-StationSearchQuery::parse(" tag : ambient ")
-```
-
-Current parser uses `split_once(':')`, then trims prefix and value, so it should work.
-
-### API mapping
-
-Add or verify tests for:
-
-```text
-empty URL dropped
-url_resolved preferred over url
-raw url used when resolved missing
-name trimmed with fallback
-first tag becomes genre
-tags trimmed, empties dropped, duplicates removed
-country code uppercased
-codec normalized
-lastcheckok 1 true, 0 false, other None
-absurd bitrate clamped
-UUID blank becomes None
-homepage trimmed
-```
-
-### Ranking
-
-Add or verify tests for:
-
-```text
-exact name outranks prefix
-exact tag outranks partial tag with high clicks
-exact country code outranks unrelated country text
-exact codec outranks popularity
-checked_ok breaks ties
-HTTPS breaks ties
-click_count applies after relevance
-votes applies after click_count
-UUID dedupe keeps stronger candidate
-URL dedupe trims slash and case
-ranking deterministic for equal scores
-```
-
-### Library compatibility
-
-Add tests in `src/favorites.rs` for old and new JSON.
-
-Old format without metadata:
-
-```rust
-#[test]
-fn old_library_station_without_metadata_loads() {
-    let json = r#"{
-        "version": 1,
-        "stations": [{
-            "name": "Old FM",
-            "url": "http://old",
-            "genre": "Radio",
-            "country": "US",
-            "bitrate": 128
-        }],
-        "settings": {}
-    }"#;
-
-    let (stations, _, warning) = parse_library_file(json).unwrap();
-    assert!(warning.is_none());
-    assert_eq!(stations.len(), 1);
-    assert_eq!(stations[0].station_uuid, None);
-    assert!(stations[0].tags.is_empty());
-    assert_eq!(stations[0].codec, "");
+pub async fn lookup_station_metadata(station: &Station) -> anyhow::Result<Option<Station>> {
+    // Prefer UUID lookup if supported by client.
+    // Fallback to name search.
+    // Return best identity match or highest-ranked candidate.
 }
 ```
 
-New metadata round trip:
+If Radio Browser UUID endpoint is not already supported, start with name search and conservative matching.
+
+### Library helper already exists
+
+File: `src/favorites.rs`
 
 ```rust
-#[test]
-fn rich_station_metadata_round_trips_through_saved_station() {
-    let mut station = Station::basic("Rich", "http://rich", "Jazz", "Bosnia", 128);
-    station.station_uuid = Some("uuid".to_string());
-    station.country_code = "BA".to_string();
-    station.tags = vec!["jazz".to_string(), "live".to_string()];
-    station.language = "Bosnian".to_string();
-    station.codec = "MP3".to_string();
-    station.homepage = "https://example.com".to_string();
-    station.last_check_ok = Some(true);
-    station.votes = Some(42);
-    station.click_count = Some(1200);
+pub fn enrich_matching_station(&mut self, station: &Station) -> bool
+```
 
-    let saved = SavedStation::from(&station);
-    let loaded = Station::from(saved);
-    assert_eq!(loaded, station);
+Do not replace user-facing name, URL, or genre.
+
+### Refresh summary
+
+```rust
+pub struct MetadataRefreshSummary {
+    pub checked: usize,
+    pub enriched: usize,
+    pub unchanged: usize,
+    pub failed: usize,
 }
 ```
 
-If `SavedStation` is private, this test belongs inside the same module, which it already does.
-
-### App search behavior
-
-Add tests for:
+Notice:
 
 ```text
-confirming new result saves station
-confirming duplicate result enriches metadata
-confirming duplicate result preserves saved name/url
-search audition does not enrich or save
-search response with saved station displays saved indicator through contains_station
+Metadata refresh: 12 checked, 5 enriched, 6 unchanged, 1 failed
 ```
 
-Audition should not write metadata because audition means “sample, do not commit.”
+Pitfall: do not run this automatically at startup. Make it user-triggered through command palette first.
 
-### UI helpers
+### Tests
 
-Add tests for:
-
-```text
-empty plain query hint
-empty tag query hint
-empty country query hint
-empty country code query hint
-empty language query hint
-empty codec query hint
-unknown prefix fallback hint
-public search error message truncates details
-compact label truncates long values
-```
-
-## Pitfalls
-
-- Avoid tests that rely on network access. Search client unit tests should test URL/param/error formatting, not live Radio Browser.
-- Keep test stations built through `Station::basic` unless specifically testing metadata.
-- If helpers are private, add tests in the same module instead of widening visibility just for tests.
-
-## Commands
-
-Run:
-
-```bash
-cargo fmt --check
-cargo test
-cargo clippy --all-targets -- -D warnings
-```
-
-If clippy is not currently clean for unrelated reasons, document the exact warning and avoid adding new ones.
+- fills missing metadata.
+- preserves name, URL, genre.
+- duplicate UUID does not create duplicate station.
+- summary counts changed, unchanged, failed.
 
 ---
 
-# 9. Documentation polish
+## Phase 9: import preview
 
-## Goal
+### Goal
 
-Document `0.3.1` as a patch polish release, not a feature leap.
+Make import safe and explainable.
 
-## Files
+### Core model
+
+File: `src/favorites.rs` or `src/playlist.rs`
+
+```rust
+pub struct ImportPreview {
+    pub new_stations: Vec<Station>,
+    pub duplicates: Vec<Station>,
+    pub enrichments: Vec<Station>,
+    pub skipped: Vec<ImportSkip>,
+}
+
+pub struct ImportSkip {
+    pub name: String,
+    pub reason: String,
+}
+
+pub enum ImportMode {
+    All,
+    EnrichExistingOnly,
+}
+```
+
+Library methods:
+
+```rust
+impl Library {
+    pub fn preview_import(&self, stations: Vec<Station>) -> ImportPreview { ... }
+
+    pub fn apply_import_preview(
+        &mut self,
+        preview: ImportPreview,
+        mode: ImportMode,
+    ) -> anyhow::Result<ImportSummary> { ... }
+}
+```
+
+### CLI behavior
+
+Do not break current automation. Existing command should still import directly.
+
+Add optional modes later:
 
 ```text
-Cargo.toml
-Cargo.lock
-CHANGELOG.md
-README.md
-docs/releases/0.3.1.md
-docs/release-checklist.md
-docs/testing-strategy.md
+pulsedeck import file.m3u --preview
+pulsedeck import file.m3u --enrich-only
 ```
 
-## Version bump
+### TUI behavior
 
-In `Cargo.toml`:
+Expose through command palette first:
 
-```toml
-version = "0.3.1"
+```text
+Import library
+Preview import
 ```
 
-Then run a cargo command that updates `Cargo.lock`, usually:
+### Tests
 
-```bash
-cargo check
+- preview classifies new, duplicate, enrichment.
+- preview mode does not write library.
+- enrich-only does not add new stations.
+- broken entries get stable skip reasons.
+
+---
+
+## Phase 10: Station Details grouping
+
+### Goal
+
+Make the rich metadata readable.
+
+### Layout
+
+Group rows:
+
+```text
+Identity
+  Name
+  UUID
+  Saved
+
+Playback
+  Stream
+  Codec
+  Bitrate
+  Now playing
+
+Catalog
+  Genre
+  Tags
+  Country
+  Country ID
+  Language
+  Homepage
+
+Health
+  Last check
+  Local health
+  Votes
+  Clicks
 ```
 
-Verify `Cargo.lock` package version changed from `0.3.0` to `0.3.1` for `pulsedeck`.
+File: `src/ui/station_details.rs`
 
-## CHANGELOG entry
+```rust
+struct DetailSection {
+    title: &'static str,
+    rows: Vec<DetailRow>,
+}
 
-Add under `[Unreleased]` or replace with dated `0.3.1` entry when ready:
+struct DetailRow {
+    label: &'static str,
+    value: String,
+}
 
-```md
-## [0.3.1] - 2026-06-18
+fn station_detail_sections(app: &App) -> Vec<DetailSection> { ... }
+```
 
-### Fixed
-*   Improved empty-result guidance for structured search prefixes.
-*   Hardened Radio Browser metadata parsing for unusual tags, codecs, bitrates, and last-check values.
-*   Kept older `library.json` station entries compatible with the richer 0.3 metadata model.
-*   Made Radio Browser mirror failures display a friendly search error while preserving server details internally.
+Pitfall: overlay height. Keep compact warning. Consider compact mode that shows only Identity, Playback, and Health.
+
+### Tests
+
+- sections contain expected fields.
+- missing metadata displays `N/A`.
+- long homepage and UUID truncate safely.
+
+---
+
+## Phase 11: README and CHANGELOG updates
+
+### README settings text
+
+Add under Settings:
+
+```markdown
+- **Stream Song Info Metadata**: request ICY now-playing metadata when stations support it. Turn this off if a rare stream behaves better with clean audio bytes only.
+```
+
+Update playback model:
+
+```markdown
+PulseDeck can request ICY song-title metadata when enabled in settings. Metadata is optional and can be disabled without changing saved stations or playback controls.
+```
+
+### Help overlay
+
+File: `src/ui/help.rs`
+
+Update settings line:
+
+```rust
+shortcut(",", "Settings: output, theme, autoplay, metadata, history"),
+```
+
+### Changelog skeleton
+
+```markdown
+## [0.4.0] - YYYY-MM-DD
+
+### Added
+* **Playback Doctor**: Added a diagnostic overlay for stream state, buffer health, decoder status, output device, reconnect attempts, metadata mode, and recovery actions.
+* **Command Palette**: Added a searchable action palette for core commands, overlays, settings, and recovery actions.
+* **Stream Song Info Metadata setting**: Added a settings row for ICY now-playing metadata, defaulting on with a clean-audio opt-out.
+* **Search Result Explanations**: Highlighted search results now explain matching signals such as exact tag, country code, codec, health, and saved status.
+* **Library Metadata Refresh**: Saved stations can be refreshed with richer Radio Browser metadata without replacing saved names or stream URLs.
+* **Import Preview**: Library imports now summarize new stations, duplicates, metadata refreshes, and skipped entries before committing.
 
 ### Improved
-*   Added clearer in-app and README examples for `tag:`, `country:`, `lang:`, `codec:`, and `name:` searches.
-*   Added forgiving search aliases such as `station:`, `cc:`, and `format:`.
-*   Refreshed saved-station metadata when a selected search result matches an existing library entry.
-*   Tuned ranking so exact tag, country-code, language, and codec matches beat loose popularity signals.
+* **Live Stream Decoder Compatibility**: Decoder probing can replay an initial buffered stream window without pretending live radio is fully seekable.
+* **Playback Recovery UX**: Stream, decoder, and audio-output errors now show contextual recovery actions.
+* **Station Details**: Metadata is grouped for faster scanning and clearer trust/health context.
+* **Station Health**: Saved stations remember local success/failure signals for better recovery hints and future ranking.
 
-### Internal
-*   Expanded regression coverage for query parsing, metadata mapping, station enrichment, ranking, and legacy library loading.
+### Fixed
+* **Repository hygiene**: Removed unused legacy audio experiment files that were not part of the active playback path.
 ```
-
-Adjust categories based on actual final implementation. Do not claim work that did not land.
-
-## Release notes file
-
-Create `docs/releases/0.3.1.md`:
-
-```md
-# PulseDeck 0.3.1 Release Notes
-
-PulseDeck 0.3.1 polishes the structured search system introduced in 0.3.0.
-
-## Highlights
-
-- Search prefixes are easier to discover from the app and README.
-- New aliases make searches more forgiving: `station:`, `cc:`, and `format:`.
-- Empty searches now explain what to try next based on the prefix used.
-- Radio Browser metadata is normalized more defensively before display or saving.
-- Existing saved stations can be refreshed with richer metadata when a matching search result is selected.
-- Ranking now favors exact prefix-field matches before popularity signals.
-- Search outage messages are friendlier when Radio Browser mirrors fail.
-
-## Examples
-
-```text
-tag:jazz
-country:BA
-cc:BA
-lang:english
-codec:MP3
-format:AAC
-station:lofi
-```
-
-No new playback modes, recording workflows, or multi-prefix query syntax are included in this patch release.
-```
-
-## README updates
-
-Update the search section near “Finding and adding a new station.” Include a compact table:
-
-```md
-### Search prefixes
-
-PulseDeck also supports focused search prefixes:
-
-| Prefix | Also accepts | Example | Searches |
-| :--- | :--- | :--- | :--- |
-| `name:` | `station:` | `name:lofi` | Station names |
-| `tag:` | `genre:` | `tag:ambient` | Genres and tags |
-| `country:` | `cc:` | `country:BA` | Country name or two-letter code |
-| `lang:` | `language:` | `lang:english` | Station language |
-| `codec:` | `format:` | `codec:mp3` | Stream codec |
-```
-
-Make clear that plain text still searches station names.
-
-## Help overlay updates
-
-Keep help text compact. Users are in a terminal app, not a scroll cathedral.
-
-Suggested copy:
-
-```text
-Search prefixes: tag:ambient, country:BA, lang:english, codec:mp3, name:lofi
-Aliases: genre:, cc:, language:, format:, station:
-```
-
-## Testing strategy docs
-
-In `docs/testing-strategy.md`, add a subsection:
-
-```md
-### Structured search regression tests
-
-Patch releases after 0.3.0 should cover:
-
-- prefix parsing and aliases
-- old and rich library JSON loading
-- Radio Browser metadata normalization
-- UUID and normalized URL station identity
-- saved-station metadata enrichment
-- ranking relevance before popularity
-- user-facing search error and empty-result hints
-```
-
-## Release checklist
-
-Verify `docs/release-checklist.md` references `0.3.x` commands and not stale `0.1.x` examples. `0.2.4` already cleaned up some stale release checklist wording, but check again.
-
-## Pitfalls
-
-- Do not document multi-prefix search. It is not supported in this release.
-- Do not imply saved station names or URLs are automatically replaced. Say “metadata refreshed,” not “station updated.”
-- Do not promise Radio Browser availability. Mirror failure handling only improves messaging.
 
 ---
 
-# Cross-feature connection map
+## Implementation order
 
-## Query parsing to UI hints
+1. Cleanup unused audio experiment files.
+2. Finish metadata setting tests and docs.
+3. Playback Doctor diagnostics state and overlay.
+4. Actionable playback error hints.
+5. Initial probe replay buffer.
+6. Search result explanations.
+7. Station health memory.
+8. Library metadata refresh.
+9. Import preview.
+10. Command palette.
+11. Station Details grouping.
+12. README, CHANGELOG, release notes.
 
-```text
-src/radio/query.rs
-    StationSearchQuery::parse
-    known_search_prefix
-    prefix_examples_inline
-        -> src/ui/search.rs empty_search_hint
-        -> src/ui/help.rs search help copy
-        -> README search prefix table
-```
+Why this order:
 
-Risk: if UI imports too much from `radio::query`, re-export through `src/radio.rs` to keep module boundaries clean.
-
-## Metadata mapping to persistence
-
-```text
-src/radio/map.rs map_api_station
-    -> Station fields normalized
-    -> src/radio/rank.rs uses normalized codec/country/tags
-    -> src/ui/station_details.rs displays safe metadata
-    -> src/favorites.rs saves metadata to library.json
-```
-
-Risk: changing normalization can alter tests and snapshots. Keep expected output explicit.
-
-## Saved detection to enrichment
-
-```text
-src/ui/search.rs
-    app.library.contains_station(station) draws saved marker
-
-src/app/search.rs confirm_search
-    Library::add handles new station
-    Library::enrich_matching_station handles duplicate selected station
-    mark_library_dirty persists enrichment
-```
-
-Risk: enrichment during mere search browsing creates surprise writes. Enrich only on commit/import unless explicitly chosen otherwise.
-
-## Ranking to empty-result UX
-
-```text
-src/radio/rank.rs
-    Exact field matches first
-    Trust/popularity after relevance
-
-src/ui/search.rs
-    Empty result hints help users broaden searches
-```
-
-Risk: ranking changes can make popular stations move down. That is intended when exact prefix relevance is stronger.
-
-## Error reporting
-
-```text
-src/radio/client.rs
-    collect per-server errors
-    format friendly summary plus details
-
-src/radio.rs
-    combine HTTPS and HTTP fallback errors
-
-src/ui/search.rs
-    display friendly summary only
-```
-
-Risk: throwing away server details makes debugging upstream outages painful. Keep details in the error string after `Details:` or in a typed structure.
+- Cleanup removes confusion.
+- Metadata setting is already mostly done.
+- Doctor and error hints improve confidence before deeper audio changes.
+- Probe replay is risky and should be isolated.
+- Search/library features build on stable metadata helpers.
+- Command palette can expose the new features after they exist.
 
 ---
 
-# Detailed task checklist
+## Known pitfalls from 0.3.1
 
-## Query and prefix work
+### Fake seek bug
 
-- [ ] Re-export `SearchField` if UI needs it:
+Never implement live stream seek by consuming bytes from the live stream. Decoder probing must not eat audio.
+
+Bad pattern:
 
 ```rust
-pub use query::{SearchField, StationSearchQuery};
+let n = self.read(&mut discard[..to_read])?;
 ```
 
-- [ ] Add aliases in `StationSearchQuery::parse`:
+### Decoded PCM queue experiment
 
-```text
-station -> Name
-cc -> Country/CountryCode
-format -> Codec
-```
+Do not resurrect a separate decoded-PCM playback queue unless there is a complete scheduler design and heavy tests. The current passive visualizer tap is the correct architecture.
 
-- [ ] Add canonical prefix help list or formatting helper.
-- [ ] Add unknown-prefix helper if empty hints need it.
-- [ ] Add parser tests for aliases, uppercase, whitespace, unknown prefixes, and short values.
+### Metadata blame
 
-## UI guidance work
+ICY metadata was not the final root cause of the audio bug. Keep it optional, default on, and easy to disable.
 
-- [ ] Replace hardcoded empty hint with prefix-aware helper.
-- [ ] Add public search error formatter.
-- [ ] Update search footer/title if space allows.
-- [ ] Update help overlay with compact prefix examples.
-- [ ] Add UI helper tests.
+### Docs drift
 
-## Metadata hardening work
-
-- [ ] Update `clean_tag_values` to dedupe case-insensitively.
-- [ ] Add `normalize_codec`.
-- [ ] Add `normalize_country_code`.
-- [ ] Add `normalize_station_uuid`.
-- [ ] Add `sanitize_bitrate`.
-- [ ] Add `normalize_last_check_ok` in mapper.
-- [ ] Update `SavedStation -> Station` conversion to use the same helpers.
-- [ ] Make Station Details safe for long URLs, homepage, tags, and UUIDs.
-- [ ] Add tests.
-
-## Enrichment work
-
-- [ ] Add `Station::enrich_from`.
-- [ ] Add `Library::enrich_matching_station`.
-- [ ] Call enrichment from `App::confirm_search` when `Library::add` returns duplicate.
-- [ ] Decide whether CLI import should enrich duplicates.
-- [ ] Ensure dirty flag/save happens when enrichment changes data.
-- [ ] Add tests for preserving saved name/url and filling metadata.
-
-## Ranking work
-
-- [ ] Replace single `field_match` with field match quality.
-- [ ] Ensure exact field match outranks popularity.
-- [ ] Add tests for tag, country code, language, and codec exactness.
-- [ ] Keep deterministic name/url tie-breakers.
-
-## Error work
-
-- [ ] Add friendly mirror failure summary.
-- [ ] Preserve server details in lower-level message.
-- [ ] Update UI to show public part only.
-- [ ] Add tests for error formatting.
-
-## Docs and release work
-
-- [ ] Bump `Cargo.toml` to `0.3.1`.
-- [ ] Update `Cargo.lock`.
-- [ ] Add `docs/releases/0.3.1.md`.
-- [ ] Update `CHANGELOG.md`.
-- [ ] Update README search prefix section.
-- [ ] Update help text and testing strategy docs.
-- [ ] Run final checks.
+README and CHANGELOG must describe the final design only.
 
 ---
 
-# Suggested final verification script
+## Audio stability gate
 
-Run these manually from the repository root:
+Live stream bytes are sacred. Any future change to `src/audio/session.rs`, `src/audio/stream_reader.rs`, `src/audio/probe_reader.rs`, `src/audio/engine_loop.rs`, buffering, decoder setup, reconnect behavior, or ICY metadata stripping must preserve this contract:
 
-```bash
-cargo fmt --check
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo run --release -- --version
-```
+- `StreamReader` may report its current position, but it must not implement seek by reading and discarding live bytes.
+- `SeekFrom::End` is always unsupported for live radio.
+- Forward seek outside already captured probe bytes is unsupported and must not consume from the queue.
+- Rewind is only allowed inside `ProbeReplayReader`'s captured initial probe window.
+- ICY metadata remains supported and default-on; metadata must not be treated as the root audio scapegoat.
+- Tests must cover the composed `StreamReader -> ProbeReplayReader` path, not only the individual wrappers.
 
-Manual smoke checks:
+Required regression coverage for audio byte-path work:
 
-```text
-1. Launch PulseDeck.
-2. Press / to open search.
-3. Type tag:ambient and verify results appear.
-4. Type genre:ambient and verify equivalent behavior.
-5. Type cc:BA and verify country-code search works.
-6. Type format:mp3 and verify codec search works.
-7. Type mood:rain and verify unknown prefix is treated as plain search with a helpful empty hint if no results.
-8. Select an existing saved station returned by search and press Enter.
-9. Verify it does not duplicate, plays, and refreshes metadata if missing.
-10. Open Station Details with i and verify metadata does not overflow.
-11. Temporarily simulate search failure if possible and verify friendly mirror failure text.
-```
-
-Network-dependent smoke tests should not block release if Radio Browser is temporarily down, but they should be retried before publishing crates.io if possible.
+- safe initial rewind replays captured bytes without draining the live queue twice.
+- unsafe forward seek fails without consuming queued bytes.
+- ICY metadata stripping still yields clean audio bytes after a safe start rewind.
+- metadata-on and metadata-off manual smoke tests pass on real stations.
 
 ---
 
-# Rollback plan
+## Acceptance criteria
 
-If a change becomes risky late in the release:
+0.4.0 is ready when:
 
-1. Keep alias parsing and docs. Low risk.
-2. Keep empty-result hints. Low risk.
-3. Keep metadata normalization only for tags/codecs/lastcheckok. Medium-low risk.
-4. Drop automatic enrichment if dirty/save behavior gets tangled. It can move to `0.3.2`.
-5. Drop ranking tune-up if exact ordering becomes controversial. Keep tests for current ranking instead.
-6. Keep friendly error text only if details remain available.
+- Dead audio experiment files are removed.
+- Metadata setting is documented and tested.
+- Playback Doctor opens, closes, and shows useful state.
+- Playback errors provide contextual recovery actions.
+- Probe replay allows safe initial rewinds and refuses unsafe live seeks.
+- Composed audio-reader tests prove safe rewind, unsafe forward-seek refusal, and ICY stripping on the active reader path.
+- Search result explanations exist for highlighted results.
+- Station health is stored without breaking old libraries.
+- Metadata refresh enriches saved stations safely.
+- Import preview classifies new, duplicate, enrich, skipped.
+- Command palette exposes recovery and discovery actions.
+- Station Details is grouped and readable.
+- README and CHANGELOG match reality.
+- `cargo test` passes.
+- `cargo clippy --all-targets` passes.
+- Manual metadata-on and metadata-off playback smoke tests pass.
 
-The minimum valuable `0.3.1` is:
+---
 
-```text
-prefix aliases + better hints + metadata hardening + tests + docs
-```
+## Manual smoke checklist
 
-The ideal `0.3.1` includes all nine improvements in this plan.
+- Start with metadata on.
+- Play a known ICY station.
+- Verify current track updates.
+- Verify Recent Tracks updates.
+- Enable saved history and verify history updates.
+- Turn metadata off.
+- Stop and replay station.
+- Verify playback still works.
+- Verify no new track titles arrive while metadata is off.
+- Open Playback Doctor while connecting.
+- Open Playback Doctor while playing.
+- Open Playback Doctor after an error.
+- Search `tag:ambient`.
+- Search `country:BA`.
+- Search `lang:english`.
+- Search `codec:mp3`.
+- Verify search explanations are short and sensible.
+- Preview import of M3U and JSON sample files.
+- Test 80x24 terminal.
+- Test below-minimum terminal dimensions.
+
+---
+
+## Final product shape
+
+PulseDeck 0.4.0 should feel like this:
+
+- If playback works, it is smooth and informative.
+- If playback fails, PulseDeck says why and offers the next action.
+- If search returns results, the user understands why they are good.
+- If the library ages, it can refresh and remember health.
+- If the user forgets a shortcut, the command palette catches them.
+- If a station supports song titles, PulseDeck shows them.
+- If a station behaves better without metadata, the user can turn metadata off.
+
+This is the confidence release.

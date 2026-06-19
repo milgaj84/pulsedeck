@@ -87,6 +87,52 @@ impl App {
         }
     }
 
+    pub(super) fn request_metadata_refresh(&mut self) {
+        if self.library.stations.is_empty() {
+            self.set_info_notice("Library is empty; nothing to refresh");
+            return;
+        }
+        if self.metadata_refresh_pending || self.metadata_refresh_running {
+            self.set_info_notice("Metadata refresh already running");
+            return;
+        }
+
+        self.metadata_refresh_pending = true;
+        self.set_info_notice(format!(
+            "Refreshing metadata for {} stations",
+            self.library.stations.len()
+        ));
+    }
+
+    pub fn take_metadata_refresh_request(&mut self) -> Option<Vec<Station>> {
+        if !self.metadata_refresh_pending || self.metadata_refresh_running {
+            return None;
+        }
+
+        self.metadata_refresh_pending = false;
+        self.metadata_refresh_running = true;
+        Some(self.library.stations.clone())
+    }
+
+    pub fn apply_metadata_refresh_response(
+        &mut self,
+        result: Result<(usize, Vec<Station>, usize), String>,
+    ) {
+        self.metadata_refresh_running = false;
+        match result {
+            Ok((checked, matches, failed)) => {
+                let summary = self
+                    .library
+                    .apply_metadata_refresh_results(checked, matches, failed);
+                if summary.enriched > 0 {
+                    self.mark_library_dirty();
+                }
+                self.set_info_notice(summary.notice());
+            }
+            Err(message) => self.set_error_notice(format!("Metadata refresh failed: {message}")),
+        }
+    }
+
     pub(super) fn next_genre(&mut self) {
         if self.input_mode == InputMode::Normal {
             let count = self.library.available_genres.len();
@@ -190,6 +236,44 @@ mod tests {
             .iter()
             .position(|candidate| candidate == genre)
             .unwrap()
+    }
+
+    #[test]
+    fn metadata_refresh_request_sets_pending_once() {
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+
+        app.update(Action::RefreshLibraryMetadata);
+        let request = app.take_metadata_refresh_request().unwrap();
+        app.update(Action::RefreshLibraryMetadata);
+
+        assert_eq!(request.len(), 1);
+        assert_eq!(notice_text(&app), Some("Metadata refresh already running"));
+        assert!(app.take_metadata_refresh_request().is_none());
+    }
+
+    #[test]
+    fn metadata_refresh_response_applies_summary_notice() {
+        let mut saved = station("A", "http://a", "Synthwave");
+        saved.bitrate = 0;
+        let mut app = App::new(Library::in_memory(vec![saved]));
+        app.update(Action::RefreshLibraryMetadata);
+        assert!(app.take_metadata_refresh_request().is_some());
+
+        let mut rich = station("A Rich", "http://a", "Ambient");
+        rich.codec = "MP3".to_string();
+        app.apply_metadata_refresh_response(Ok((1, vec![rich], 0)));
+
+        assert_eq!(app.library.stations[0].name, "A");
+        assert_eq!(app.library.stations[0].genre, "Synthwave");
+        assert_eq!(app.library.stations[0].codec, "MP3");
+        assert_eq!(
+            notice_text(&app),
+            Some("Metadata refresh: 1 checked, 1 enriched, 0 unchanged, 0 failed")
+        );
     }
 
     #[test]

@@ -45,6 +45,8 @@ async fn main() -> Result<()> {
 
     let (search_tx, mut search_rx) =
         tokio::sync::mpsc::unbounded_channel::<(String, Result<Vec<radio::Station>, String>)>();
+    let (metadata_tx, mut metadata_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Result<(usize, Vec<radio::Station>, usize), String>>();
     let tick_rate = Duration::from_millis(66);
     let mut search_debounce: Option<(String, Instant)> = None;
 
@@ -87,6 +89,27 @@ async fn main() -> Result<()> {
 
         while let Ok((query, result)) = search_rx.try_recv() {
             app.apply_search_response(query, result);
+        }
+
+        if let Some(stations) = app.take_metadata_refresh_request() {
+            let tx = metadata_tx.clone();
+            tokio::spawn(async move {
+                let checked = stations.len();
+                let mut matches = Vec::new();
+                let mut failed = 0;
+                for station in stations {
+                    match radio::lookup_station_metadata(&station).await {
+                        Ok(Some(metadata)) => matches.push(metadata),
+                        Ok(None) => {}
+                        Err(_) => failed += 1,
+                    }
+                }
+                let _ = tx.send(Ok((checked, matches, failed)));
+            });
+        }
+
+        while let Ok(result) = metadata_rx.try_recv() {
+            app.apply_metadata_refresh_response(result);
         }
 
         if app.should_quit {

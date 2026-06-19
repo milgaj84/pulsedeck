@@ -3,6 +3,103 @@ use std::collections::HashMap;
 use super::query::{SearchField, StationSearchQuery};
 use super::{Station, StationIdentity};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RankExplanation {
+    pub signals: Vec<RankSignal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RankSignal {
+    ExactName,
+    ExactTag,
+    CountryCode(String),
+    Language(String),
+    Codec(String),
+    LastCheckOk,
+    HighVotes,
+    HighClicks,
+    AlreadySaved,
+    Https,
+}
+
+pub fn explain_station_match(
+    query: &StationSearchQuery,
+    station: &Station,
+    is_saved: bool,
+) -> RankExplanation {
+    let mut signals = Vec::new();
+
+    match query.field() {
+        SearchField::Name if station.name.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::ExactName);
+        }
+        SearchField::Tag
+            if station
+                .tags
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(query.value())) =>
+        {
+            signals.push(RankSignal::ExactTag);
+        }
+        SearchField::CountryCode if station.country_code.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::CountryCode(station.country_code.clone()));
+        }
+        SearchField::Language if station.language.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::Language(station.language.clone()));
+        }
+        SearchField::Codec if station.codec.eq_ignore_ascii_case(query.value()) => {
+            signals.push(RankSignal::Codec(station.codec.clone()));
+        }
+        _ => {}
+    }
+
+    if station.last_check_ok == Some(true) {
+        signals.push(RankSignal::LastCheckOk);
+    }
+    if station.votes.unwrap_or(0) >= 100 {
+        signals.push(RankSignal::HighVotes);
+    }
+    if station.click_count.unwrap_or(0) >= 1_000 {
+        signals.push(RankSignal::HighClicks);
+    }
+    if is_saved {
+        signals.push(RankSignal::AlreadySaved);
+    }
+    if station.url.starts_with("https://") {
+        signals.push(RankSignal::Https);
+    }
+
+    RankExplanation { signals }
+}
+
+pub fn rank_explanation_label(explanation: &RankExplanation) -> String {
+    if explanation.signals.is_empty() {
+        return "General relevance".to_string();
+    }
+
+    explanation
+        .signals
+        .iter()
+        .map(rank_signal_label)
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn rank_signal_label(signal: &RankSignal) -> String {
+    match signal {
+        RankSignal::ExactName => "Exact name".to_string(),
+        RankSignal::ExactTag => "Exact tag".to_string(),
+        RankSignal::CountryCode(code) => format!("Country {}", code.to_ascii_uppercase()),
+        RankSignal::Language(language) => format!("Language {}", language),
+        RankSignal::Codec(codec) => codec.to_ascii_uppercase(),
+        RankSignal::LastCheckOk => "Last check OK".to_string(),
+        RankSignal::HighVotes => "High votes".to_string(),
+        RankSignal::HighClicks => "High clicks".to_string(),
+        RankSignal::AlreadySaved => "Saved".to_string(),
+        RankSignal::Https => "HTTPS".to_string(),
+    }
+}
+
 pub(super) fn rank_search_results(
     query: &StationSearchQuery,
     stations: Vec<Station>,
@@ -172,5 +269,57 @@ mod tests {
         );
 
         assert_eq!(ranked[0].name, "lofi a");
+    }
+
+    #[test]
+    fn explanation_includes_exact_tag_saved_and_health_signals() {
+        let query = StationSearchQuery::parse("tag:jazz");
+        let mut station = station("Jazz Shed", "https://jazz");
+        station.tags = vec!["jazz".to_string()];
+        station.last_check_ok = Some(true);
+
+        let explanation = explain_station_match(&query, &station, true);
+
+        assert_eq!(
+            explanation.signals,
+            vec![
+                RankSignal::ExactTag,
+                RankSignal::LastCheckOk,
+                RankSignal::AlreadySaved,
+                RankSignal::Https,
+            ]
+        );
+        assert_eq!(
+            rank_explanation_label(&explanation),
+            "Exact tag + Last check OK + Saved + HTTPS"
+        );
+    }
+
+    #[test]
+    fn explanation_includes_country_code_and_codec_labels() {
+        let country_query = StationSearchQuery::parse("country:ba");
+        let mut country_station = station("Bosnia", "http://ba");
+        country_station.country_code = "BA".to_string();
+
+        let country_explanation = explain_station_match(&country_query, &country_station, false);
+        assert_eq!(rank_explanation_label(&country_explanation), "Country BA");
+
+        let codec_query = StationSearchQuery::parse("codec:mp3");
+        let mut codec_station = station("MP3", "http://mp3");
+        codec_station.codec = "MP3".to_string();
+
+        let codec_explanation = explain_station_match(&codec_query, &codec_station, false);
+        assert_eq!(rank_explanation_label(&codec_explanation), "MP3");
+    }
+
+    #[test]
+    fn explanation_falls_back_when_no_signal_is_known() {
+        let query = StationSearchQuery::parse("lofi");
+        let station = station("Other", "http://other");
+
+        let explanation = explain_station_match(&query, &station, false);
+
+        assert!(explanation.signals.is_empty());
+        assert_eq!(rank_explanation_label(&explanation), "General relevance");
     }
 }

@@ -203,6 +203,10 @@ fn footer_line(app: &App) -> Line<'static> {
             ],
             Some("worldwide station search"),
         ),
+        InputMode::CommandPalette => hint_line(
+            &[("↑↓", "Select"), ("Enter", "Run"), ("Esc", "Close")],
+            Some("command palette"),
+        ),
         InputMode::Normal => normal_mode_footer(app),
         InputMode::SleepTimer => normal_mode_footer(app),
     }

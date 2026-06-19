@@ -1,8 +1,10 @@
+pub mod command_palette;
 pub mod controls;
 pub mod critical;
 pub mod deck;
 pub mod header;
 pub mod help;
+pub mod playback_doctor;
 pub mod recent_tracks;
 pub mod search;
 pub mod settings;
@@ -104,8 +106,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ActiveOverlay::RecentTracks => recent_tracks::render(frame, size, app),
         ActiveOverlay::Help => help::render(frame, size, app),
         ActiveOverlay::Settings => settings::render(frame, size, app),
+        ActiveOverlay::PlaybackDoctor => playback_doctor::render(frame, size, app),
         ActiveOverlay::SleepTimer => sleep_timer::render(frame, size, app),
         ActiveOverlay::None => {}
+    }
+
+    if app.input_mode == InputMode::CommandPalette {
+        command_palette::render(frame, size, app);
     }
 }
 

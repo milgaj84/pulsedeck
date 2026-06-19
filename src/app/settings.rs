@@ -66,6 +66,9 @@ impl App {
                     &available_output_device_choices(),
                     forward,
                 );
+                self.diagnostics.output_device = output_device_display_name(
+                    self.library.settings.output_device_name.as_deref(),
+                );
                 self.sync_output_device();
                 self.set_info_notice(format!(
                     "Audio output: {}",
@@ -80,6 +83,21 @@ impl App {
                 crate::ui::theme::set_active(next);
                 true
             }
+            Some(SettingRow::StreamMetadata) => {
+                self.library.settings.stream_metadata_enabled =
+                    !self.library.settings.stream_metadata_enabled;
+                self.diagnostics.metadata_enabled = self.library.settings.stream_metadata_enabled;
+                self.sync_stream_metadata();
+                self.set_info_notice(format!(
+                    "Song info metadata: {}",
+                    if self.library.settings.stream_metadata_enabled {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                ));
+                true
+            }
             Some(SettingRow::SaveHistory) => {
                 self.library.settings.save_history = !self.library.settings.save_history;
                 true
@@ -88,10 +106,32 @@ impl App {
         }
     }
 
+    pub(super) fn cycle_theme_setting(&mut self) {
+        self.overlays.selected_setting_idx = SettingRow::Theme.index();
+        if self.apply_selected_setting(true) {
+            self.mark_library_dirty();
+            self.set_info_notice(format!("Theme: {}", self.library.settings.theme));
+        }
+    }
+
+    pub(super) fn toggle_stream_metadata_setting(&mut self) {
+        self.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
+        if self.apply_selected_setting(true) {
+            self.mark_library_dirty();
+        }
+    }
+
     pub(super) fn sync_output_device(&self) {
         self.audio.send(crate::audio::AudioCommand::SetOutputDevice(
             self.library.settings.output_device_name.clone(),
         ));
+    }
+
+    pub(super) fn sync_stream_metadata(&self) {
+        self.audio
+            .send(crate::audio::AudioCommand::SetStreamMetadata(
+                self.library.settings.stream_metadata_enabled,
+            ));
     }
 
     fn apply_directional_setting(&mut self, forward: bool) -> bool {
@@ -276,6 +316,18 @@ mod tests {
             step_output_device_preference(Some("Missing Bluetooth"), &choices, false).as_deref(),
             Some("Built-in Speakers")
         );
+    }
+
+    #[test]
+    fn settings_toggle_stream_metadata_updates_setting() {
+        let mut app = test_app();
+        app.overlays.active = ActiveOverlay::Settings;
+        app.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
+        app.library.settings.stream_metadata_enabled = true;
+
+        app.update(Action::TogglePause);
+
+        assert!(!app.library.settings.stream_metadata_enabled);
     }
 
     #[test]
