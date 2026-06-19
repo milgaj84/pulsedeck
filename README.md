@@ -136,18 +136,6 @@ While in search, plain printable characters continue to edit the query. Use the 
 
 Search results show saved stations with a star and include compact genre/country/bitrate/codec/check metadata when available. Long station names are truncated around the active search term when possible, so matching text stays visible even in narrow result rows. Search titles and the footer both reinforce the `Space` preview versus `Enter` save-and-play split.
 
-Focused search prefixes:
-
-| Prefix | Example | Searches |
-| :--- | :--- | :--- |
-| `name:` | `name:lofi` | station names |
-| `tag:` | `tag:ambient` | Radio Browser tags / genres |
-| `country:` | `country:BA` or `country:Bosnia` | country code or country name |
-| `lang:` | `lang:english` | station language |
-| `codec:` | `codec:mp3` | stream codec |
-
-Plain text still searches station names, so `lofi` works exactly as before.
-
 **Search prefixes:** plain text still searches station names, but you can focus Radio Browser searches with prefixes:
 
 | Prefix | Also accepts | Example | Searches |

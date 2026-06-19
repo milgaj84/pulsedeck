@@ -10,8 +10,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [0.3.1] - 2026-06-18
 
+### Added
+*   **Structured Radio Browser search**: Search now supports focused prefixes for station names, tags/genres, country names or country codes, languages, and codecs: `name:`, `station:`, `tag:`, `genre:`, `country:`, `cc:`, `lang:`, `language:`, `codec:`, and `format:`. Plain text still searches station names.
+*   **Richer station metadata**: Search results and saved stations can now carry Radio Browser UUIDs, country codes, tags, language, codec, homepage, last-check status, votes, and click counts.
+*   **Expanded Station Details**: The `i` overlay now shows the richer station metadata when available, including trust/popularity fields and the station UUID.
+
 ### Fixed
-*   **Structured search guidance**: Empty-result hints now explain what to try next based on the prefix being used.
+*   **Structured search guidance**: Empty-result hints now explain what to try next based on the prefix being used, and unknown prefixes are clearly treated as plain station-name searches.
 *   **Radio Browser metadata hardening**: Tags, codecs, country codes, bitrates, UUIDs, and last-check flags are normalized defensively before display or persistence.
 *   **Search outage messages**: Radio Browser mirror failures now show a friendly user-facing summary while preserving server details internally.
 *   **Playback startup and stutter**: Live radio streams no longer simulate forward seeks by reading and discarding real stream bytes during decoder probing, fixing long tuning delays and broken buffering on affected stations.
@@ -21,9 +26,9 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Startup autoplay**: Last-played autoplay now starts the stored stream URL even when the saved-library URL no longer matches byte-for-byte after Radio Browser URL resolution.
 
 ### Improved
-*   **Search aliases**: Added forgiving aliases including `station:`, `cc:`, and `format:` alongside the existing `name:`, `country:`, and `codec:` forms.
+*   **Saved-station identity**: Saved search results are detected by Radio Browser UUID when available, falling back to normalized stream URL matching.
 *   **Saved-station refresh**: Selecting an already-saved matching search result can refresh missing station metadata without duplicating the library entry or replacing the saved name/URL.
-*   **Search ranking**: Exact tag, country-code, language, and codec matches now outrank loose popularity signals.
+*   **Search ranking and dedupe**: Results are deduplicated and ranked locally so exact tag, country-code, language, and codec matches outrank loose popularity signals.
 *   **In-app docs**: Help and README now surface structured-search examples and aliases.
 
 ### Internal
