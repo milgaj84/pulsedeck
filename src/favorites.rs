@@ -3,7 +3,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::radio::Station;
+use crate::radio::{
+    clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
+    sanitize_bitrate, station_identity_matches, Station,
+};
 
 const LIBRARY_FILE: &str = "library.json";
 
@@ -127,13 +130,13 @@ impl From<SavedStation> for Station {
             name: s.name,
             url: s.url,
             genre: s.genre,
-            country: s.country,
-            bitrate: s.bitrate,
-            station_uuid: s.station_uuid.filter(|uuid| !uuid.trim().is_empty()),
-            country_code: s.country_code.trim().to_ascii_uppercase(),
-            tags: crate::radio::clean_tag_values(s.tags),
+            country: s.country.trim().to_string(),
+            bitrate: sanitize_bitrate(s.bitrate),
+            station_uuid: s.station_uuid.and_then(normalize_station_uuid),
+            country_code: normalize_country_code(&s.country_code),
+            tags: clean_tag_values(s.tags),
             language: s.language.trim().to_string(),
-            codec: s.codec.trim().to_ascii_uppercase(),
+            codec: normalize_codec(&s.codec),
             homepage: s.homepage.trim().to_string(),
             last_check_ok: s.last_check_ok,
             votes: s.votes,
@@ -309,6 +312,7 @@ impl Library {
         let mut skipped = 0;
         for s in stations {
             if self.contains_station(&s) {
+                self.enrich_matching_station(&s);
                 skipped += 1;
             } else {
                 self.stations.push(s);
@@ -351,7 +355,15 @@ impl Library {
     pub fn contains_station(&self, station: &Station) -> bool {
         self.stations
             .iter()
-            .any(|saved| crate::radio::station_identity_matches(saved, station))
+            .any(|saved| station_identity_matches(saved, station))
+    }
+
+    /// Enrich an already-saved matching station with fresh Radio Browser metadata.
+    pub fn enrich_matching_station(&mut self, station: &Station) -> bool {
+        self.stations
+            .iter_mut()
+            .find(|saved| station_identity_matches(saved, station))
+            .is_some_and(|saved| saved.enrich_from(station))
     }
 
     /// Check if a station URL is in the library.
@@ -412,6 +424,10 @@ fn parse_library_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn station(name: &str, url: &str, genre: &str, country: &str, bitrate: u32) -> Station {
+        Station::basic(name, url, genre, country, bitrate)
+    }
 
     #[test]
     fn test_resolve_parent_genre_synthwave_variants() {
@@ -513,7 +529,7 @@ mod tests {
             path: None,
             load_warnings: Vec::new(),
         };
-        let station = Station::basic("Test", "http://test", "Synthwave", "US", 128);
+        let station = station("Test", "http://test", "Synthwave", "US", 128);
         assert!(lib.add(station.clone()).unwrap());
         assert!(!lib.add(station).unwrap());
         assert_eq!(lib.stations.len(), 1);
@@ -522,13 +538,7 @@ mod tests {
     #[test]
     fn test_library_remove() {
         let mut lib = Library {
-            stations: vec![Station::basic(
-                "Test",
-                "http://test",
-                "Synthwave",
-                "US",
-                128,
-            )],
+            stations: vec![station("Test", "http://test", "Synthwave", "US", 128)],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
@@ -542,13 +552,7 @@ mod tests {
     #[test]
     fn test_library_contains() {
         let lib = Library {
-            stations: vec![Station::basic(
-                "Test",
-                "http://test",
-                "Synthwave",
-                "US",
-                128,
-            )],
+            stations: vec![station("Test", "http://test", "Synthwave", "US", 128)],
             available_genres: vec![],
             settings: Settings::default(),
             path: None,
@@ -562,8 +566,8 @@ mod tests {
     fn test_rebuild_genres() {
         let mut lib = Library {
             stations: vec![
-                Station::basic("A", "http://a", "Synthwave", "US", 128),
-                Station::basic("B", "http://b", "Ambient", "US", 128),
+                station("A", "http://a", "Synthwave", "US", 128),
+                station("B", "http://b", "Ambient", "US", 128),
             ],
             available_genres: vec![],
             settings: Settings::default(),
@@ -578,20 +582,14 @@ mod tests {
 
     #[test]
     fn test_in_memory_library_rebuilds_genres_without_path() {
-        let lib = Library::in_memory(vec![Station::basic(
-            "Test",
-            "http://test",
-            "Synthwave",
-            "US",
-            128,
-        )]);
+        let lib = Library::in_memory(vec![station("Test", "http://test", "Synthwave", "US", 128)]);
         assert!(lib.path.is_none());
         assert!(lib.available_genres.contains(&"Synthwave".to_string()));
     }
 
     #[test]
     fn test_import_stations() {
-        let mut lib = Library::in_memory(vec![Station::basic(
+        let mut lib = Library::in_memory(vec![station(
             "Test A",
             "http://a",
             "Synthwave",
@@ -600,8 +598,8 @@ mod tests {
         )]);
 
         let to_import = vec![
-            Station::basic("Test A", "http://a", "Synthwave", "US", 128),
-            Station::basic("Test B", "http://b", "Ambient", "UK", 96),
+            station("Test A", "http://a", "Synthwave", "US", 128),
+            station("Test B", "http://b", "Ambient", "UK", 96),
         ];
 
         let summary = lib.import_stations(to_import).unwrap();

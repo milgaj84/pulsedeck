@@ -1,12 +1,11 @@
 use crate::app::App;
-use crate::radio::Station;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::{critical, theme};
 
-const MIN_DETAILS_WIDTH: u16 = 64;
-const MIN_DETAILS_HEIGHT: u16 = 16;
+const MIN_DETAILS_WIDTH: u16 = 56;
+const MIN_DETAILS_HEIGHT: u16 = 12;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let popup_area = super::centered_rect(62, 48, area);
@@ -81,29 +80,33 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
         .as_deref()
         .filter(|_| app.player.playing_url.as_ref() == Some(&station.url))
         .unwrap_or("N/A");
-
-    let tags = tags_label(station);
-    let country = country_label(station);
-    let codec = codec_label(station);
-    let checked = check_label(station);
-    let popularity = popularity_label(station);
-    let homepage = homepage_label(station);
-    let uuid = uuid_label(station);
     let bitrate = bitrate_label(station.bitrate);
+    let tags = metadata_list(&station.tags, "N/A");
+    let last_check = match station.last_check_ok {
+        Some(true) => "OK",
+        Some(false) => "Failing",
+        None => "Unknown",
+    };
+    let votes = option_count_label(station.votes);
+    let click_count = option_count_label(station.click_count);
+    let station_uuid = station.station_uuid.as_deref().unwrap_or("N/A");
 
     vec![
         detail_row("Name", station.name.as_str()),
-        detail_row("Tags", tags.as_str()),
-        detail_row("Country", country.as_str()),
-        detail_row("Language", fallback(station.language.as_str(), "Unknown")),
-        detail_row("Codec", codec.as_str()),
+        detail_row("Genre", fallback(station.genre.as_str(), "Other")),
+        detail_row("Country", fallback(station.country.as_str(), "??")),
+        detail_row("Country ID", fallback(station.country_code.as_str(), "N/A")),
+        detail_row("Language", fallback(station.language.as_str(), "N/A")),
+        detail_row("Codec", fallback(station.codec.as_str(), "N/A")),
         detail_row("Bitrate", bitrate.as_str()),
-        detail_row("Checked", checked.as_str()),
-        detail_row("Popularity", popularity.as_str()),
+        detail_row("Last check", last_check),
+        detail_row("Votes", votes.as_str()),
+        detail_row("Clicks", click_count.as_str()),
+        detail_row("Tags", tags.as_str()),
+        detail_row("Homepage", fallback(station.homepage.as_str(), "N/A")),
+        detail_row("UUID", station_uuid),
         detail_row("Saved", saved),
         detail_row("Now playing", now_playing),
-        detail_row("Homepage", homepage.as_str()),
-        detail_row("UUID", uuid.as_str()),
         detail_row("Stream", station.url.as_str()),
         Line::from(""),
         close_hint(),
@@ -113,8 +116,34 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
 fn detail_row(label: &'static str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:>11}: "), theme::dim()),
-        Span::styled(value.to_string(), theme::text()),
+        Span::styled(compact_detail_value(value), theme::text()),
     ])
+}
+
+fn compact_detail_value(value: &str) -> String {
+    const MAX_CHARS: usize = 96;
+    let value = value.trim();
+    let mut chars = value.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
+}
+
+fn metadata_list(values: &[String], fallback: &str) -> String {
+    if values.is_empty() {
+        fallback.to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn option_count_label(value: Option<u32>) -> String {
+    value
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "N/A".to_string())
 }
 
 fn close_hint() -> Line<'static> {
@@ -122,67 +151,6 @@ fn close_hint() -> Line<'static> {
         Span::styled(" i ", theme::cyan()),
         Span::styled("closes this panel", theme::dim()),
     ])
-}
-
-fn tags_label(station: &Station) -> String {
-    if !station.tags.is_empty() {
-        station
-            .tags
-            .iter()
-            .take(4)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        fallback(station.genre.as_str(), "Other").to_string()
-    }
-}
-
-fn country_label(station: &Station) -> String {
-    let country = fallback(station.country.as_str(), "Unknown");
-    if station.country_code.trim().is_empty() {
-        country.to_string()
-    } else {
-        format!(
-            "{} ({})",
-            country,
-            station.country_code.trim().to_ascii_uppercase()
-        )
-    }
-}
-
-fn codec_label(station: &Station) -> String {
-    fallback(station.codec.as_str(), "Unknown").to_string()
-}
-
-fn check_label(station: &Station) -> String {
-    match station.last_check_ok {
-        Some(true) => "Online at last check".to_string(),
-        Some(false) => "Failed last check".to_string(),
-        None => "Unknown".to_string(),
-    }
-}
-
-fn popularity_label(station: &Station) -> String {
-    match (station.votes, station.click_count) {
-        (Some(votes), Some(clicks)) => format!("{votes} votes · {clicks} recent clicks"),
-        (Some(votes), None) => format!("{votes} votes"),
-        (None, Some(clicks)) => format!("{clicks} recent clicks"),
-        (None, None) => "Unknown".to_string(),
-    }
-}
-
-fn homepage_label(station: &Station) -> String {
-    fallback(station.homepage.as_str(), "Unknown").to_string()
-}
-
-fn uuid_label(station: &Station) -> String {
-    station
-        .station_uuid
-        .as_deref()
-        .filter(|uuid| !uuid.trim().is_empty())
-        .unwrap_or("Unknown")
-        .to_string()
 }
 
 fn bitrate_label(bitrate: u32) -> String {
@@ -207,13 +175,13 @@ mod tests {
 
     #[test]
     fn details_overlay_rejects_tiny_area() {
-        assert!(details_area_is_compact(Rect::new(0, 0, 63, 16)));
-        assert!(details_area_is_compact(Rect::new(0, 0, 64, 15)));
+        assert!(details_area_is_compact(Rect::new(0, 0, 55, 12)));
+        assert!(details_area_is_compact(Rect::new(0, 0, 56, 11)));
     }
 
     #[test]
     fn details_overlay_accepts_minimum_area() {
-        assert!(!details_area_is_compact(Rect::new(0, 0, 64, 16)));
+        assert!(!details_area_is_compact(Rect::new(0, 0, 56, 12)));
     }
 
     #[test]
@@ -229,27 +197,23 @@ mod tests {
     }
 
     #[test]
-    fn country_label_includes_country_code_when_available() {
-        let mut station = Station::basic("A", "http://a", "Radio", "Bosnia", 128);
-        station.country_code = "ba".to_string();
-
-        assert_eq!(country_label(&station), "Bosnia (BA)");
+    fn metadata_list_uses_fallback_or_joined_values() {
+        assert_eq!(metadata_list(&[], "N/A"), "N/A");
+        assert_eq!(
+            metadata_list(&["jazz".to_string(), "live".to_string()], "N/A"),
+            "jazz, live"
+        );
     }
 
     #[test]
-    fn tags_label_uses_full_tags_when_available() {
-        let mut station = Station::basic("A", "http://a", "Radio", "US", 128);
-        station.tags = vec!["jazz".to_string(), "soul".to_string()];
-
-        assert_eq!(tags_label(&station), "jazz, soul");
+    fn option_count_label_formats_known_and_unknown_counts() {
+        assert_eq!(option_count_label(None), "N/A");
+        assert_eq!(option_count_label(Some(42)), "42");
     }
 
     #[test]
-    fn popularity_label_handles_votes_and_clicks() {
-        let mut station = Station::basic("A", "http://a", "Radio", "US", 128);
-        station.votes = Some(5);
-        station.click_count = Some(20);
-
-        assert_eq!(popularity_label(&station), "5 votes · 20 recent clicks");
+    fn compact_detail_value_truncates_long_metadata() {
+        assert_eq!(compact_detail_value("  short  "), "short");
+        assert!(compact_detail_value(&"x".repeat(120)).ends_with('…'));
     }
 }

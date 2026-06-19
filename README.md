@@ -48,7 +48,7 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 💤 **Sleep Timer**: press `t` to open a sleep-timer panel; nudge by 5 minutes with ↑ / ↓, jump to presets (15-120 min) with number keys, turn it off with `0` / `c`, and playback fades out and stops when time is up
 - 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line
 - 🔔 **Desktop notifications**: a quiet system notification can show the current track when a new song starts
-- 🎛️ **Resilient streaming**: a circular buffer absorbs network hiccups, auto-reconnecting up to 3× on dropout; manual retry with `r` also works
+- 🎛️ **Resilient streaming**: a stream byte buffer, buffered decoder reads, short prebuffering, live-stream-safe seek handling, and a non-blocking visualizer tap help absorb network and decoder hiccups; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
 - 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
 
@@ -148,6 +148,16 @@ Focused search prefixes:
 
 Plain text still searches station names, so `lofi` works exactly as before.
 
+**Search prefixes:** plain text still searches station names, but you can focus Radio Browser searches with prefixes:
+
+| Prefix | Also accepts | Example | Searches |
+| :--- | :--- | :--- | :--- |
+| `name:` | `station:` | `name:lofi` | Station names |
+| `tag:` | `genre:` | `tag:ambient` | Genres and tags |
+| `country:` | `cc:` | `country:BA` | Country name or two-letter code |
+| `lang:` | `language:` | `lang:english` | Station language |
+| `codec:` | `format:` | `codec:mp3` | Stream codec |
+
 **Managing your library:**
 
 - Your Library is the saved station list shown on launch.
@@ -166,6 +176,14 @@ Plain text still searches station names, so `lofi` works exactly as before.
 - During stop or station changes, the deck stays visually active while the audio fade-out completes.
 - Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
 - Watch the footer chips for playback state, volume, layout, and visualizer mode.
+
+**Playback stability model:**
+
+PulseDeck treats internet radio as a live stream, not a seekable file. A 4 MiB stream byte queue, 64 KiB decoder read buffer, and short startup prebuffer smooth bursty downloads without forcing long waits before playback starts. Decoder probes may ask for the current stream position, but real seeks return `Unsupported` instead of discarding live audio bytes.
+
+The visualizer is a passive tap on the decoded audio source. It copies small batches only when the UI sample buffer is available, so visual rendering does not block the audio path and PulseDeck does not maintain a separate decoded-PCM playback queue.
+
+PulseDeck does not request ICY metadata during playback by default. This favors clean audio bytes over now-playing titles because some servers inject metadata in ways that can confuse decoders when network chunks arrive unevenly.
 
 **Recovering from playback errors:**
 
@@ -258,7 +276,7 @@ PulseDeck's CI checks:
 - Release build verification
 - RustSec dependency audit with `cargo audit`
 
-The codebase keeps UI colors routed through the semantic palette in `theme.rs`, isolates blocking audio work from the TUI event loop, and keeps app/audio architecture notes in `docs/`.
+The codebase keeps UI colors routed through the semantic palette in `theme.rs`, isolates blocking audio work from the TUI event loop, and uses regression tests to guard playback, search, settings, library, and compact-layout behavior.
 
 ---
 

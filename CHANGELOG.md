@@ -8,20 +8,27 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.3.0] - 2026-06-18
+## [0.3.1] - 2026-06-18
 
-### Added
-*   **Structured search prefixes**: Search now understands focused prefixes such as `tag:ambient`, `country:BA`, `lang:english`, and `codec:mp3` while preserving plain station-name search.
-*   **Richer station metadata**: Search results and saved stations now preserve Radio Browser UUIDs, country codes, languages, codec, homepage, votes, click counts, and last-check status when available.
-*   **Station trust details**: Station Details now shows richer metadata so users can inspect stream quality and reachability before saving.
+### Fixed
+*   **Structured search guidance**: Empty-result hints now explain what to try next based on the prefix being used.
+*   **Radio Browser metadata hardening**: Tags, codecs, country codes, bitrates, UUIDs, and last-check flags are normalized defensively before display or persistence.
+*   **Search outage messages**: Radio Browser mirror failures now show a friendly user-facing summary while preserving server details internally.
+*   **Playback startup and stutter**: Live radio streams no longer simulate forward seeks by reading and discarding real stream bytes during decoder probing, fixing long tuning delays and broken buffering on affected stations.
+*   **Decoder read buffering**: Stream prebuffering now targets about two seconds of audio with a smaller 32 KiB floor and a shorter 2-second wait cap, while decoder reads go through a 64 KiB buffer to avoid tiny queue reads during stream probing.
+*   **Visualizer audio path**: The visualizer is now a passive, non-blocking tap that copies small sample batches when the UI buffer is available instead of maintaining a separate decoded-PCM playback queue.
+*   **Clean stream bytes**: Playback no longer requests ICY metadata by default, avoiding server-injected metadata bytes on streams where chunk timing can confuse decoders.
+*   **Startup autoplay**: Last-played autoplay now starts the stored stream URL even when the saved-library URL no longer matches byte-for-byte after Radio Browser URL resolution.
 
 ### Improved
-*   **Search relevance**: Results are deduplicated and locally ranked so exact name matches, reachable stations, HTTPS streams, and more popular stations are easier to find.
-*   **Saved-result detection**: Search results can match saved stations by Radio Browser UUID when available, not only exact stream URL.
+*   **Search aliases**: Added forgiving aliases including `station:`, `cc:`, and `format:` alongside the existing `name:`, `country:`, and `codec:` forms.
+*   **Saved-station refresh**: Selecting an already-saved matching search result can refresh missing station metadata without duplicating the library entry or replacing the saved name/URL.
+*   **Search ranking**: Exact tag, country-code, language, and codec matches now outrank loose popularity signals.
+*   **In-app docs**: Help and README now surface structured-search examples and aliases.
 
 ### Internal
-*   Split Radio Browser search code into focused query, client, mapping, and ranking modules.
-*   Added compatibility tests for old library files and richer station metadata.
+*   Split Radio Browser search into query, client, mapping, ranking, and station modules.
+*   Expanded regression coverage for prefix parsing, metadata mapping, ranking, station identity, enrichment, legacy playlist compatibility, stream prebuffer targets, exact ICY metadata reads, and live-stream seek refusal.
 
 ---
 

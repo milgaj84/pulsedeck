@@ -6,15 +6,16 @@ use super::AudioStatus;
 
 use rodio::{Decoder, Sink};
 use std::collections::VecDeque;
-use std::io::Read;
+use std::io::{BufReader, Read};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 const STREAM_BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
+const DECODER_READ_BUFFER_SIZE: usize = 64 * 1024;
 const MIN_PREBUFFER_SECONDS: usize = 2;
-const MIN_PREBUFFER_BYTES: usize = 128 * 1024;
-const MAX_PREBUFFER_WAIT: Duration = Duration::from_secs(4);
+const MIN_PREBUFFER_BYTES: usize = 32 * 1024;
+const MAX_PREBUFFER_WAIT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub(super) struct ConnectionContext {
@@ -69,12 +70,15 @@ pub(super) fn connect_and_decode(
 }
 
 fn prebuffer_stream(queue: &BufferQueue, bytes_per_sec: usize) {
-    let target = bytes_per_sec
+    let target = prebuffer_target_bytes(queue.capacity, bytes_per_sec);
+    let _ = queue.wait_until_at_least(target, MAX_PREBUFFER_WAIT);
+}
+
+fn prebuffer_target_bytes(capacity: usize, bytes_per_sec: usize) -> usize {
+    bytes_per_sec
         .saturating_mul(MIN_PREBUFFER_SECONDS)
         .max(MIN_PREBUFFER_BYTES)
-        .min(queue.capacity / 2);
-
-    let _ = queue.wait_until_at_least(target, MAX_PREBUFFER_WAIT);
+        .min(capacity / 2)
 }
 
 fn try_connect_and_decode_once(
@@ -95,7 +99,6 @@ fn try_connect_and_decode_once(
 
     let response = client
         .get(url)
-        .header("Icy-MetaData", "1")
         .send()
         .map_err(|err| format!("Connection failed: {err}"))?;
 
@@ -107,11 +110,7 @@ fn try_connect_and_decode_once(
         return Err("Abandoned".into());
     }
 
-    let metaint = response
-        .headers()
-        .get("icy-metaint")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok());
+    let metaint = None;
 
     let bitrate_kbps = response
         .headers()
@@ -171,7 +170,8 @@ fn try_connect_and_decode_once(
         metaint,
     });
 
-    let source = Decoder::new(reader).map_err(|err| format!("Decode error: {err}"))?;
+    let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, reader);
+    let source = Decoder::new(buffered_reader).map_err(|err| format!("Decode error: {err}"))?;
     let wrapped_source = VisualizerSource::new(source, context.sample_buffer);
     let sink = Sink::try_new(handle)
         .map_err(|err| super::hardware_output_error(format!("Sink error: {err}")))?;
@@ -186,9 +186,13 @@ mod prebuffer_tests {
     use super::*;
 
     #[test]
+    fn prebuffer_target_uses_two_seconds_at_common_radio_bitrates() {
+        assert_eq!(prebuffer_target_bytes(4 * 1024 * 1024, 16 * 1024), 32 * 1024);
+        assert_eq!(prebuffer_target_bytes(4 * 1024 * 1024, 40 * 1024), 80 * 1024);
+    }
+
+    #[test]
     fn prebuffer_target_is_capped_by_half_capacity() {
-        let queue = BufferQueue::new(256 * 1024);
-        prebuffer_stream(&queue, 512 * 1024);
-        assert_eq!(queue.len(), 0);
+        assert_eq!(prebuffer_target_bytes(64 * 1024, 512 * 1024), 32 * 1024);
     }
 }

@@ -69,7 +69,12 @@ impl App {
                     self.mark_library_dirty();
                     self.set_info_notice("Station saved to library");
                 }
-                Ok(false) => {}
+                Ok(false) => {
+                    if self.library.enrich_matching_station(&station) {
+                        self.mark_library_dirty();
+                        self.set_info_notice("Saved station metadata refreshed");
+                    }
+                }
                 Err(err) => self.set_error_notice(format!("Could not add station: {err}")),
             }
             self.player.playing_url = Some(station.url.clone());

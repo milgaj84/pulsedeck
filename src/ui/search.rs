@@ -3,6 +3,7 @@ use ratatui::widgets::Paragraph;
 
 use super::theme;
 use crate::app::{App, SearchStatus};
+use crate::radio::{has_unknown_prefix, prefix_examples_inline, SearchField, StationSearchQuery};
 
 const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -32,16 +33,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!("  {} found", result_count), theme::dim())
         }
         SearchStatus::Empty { query } => Span::styled(empty_search_hint(query), theme::dim()),
-        SearchStatus::Error { message, .. } => {
-            let message = message
-                .split('|')
-                .next()
-                .unwrap_or(message)
-                .chars()
-                .take(96)
-                .collect::<String>();
-            Span::styled(format!("  Search failed: {}", message), theme::error())
-        }
+        SearchStatus::Error { message, .. } => Span::styled(
+            format!("  Search failed: {}", public_search_error_message(message)),
+            theme::error(),
+        ),
         SearchStatus::StaleResponseDiscarded {
             query,
             received_stale,
@@ -86,13 +81,48 @@ fn stale_response_text(query: &str, received_stale: &str) -> String {
 }
 
 fn empty_search_hint(query: &str) -> String {
-    if query.contains(':') {
-        format!(
-            "  No results for {}; try a broader value",
+    let parsed = StationSearchQuery::parse(query);
+    let value = compact_search_label(parsed.value());
+
+    match parsed.field() {
+        SearchField::Name if has_unknown_prefix(query) => format!(
+            "  No results for {}; unknown prefix, treated as station name",
             compact_search_label(query)
-        )
+        ),
+        SearchField::Name => format!("  No results; {}", prefix_examples_inline()),
+        SearchField::Tag => format!("  No tag results for {value}; try a broader genre"),
+        SearchField::Country => {
+            format!("  No country results for {value}; try a country code like country:BA")
+        }
+        SearchField::CountryCode => {
+            format!("  No country results for {value}; try the full country name")
+        }
+        SearchField::Language => {
+            format!("  No language results for {value}; try english, bosnian, or serbian")
+        }
+        SearchField::Codec => {
+            format!("  No codec results for {value}; try codec:MP3, codec:AAC, or codec:OGG")
+        }
+    }
+}
+
+fn public_search_error_message(message: &str) -> String {
+    const MAX_CHARS: usize = 96;
+    let trimmed = message.trim();
+    let public = trimmed
+        .split("Details:")
+        .next()
+        .unwrap_or(trimmed)
+        .split('|')
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
+    let mut chars = public.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
     } else {
-        "  No results; try tag:ambient, country:BA, lang:english, or a shorter name".to_string()
+        compact
     }
 }
 
@@ -140,22 +170,6 @@ mod tests {
         assert_eq!(
             compact_search_label("abcdefghijklmnopqrstuvwxyz"),
             "abcdefghijklmnopqrstuvwx…"
-        );
-    }
-
-    #[test]
-    fn empty_search_hint_suggests_prefixes_for_plain_query() {
-        assert_eq!(
-            empty_search_hint("zzzz"),
-            "  No results; try tag:ambient, country:BA, lang:english, or a shorter name"
-        );
-    }
-
-    #[test]
-    fn empty_search_hint_suggests_broadening_prefixed_query() {
-        assert_eq!(
-            empty_search_hint("tag:nope"),
-            "  No results for tag:nope; try a broader value"
         );
     }
 }

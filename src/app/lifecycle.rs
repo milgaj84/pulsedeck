@@ -6,6 +6,17 @@ const NOTICE_ERROR_TICKS: u16 = 150;
 const SONG_HISTORY_CAP: usize = 100;
 const NOTIFY_IDLE_MS: u64 = 120_000;
 
+fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
+    let needle = normalized_playback_url(last_played_url);
+    stations
+        .iter()
+        .position(|station| normalized_playback_url(&station.url) == needle)
+}
+
+fn normalized_playback_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
 #[derive(Default)]
 pub struct NoticeState {
     pub current: Option<AppNotice>,
@@ -64,14 +75,14 @@ impl App {
         }
 
         if app.library.settings.autoplay_last {
-            if let Some(ref url) = app.library.settings.last_played_url {
-                if let Some(pos) = app.library.stations.iter().position(|s| s.url == *url) {
+            if let Some(url) = app.library.settings.last_played_url.clone() {
+                if let Some(pos) = last_played_station_position(&app.library.stations, &url) {
                     app.nav.selected = pos;
-                    app.player.playing_url = Some(url.clone());
-                    app.player.state = PlaybackState::Connecting;
-                    app.audio.send(AudioCommand::Play(url.clone()));
-                    app.sync_volume();
                 }
+                app.player.playing_url = Some(url.clone());
+                app.player.state = PlaybackState::Connecting;
+                app.audio.send(AudioCommand::Play(url));
+                app.sync_volume();
             }
         }
 
@@ -195,5 +206,24 @@ impl App {
         self.player.buffer_percent = 0;
         self.player.buffer_seconds = 0;
         self.player.state = PlaybackState::Error(error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn last_played_station_position_matches_normalized_urls() {
+        let stations = vec![Station::basic("A", " HTTP://STREAM/ ", "Radio", "US", 128)];
+
+        assert_eq!(last_played_station_position(&stations, "http://stream"), Some(0));
+    }
+
+    #[test]
+    fn last_played_station_position_allows_missing_library_match() {
+        let stations = vec![Station::basic("A", "http://a", "Radio", "US", 128)];
+
+        assert_eq!(last_played_station_position(&stations, "http://other"), None);
     }
 }

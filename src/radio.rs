@@ -4,9 +4,10 @@ mod query;
 mod rank;
 mod station;
 
-pub use query::StationSearchQuery;
+pub use query::{has_unknown_prefix, prefix_examples_inline, SearchField, StationSearchQuery};
 pub use station::{
-    clean_tag_values, fallback_stations, station_identity_matches, Station, StationIdentity,
+    clean_tag_values, fallback_stations, normalize_codec, normalize_country_code,
+    normalize_station_uuid, sanitize_bitrate, station_identity_matches, Station, StationIdentity,
 };
 
 const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
@@ -27,7 +28,8 @@ const RADIO_BROWSER_HTTP_SERVERS: &[&str] = &[
 ///
 /// Plain text searches station names. Focused prefixes such as `tag:ambient`,
 /// `country:BA`, `lang:english`, and `codec:mp3` map to Radio Browser's
-/// advanced search parameters.
+/// advanced search parameters. Friendly aliases such as `genre:`, `cc:`,
+/// `language:`, `format:`, and `station:` are accepted too.
 pub async fn search_stations(raw_query: &str) -> anyhow::Result<Vec<Station>> {
     let query = StationSearchQuery::parse(raw_query);
     if query.is_short() {
@@ -46,7 +48,8 @@ pub async fn search_stations(raw_query: &str) -> anyhow::Result<Vec<Station>> {
             {
                 Ok(stations) => stations,
                 Err(http_error) => anyhow::bail!(
-                    "HTTPS search failed: {https_error}; HTTP fallback failed: {http_error}"
+                    "Search temporarily unavailable. Tried {} Radio Browser mirrors. Details: HTTPS search failed: {https_error}; HTTP fallback failed: {http_error}",
+                    RADIO_BROWSER_HTTPS_SERVERS.len() + RADIO_BROWSER_HTTP_SERVERS.len()
                 ),
             }
         }
