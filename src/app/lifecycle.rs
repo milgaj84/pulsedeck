@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
+use crate::radio::station_url_matches;
 
 const NOTICE_INFO_TICKS: u16 = 90;
 const NOTICE_ERROR_TICKS: u16 = 150;
@@ -7,14 +8,9 @@ const SONG_HISTORY_CAP: usize = 100;
 const NOTIFY_IDLE_MS: u64 = 120_000;
 
 fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
-    let needle = normalized_playback_url(last_played_url);
     stations
         .iter()
-        .position(|station| normalized_playback_url(&station.url) == needle)
-}
-
-fn normalized_playback_url(url: &str) -> String {
-    url.trim().trim_end_matches('/').to_ascii_lowercase()
+        .position(|station| station_url_matches(&station.url, last_played_url))
 }
 
 fn unix_now_string() -> String {
@@ -102,8 +98,9 @@ impl App {
                 }
                 app.player.playing_url = Some(url.clone());
                 app.player.state = PlaybackState::Connecting;
-                app.audio.send(AudioCommand::Play(url));
-                app.sync_volume();
+                if app.send_audio_command(AudioCommand::Play(url)) {
+                    app.sync_volume();
+                }
             }
         }
 
@@ -175,7 +172,12 @@ impl App {
     }
 
     fn handle_track_changed(&mut self, url: String, title: String) {
-        if Some(&url) != self.player.playing_url.as_ref() {
+        if !self
+            .player
+            .playing_url
+            .as_deref()
+            .is_some_and(|playing_url| station_url_matches(playing_url, &url))
+        {
             return;
         }
 
@@ -270,5 +272,21 @@ mod tests {
         let stations = vec![Station::basic("A", "http://a", "Radio", "US", 128)];
 
         assert_eq!(last_played_station_position(&stations, "http://other"), None);
+    }
+
+    #[test]
+    fn track_changed_matches_normalized_playing_url() {
+        let mut app = App::new(Library::in_memory(vec![Station::basic(
+            "A",
+            "HTTP://STREAM/",
+            "Radio",
+            "US",
+            128,
+        )]));
+        app.player.playing_url = Some("http://stream".to_string());
+
+        app.handle_track_changed(" HTTP://STREAM/ ".to_string(), "Artist - Title".to_string());
+
+        assert_eq!(app.player.current_track.as_deref(), Some("Artist - Title"));
     }
 }

@@ -59,8 +59,9 @@ impl super::App {
             let (n, max) = (self.reconnect.attempt(), self.reconnect.max());
             self.set_info_notice(format!("Reconnecting ({n}/{max})"));
             self.player.state = PlaybackState::Connecting;
-            self.audio.send(crate::audio::AudioCommand::Play(url));
-            self.sync_volume();
+            if self.send_audio_command(crate::audio::AudioCommand::Play(url)) {
+                self.sync_volume();
+            }
         } else if self.reconnect.exhausted()
             && matches!(self.player.state, PlaybackState::Connecting)
         {

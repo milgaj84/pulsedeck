@@ -1,5 +1,6 @@
 use super::*;
 use crate::favorites::resolve_parent_genre;
+use crate::radio::station_url_matches;
 
 impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
@@ -38,15 +39,16 @@ impl App {
             self.library
                 .stations
                 .iter()
-                .find(|s| s.url == *url)
-                .or_else(|| self.search.results.iter().find(|s| s.url == *url))
+                .find(|station| station_url_matches(&station.url, url))
+                .or_else(|| {
+                    self.search
+                        .results
+                        .iter()
+                        .find(|station| station_url_matches(&station.url, url))
+                })
                 .or_else(|| {
                     self.undo_history.iter().rev().find_map(|(station, _, _)| {
-                        if station.url == *url {
-                            Some(station)
-                        } else {
-                            None
-                        }
+                        station_url_matches(&station.url, url).then_some(station)
                     })
                 })
         })
@@ -80,7 +82,11 @@ impl App {
     /// Try to select the currently playing station in the visible list.
     pub(super) fn select_playing(&mut self) {
         if let Some(ref url) = self.player.playing_url {
-            if let Some(pos) = self.visible_stations().iter().position(|s| s.url == *url) {
+            if let Some(pos) = self
+                .visible_stations()
+                .iter()
+                .position(|station| station_url_matches(&station.url, url))
+            {
                 self.nav.selected = pos;
             }
         }
@@ -116,5 +122,29 @@ mod tests {
         let app = App::new(Library::in_memory(vec![]));
 
         assert!(app.selected_station().is_none());
+    }
+
+    #[test]
+    fn now_playing_matches_normalized_library_url() {
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            " HTTP://STREAM/ ",
+        )]));
+        app.player.playing_url = Some("http://stream".to_string());
+
+        assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
+    }
+
+    #[test]
+    fn select_playing_matches_normalized_visible_url() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("A", "http://a"),
+            station("B", " HTTP://STREAM/ "),
+        ]));
+        app.player.playing_url = Some("http://stream".to_string());
+
+        app.select_playing();
+
+        assert_eq!(app.nav.selected, 1);
     }
 }

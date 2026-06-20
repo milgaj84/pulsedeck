@@ -83,9 +83,12 @@ impl App {
             self.library.settings.last_played_url = Some(station.url.clone());
             self.mark_library_dirty();
 
-            self.audio.send(AudioCommand::Play(station.url));
-            self.sync_volume();
-            true
+            if self.send_audio_command(AudioCommand::Play(station.url)) {
+                self.sync_volume();
+                true
+            } else {
+                false
+            }
         } else {
             false
         };
@@ -116,9 +119,10 @@ impl App {
 
             self.player.playing_url = Some(station.url.clone());
             self.player.state = next_playback;
-            self.audio.send(AudioCommand::Play(station.url));
-            self.sync_volume();
-            self.set_info_notice("Auditioning stream (not saved to library)");
+            if self.send_audio_command(AudioCommand::Play(station.url)) {
+                self.sync_volume();
+                self.set_info_notice("Auditioning stream (not saved to library)");
+            }
         }
     }
 

@@ -180,6 +180,8 @@ The visualizer is a passive tap on the decoded audio source. It copies small bat
 
 PulseDeck can request ICY song-title metadata when enabled in settings. Metadata is on by default, remains optional, and can be disabled without changing saved stations or playback controls, which is useful if a rare stream behaves better with clean audio bytes only.
 
+If the internal audio engine stops accepting commands, PulseDeck surfaces a visible playback error instead of silently ignoring play, pause, stop, or retry actions.
+
 **Recovering from playback errors:**
 
 - Press `r` to retry the current stream when an error leaves PulseDeck with a stream URL to retry.

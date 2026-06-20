@@ -1,4 +1,5 @@
 use super::*;
+use crate::radio::station_url_matches;
 
 const UNDO_HISTORY_LIMIT: usize = 10;
 
@@ -15,7 +16,7 @@ impl App {
                     .library
                     .stations
                     .iter()
-                    .position(|saved| saved.url == station.url)
+                    .position(|saved| station_url_matches(&saved.url, &station.url))
                     .unwrap_or(self.nav.selected);
                 let removed_genre = self
                     .library
@@ -74,7 +75,7 @@ impl App {
         self.nav.selected = self
             .visible_stations()
             .iter()
-            .position(|visible| visible.url == station.url)
+            .position(|visible| station_url_matches(&visible.url, &station.url))
             .unwrap_or(0);
         self.mark_library_dirty();
         self.set_info_notice(format!("Restored station: {station_name}"));
@@ -204,7 +205,7 @@ impl App {
             .and_then(|playing_url| {
                 self.visible_stations()
                     .iter()
-                    .position(|station| station.url == playing_url)
+                    .position(|station| station_url_matches(&station.url, playing_url))
             })
             .unwrap_or(0);
 

@@ -1,105 +1,179 @@
-# PulseDeck 0.4.0 Implementation Plan
+# PulseDeck 0.4.1 Stabilization Plan
 
-Release theme: **Playback Confidence, Search Confidence, UI Explainability**.
+Release theme: **Stop Breaking Audio, Remove Dead Audio Debris, Make Station Identity Boringly Correct**.
 
-PulseDeck 0.4.0 should make focused internet radio feel stable, inspectable, and recoverable. This is not the release for recording, local tape playback, plugins, accounts, podcasts, cloud sync, or a broad media-suite turn. The app should stay small, sharp, and radio-first.
+This release is deliberately small. It is not the release for new UI features, new providers, local files, recording, podcasts, plugins, cloud sync, or a major playback rewrite. PulseDeck has broken audio too many times. For 0.4.1, the work must move like a bomb technician in wool socks: small cuts, measured tests, no clever detonations.
 
-Current branch observed during planning:
+## Current baseline observed during planning
 
-```text
-feature/0.3.0-radio-prefixes...origin/feature/0.3.0-radio-prefixes
-```
+Repository: `pulsedeck`
 
-Recent groundwork already implemented in this workspace:
+Important current facts:
 
 ```text
-src/favorites.rs          Settings::stream_metadata_enabled, default true
-src/app/types.rs          SettingRow::StreamMetadata
-src/app/settings.rs       toggles and syncs stream metadata
-src/app/lifecycle.rs      syncs stream metadata on startup
-src/audio.rs              AudioCommand::SetStreamMetadata(bool)
-src/audio/engine_loop.rs  forwards metadata setting into ConnectionContext
-src/audio/session.rs      requests/parses ICY metadata only when enabled
-src/ui/settings.rs        renders Stream Song Info Metadata row
+src/audio.rs declares only:
+- src/audio/engine_loop.rs
+- src/audio/metadata.rs
+- src/audio/output.rs
+- src/audio/session.rs
+- src/audio/stream_reader.rs
+- src/audio/visualizer.rs
+
+src/audio/ contains additional stale files that are not declared by src/audio.rs:
+- src/audio/buffer.rs
+- src/audio/buffer_meter.rs
+- src/audio/decoded_source.rs
+- src/audio/pcm_buffer.rs
+- src/audio/pcm_buffer2.rs
+- src/audio/probe_reader.rs
 ```
 
-Validation after metadata groundwork:
+Validation from the review pass:
 
 ```text
-cargo test                 272 passed
-cargo clippy --all-targets passed
+cargo check                         passed
+cargo clippy --all-targets --all-features passed
+cargo test                          passed, 303 tests
 ```
 
-Important merge caveat: this branch had a mismatch where `favorites.rs` and `radio.rs` expected richer Radio Browser helpers that were missing in `src/radio/query.rs` and `src/radio/station.rs`. These were restored here. Before merging into a 0.4.0 branch, verify the intended base already contains or receives:
+This plan intentionally focuses on the top three fixes from the code review:
+
+1. Remove or deliberately quarantine dead audio prototype files.
+2. Centralize station identity and replace raw URL equality with one normalized identity path.
+3. Stabilize the active audio engine loop through behavior-preserving extraction, tests, and manual playback gates.
+
+The third item is intentionally framed as **stabilize**, not “rewrite.” If a change touches active playback behavior, it must ship with a regression test or an explicit manual verification checklist item.
+
+---
+
+# Non-negotiable audio rules for 0.4.1
+
+These rules exist because audio has been broken repeatedly. Do not skip them.
+
+## Rule 1: No silent audio failures
+
+Any command sent from app state into `AudioEngine` must eventually become either:
+
+- an `AudioStatus` from the engine, or
+- a visible app notice / playback error if the engine command channel is dead.
+
+Current risk:
 
 ```rust
-has_unknown_prefix
-prefix_examples_inline
-normalize_codec
-normalize_country_code
-normalize_station_uuid
-sanitize_bitrate
-Station::enrich_from
+// src/audio.rs
+impl AudioEngine {
+    pub fn send(&self, cmd: AudioCommand) {
+        let _ = self.cmd_tx.send(cmd);
+    }
+}
+```
+
+`send` currently discards failure. That means the audio thread can die and UI state can still pretend commands worked. This is unacceptable for a stabilization release.
+
+## Rule 2: Active playback path is sacred
+
+The active path is:
+
+```text
+src/app/playback.rs::play_selected
+  -> src/audio.rs::AudioEngine::send(AudioCommand::Play)
+  -> src/audio/engine_loop.rs::audio_loop
+  -> src/audio/engine_loop.rs::start_connection
+  -> src/audio/engine_loop.rs::spawn_connection
+  -> src/audio/session.rs::connect_and_decode
+  -> src/audio/session.rs::try_connect_and_decode_once
+  -> src/audio/stream_reader.rs::StreamReader
+  -> rodio::Sink
+```
+
+Do not replace this path wholesale in 0.4.1. Only isolate, test, and clarify it.
+
+## Rule 3: No zombie audio modules in `src/audio/`
+
+If a file under `src/audio/` is not declared in `src/audio.rs`, it must either be:
+
+- deleted, or
+- moved out of `src/` into documentation / archive space.
+
+Leaving uncompiled audio experiments beside active code is how the next release accidentally copies from a corpse.
+
+## Rule 4: No broad decoder changes without manual playback checks
+
+`src/audio/session.rs::try_connect_and_decode_once` currently uses `rodio::Decoder::new_mp3`. This may be too narrow for `.m4a` and AAC-ish streams, but changing decoder behavior can break working MP3 playback. For 0.4.1, decoder changes are allowed only if they are isolated and manually verified with known streams.
+
+Manual stream checks must include at least:
+
+```text
+Nightride FM              https://stream.nightride.fm/nightride.m4a
+NightWave Plaza           https://radio.plaza.one/mp3
+SomaFM Groove Salad       https://ice2.somafm.com/groovesalad-128-mp3
+SomaFM DEF CON            https://ice2.somafm.com/defcon-128-mp3
+```
+
+If `.m4a` still does not play, do not hide it. Surface it as a known limitation or filter/warn before playback.
+
+---
+
+# Desired release outcome
+
+By the end of 0.4.1:
+
+```text
+1. The active audio module graph is obvious.
+2. Station remove/select/now-playing/health lookup all use the same URL identity rules.
+3. Audio command send failure is observable.
+4. audio_loop.rs is easier to reason about without changing playback behavior.
+5. Tests prove station identity edge cases and engine command failure semantics.
+6. Manual playback checklist is documented and completed before release.
 ```
 
 ---
 
-## Release principles
+# Fix 1: Remove or quarantine dead audio prototype files
 
-### Preserve
+## Goal
 
-- Focused terminal public-radio playback.
-- No API keys.
-- No cloud dependency.
-- No fake file semantics for live streams.
-- Optional song metadata, never mandatory for playback.
-- Simple search for casual users, powerful prefixes for advanced users.
-- Compact terminal protection.
-- Testable pure helpers wherever possible.
+Delete stale, uncompiled audio code from `src/audio/` so maintainers cannot confuse abandoned buffering/PCM experiments with the active playback stack.
 
-### Avoid
+This is the least glamorous fix, but it is the first because audio has already been fragile. A confusing source tree is not harmless. It is a trapdoor with comments.
 
-- Reintroducing a separate decoded-PCM playback queue.
-- Reintroducing fake forward seeking that consumes live stream bytes.
-- Treating ICY metadata as the audio problem.
-- Turning settings into a giant cockpit.
-- Letting docs describe abandoned implementation attempts.
+## Files involved
 
----
-
-## Phase 0: repository cleanup
-
-### Goal
-
-Remove stale experiments so future audio work starts from a clear map instead of a haunted drawer.
-
-### Remove unused files
-
-These files are not included by `src/audio.rs` and should be removed from the repository:
+Active module root:
 
 ```text
+src/audio.rs
+```
+
+Active audio modules declared by `src/audio.rs`:
+
+```text
+src/audio/engine_loop.rs
+src/audio/metadata.rs
+src/audio/output.rs
+src/audio/session.rs
+src/audio/stream_reader.rs
+src/audio/visualizer.rs
+```
+
+Dead / uncompiled files currently under `src/audio/`:
+
+```text
+src/audio/buffer.rs
+src/audio/buffer_meter.rs
 src/audio/decoded_source.rs
 src/audio/pcm_buffer.rs
 src/audio/pcm_buffer2.rs
+src/audio/probe_reader.rs
 ```
 
-Keep this file, `plan.md`, as the 0.4.0 implementation plan.
+## Why these files are dead
 
-Do not remove:
+Rust does not compile a sibling `.rs` file just because it exists. A file must be declared via `mod`, included, or otherwise referenced.
 
-```text
-src/radio/
-```
-
-That directory is intentional and is wired through `src/radio.rs`.
-
-### Verify module graph
-
-`src/audio.rs` should only include active audio modules:
+Current `src/audio.rs` begins with:
 
 ```rust
-mod buffer;
-mod buffer_meter;
 mod engine_loop;
 mod metadata;
 mod output;
@@ -108,72 +182,848 @@ mod stream_reader;
 mod visualizer;
 ```
 
-`src/radio.rs` should include:
-
-```rust
-mod client;
-mod map;
-mod query;
-mod rank;
-mod station;
-```
-
-### Tests
-
-Run after cleanup:
+That means these files are not compiled:
 
 ```text
+src/audio/buffer.rs
+src/audio/buffer_meter.rs
+src/audio/decoded_source.rs
+src/audio/pcm_buffer.rs
+src/audio/pcm_buffer2.rs
+src/audio/probe_reader.rs
+```
+
+Specific stale-code evidence:
+
+```rust
+// src/audio/buffer_meter.rs
+// This file attempts to send a status variant that does not exist in src/audio.rs.
+AudioStatus::BufferLevel { percent, seconds }
+```
+
+Current `src/audio.rs::AudioStatus` contains:
+
+```rust
+pub enum AudioStatus {
+    Playing,
+    Paused,
+    Stopped,
+    Error(String),
+    Connecting,
+    FadingOut { current_volume: f32 },
+    TrackChanged { url: String, title: String },
+}
+```
+
+There is no `BufferLevel` variant. So `src/audio/buffer_meter.rs` is not merely unused. It is stale relative to the active public audio status contract.
+
+## Implementation choice
+
+Prefer deletion.
+
+```text
+Delete:
+- src/audio/buffer.rs
+- src/audio/buffer_meter.rs
+- src/audio/decoded_source.rs
+- src/audio/pcm_buffer.rs
+- src/audio/pcm_buffer2.rs
+- src/audio/probe_reader.rs
+```
+
+If someone insists on keeping history, move them outside active source:
+
+```text
+docs/architecture/audio-prototypes/buffer.rs
+docs/architecture/audio-prototypes/buffer_meter.rs
+docs/architecture/audio-prototypes/decoded_source.rs
+docs/architecture/audio-prototypes/pcm_buffer.rs
+docs/architecture/audio-prototypes/pcm_buffer2.rs
+docs/architecture/audio-prototypes/probe_reader.rs
+```
+
+But the preferred 0.4.1 path is deletion because Git already preserves history.
+
+## Exact commands
+
+```bash
+git rm src/audio/buffer.rs
+git rm src/audio/buffer_meter.rs
+git rm src/audio/decoded_source.rs
+git rm src/audio/pcm_buffer.rs
+git rm src/audio/pcm_buffer2.rs
+git rm src/audio/probe_reader.rs
+```
+
+Do not edit `src/audio.rs` for this step unless a deleted file was unexpectedly declared. It currently is not.
+
+## Required verification
+
+Run:
+
+```bash
+cargo check
 cargo test
-cargo clippy --all-targets
+cargo clippy --all-targets --all-features
+```
+
+Expected result:
+
+```text
+No compile behavior should change.
+No tests should disappear except tests that were never compiled in the first place.
+```
+
+## Pitfalls
+
+### Pitfall: accidentally deleting active audio files
+
+Do not delete:
+
+```text
+src/audio/engine_loop.rs
+src/audio/metadata.rs
+src/audio/output.rs
+src/audio/session.rs
+src/audio/stream_reader.rs
+src/audio/visualizer.rs
+```
+
+Those are declared by `src/audio.rs` and are active.
+
+### Pitfall: reintroducing buffer code to “fix” audio quickly
+
+Do not revive `buffer.rs`, `pcm_buffer.rs`, or `pcm_buffer2.rs` as a panic patch. The active playback path currently uses `StreamReader` and `rodio::Sink`. Reviving a decoded PCM queue is a larger architecture change and is not a patch-release move.
+
+### Pitfall: trusting uncompiled tests
+
+Any tests inside deleted files were not running. Do not count them as coverage. If any test scenario is valuable, port it into an active module test.
+
+## Edge cases
+
+### Edge case: future buffering metrics
+
+`PlaybackView` still has:
+
+```rust
+// src/app/playback.rs
+pub buffer_percent: u8,
+pub buffer_seconds: u32,
+```
+
+And diagnostics still track buffer-like fields. Deleting `buffer_meter.rs` does not remove those UI fields. It only removes the stale, uncompiled producer. If buffer metrics are revived later, add a fresh `AudioStatus::BufferLevel` variant and wire it through active code intentionally.
+
+### Edge case: release notes mention buffering
+
+Search README and CHANGELOG for claims about active buffering metrics. If docs claim a live buffer meter exists, update them or defer the claim.
+
+## Definition of done for Fix 1
+
+```text
+[ ] Dead src/audio prototype files removed or moved out of src/.
+[ ] src/audio.rs still declares only active modules.
+[ ] cargo check passes.
+[ ] cargo test passes.
+[ ] cargo clippy --all-targets --all-features passes.
+[ ] No release notes claim deleted prototypes are active features.
 ```
 
 ---
 
-## Phase 1: Stream Song Info Metadata setting
+# Fix 2: Centralize station identity and remove raw URL equality
 
-### Status
+## Goal
 
-Already implemented as groundwork. Keep it in 0.4.0 and document it.
+Make station identity consistent everywhere. A station URL should match even when casing, whitespace, or trailing slashes differ. Radio Browser UUID should remain the preferred identity when both sides have UUIDs.
 
-### Behavior
+This fix prevents ghost-station behavior:
 
-Default is on.
+- remove says station is not present even though UI shows it,
+- now-playing cannot find the active station,
+- health metadata attaches to one spelling of a URL but not another,
+- autoplay restores selection differently from now-playing lookup.
 
-When enabled:
+## Files involved
 
-- `src/audio/session.rs` sends `Icy-MetaData: 1`.
-- `icy-metaint` response header is parsed.
-- `StreamReader` strips metadata blocks from audio bytes.
-- `AudioStatus::TrackChanged` updates current track, recent tracks, saved history, and notifications.
+Identity source of truth:
 
-When disabled:
+```text
+src/radio/station.rs
+```
 
-- No metadata request header is sent.
-- `metaint` is `None`.
-- Playback receives clean stream bytes only.
-
-### Important files
+Callers to update:
 
 ```text
 src/favorites.rs
-src/app/types.rs
-src/app/settings.rs
+src/app/selectors.rs
 src/app/lifecycle.rs
+src/app/lifecycle.rs::handle_track_changed
+```
+
+Also inspect for raw comparisons:
+
+```text
+src/app/playback.rs
+src/app/library.rs
+src/app/update.rs
+src/radio/rank.rs
+src/radio/map.rs
+```
+
+## Current identity situation
+
+`src/radio/station.rs::Station::identity` already normalizes URLs when no UUID is present:
+
+```rust
+pub fn identity(&self) -> StationIdentity {
+    self.station_uuid
+        .as_deref()
+        .map(str::trim)
+        .filter(|uuid| !uuid.is_empty())
+        .map(|uuid| StationIdentity::Uuid(uuid.to_ascii_lowercase()))
+        .unwrap_or_else(|| StationIdentity::Url(normalized_station_url(&self.url)))
+}
+```
+
+`src/radio/station.rs::station_identity_matches` already prefers UUID and falls back to normalized URL:
+
+```rust
+pub fn station_identity_matches(a: &Station, b: &Station) -> bool {
+    match (a.station_uuid.as_deref(), b.station_uuid.as_deref()) {
+        (Some(left), Some(right)) if !left.trim().is_empty() && !right.trim().is_empty() => {
+            left.eq_ignore_ascii_case(right)
+        }
+        _ => normalized_station_url(&a.url) == normalized_station_url(&b.url),
+    }
+}
+```
+
+But the URL normalizer is private:
+
+```rust
+fn normalized_station_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+```
+
+So other modules duplicate it or skip it.
+
+## Raw / duplicated URL comparison sites to fix
+
+### `src/favorites.rs::remove`
+
+Current:
+
+```rust
+pub fn remove(&mut self, url: &str) -> anyhow::Result<bool> {
+    let before = self.stations.len();
+    self.stations.retain(|s| s.url != url);
+    let removed = self.stations.len() < before;
+    if removed {
+        self.rebuild_genres();
+    }
+    Ok(removed)
+}
+```
+
+Problem: exact raw URL equality.
+
+### `src/favorites.rs::contains`
+
+Current:
+
+```rust
+pub fn contains(&self, url: &str) -> bool {
+    self.stations.iter().any(|s| s.url == url)
+}
+```
+
+Problem: exact raw URL equality.
+
+### `src/favorites.rs::normalized_url_match`
+
+Current:
+
+```rust
+fn normalized_url_match(left: &str, right: &str) -> bool {
+    left.trim().trim_end_matches('/').eq_ignore_ascii_case(right.trim().trim_end_matches('/'))
+}
+```
+
+Problem: duplicate logic. It should live in `src/radio/station.rs`.
+
+### `src/app/selectors.rs::now_playing`
+
+Current:
+
+```rust
+pub fn now_playing(&self) -> Option<&Station> {
+    self.player.playing_url.as_ref().and_then(|url| {
+        self.library
+            .stations
+            .iter()
+            .find(|s| s.url == *url)
+            .or_else(|| self.search.results.iter().find(|s| s.url == *url))
+            .or_else(|| {
+                self.undo_history.iter().rev().find_map(|(station, _, _)| {
+                    if station.url == *url {
+                        Some(station)
+                    } else {
+                        None
+                    }
+                })
+            })
+    })
+}
+```
+
+Problem: exact raw URL equality in all three lookup paths.
+
+### `src/app/selectors.rs::select_playing`
+
+Current:
+
+```rust
+pub(super) fn select_playing(&mut self) {
+    if let Some(ref url) = self.player.playing_url {
+        if let Some(pos) = self.visible_stations().iter().position(|s| s.url == *url) {
+            self.nav.selected = pos;
+        }
+    }
+}
+```
+
+Problem: exact raw URL equality.
+
+### `src/app/lifecycle.rs::last_played_station_position`
+
+Current:
+
+```rust
+fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
+    let needle = normalized_playback_url(last_played_url);
+    stations
+        .iter()
+        .position(|station| normalized_playback_url(&station.url) == needle)
+}
+
+fn normalized_playback_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+```
+
+Problem: duplicate logic.
+
+### `src/app/lifecycle.rs::handle_track_changed`
+
+Current:
+
+```rust
+fn handle_track_changed(&mut self, url: String, title: String) {
+    if Some(&url) != self.player.playing_url.as_ref() {
+        return;
+    }
+
+    // ...
+}
+```
+
+Problem: exact raw URL equality means ICY metadata from a normalized-equivalent stream can be ignored.
+
+## Implementation plan
+
+### Step 2.1: Export URL normalization helpers from `src/radio/station.rs`
+
+Change:
+
+```rust
+fn normalized_station_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+```
+
+To:
+
+```rust
+pub fn normalized_station_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
+pub fn station_url_matches(left: &str, right: &str) -> bool {
+    normalized_station_url(left) == normalized_station_url(right)
+}
+```
+
+Then update `station_identity_matches` to use the public helper:
+
+```rust
+pub fn station_identity_matches(a: &Station, b: &Station) -> bool {
+    match (a.station_uuid.as_deref(), b.station_uuid.as_deref()) {
+        (Some(left), Some(right)) if !left.trim().is_empty() && !right.trim().is_empty() => {
+            left.trim().eq_ignore_ascii_case(right.trim())
+        }
+        _ => station_url_matches(&a.url, &b.url),
+    }
+}
+```
+
+Note the `trim()` on UUID comparison. Current code checks trimmed emptiness but compares untrimmed values. Fix that while touching this function.
+
+### Step 2.2: Re-export helper from `src/radio.rs` if needed
+
+Check current `src/radio.rs`. It likely re-exports station helpers. Add:
+
+```rust
+pub use station::{
+    clean_tag_values,
+    fallback_stations,
+    normalize_codec,
+    normalize_country_code,
+    normalize_station_uuid,
+    normalized_station_url,
+    sanitize_bitrate,
+    station_identity_matches,
+    station_url_matches,
+    Station,
+    StationHealth,
+    StationIdentity,
+};
+```
+
+Keep names sorted consistently with existing style.
+
+### Step 2.3: Update `src/favorites.rs` imports
+
+Current import:
+
+```rust
+use crate::radio::{
+    clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
+    sanitize_bitrate, station_identity_matches, Station, StationHealth,
+};
+```
+
+Change to:
+
+```rust
+use crate::radio::{
+    clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
+    sanitize_bitrate, station_identity_matches, station_url_matches, Station, StationHealth,
+};
+```
+
+Then update `remove`:
+
+```rust
+pub fn remove(&mut self, url: &str) -> anyhow::Result<bool> {
+    let before = self.stations.len();
+    self.stations
+        .retain(|station| !station_url_matches(&station.url, url));
+
+    let removed = self.stations.len() < before;
+    if removed {
+        self.rebuild_genres();
+    }
+
+    Ok(removed)
+}
+```
+
+Update `contains`:
+
+```rust
+pub fn contains(&self, url: &str) -> bool {
+    self.stations
+        .iter()
+        .any(|station| station_url_matches(&station.url, url))
+}
+```
+
+Update health methods:
+
+```rust
+pub fn mark_station_success(&mut self, url: &str, now: String) -> bool {
+    if let Some(station) = self
+        .stations
+        .iter_mut()
+        .find(|station| station_url_matches(&station.url, url))
+    {
+        station.health.last_success_at = Some(now);
+        station.health.last_error_summary.clear();
+        return true;
+    }
+    false
+}
+
+pub fn mark_station_failure(&mut self, url: &str, now: String, error: &str) -> bool {
+    if let Some(station) = self
+        .stations
+        .iter_mut()
+        .find(|station| station_url_matches(&station.url, url))
+    {
+        station.health.last_failure_at = Some(now);
+        station.health.failure_count = Some(
+            station
+                .health
+                .failure_count
+                .unwrap_or(0)
+                .saturating_add(1),
+        );
+        station.health.last_error_summary = compact_error_summary(error);
+        return true;
+    }
+    false
+}
+```
+
+Delete local duplicate:
+
+```rust
+fn normalized_url_match(left: &str, right: &str) -> bool {
+    left.trim().trim_end_matches('/').eq_ignore_ascii_case(right.trim().trim_end_matches('/'))
+}
+```
+
+### Step 2.4: Update `src/app/selectors.rs`
+
+Add import:
+
+```rust
+use crate::radio::station_url_matches;
+```
+
+Update `now_playing`:
+
+```rust
+pub fn now_playing(&self) -> Option<&Station> {
+    self.player.playing_url.as_ref().and_then(|url| {
+        self.library
+            .stations
+            .iter()
+            .find(|station| station_url_matches(&station.url, url))
+            .or_else(|| {
+                self.search
+                    .results
+                    .iter()
+                    .find(|station| station_url_matches(&station.url, url))
+            })
+            .or_else(|| {
+                self.undo_history.iter().rev().find_map(|(station, _, _)| {
+                    station_url_matches(&station.url, url).then_some(station)
+                })
+            })
+    })
+}
+```
+
+Update `select_playing`:
+
+```rust
+pub(super) fn select_playing(&mut self) {
+    if let Some(ref url) = self.player.playing_url {
+        if let Some(pos) = self
+            .visible_stations()
+            .iter()
+            .position(|station| station_url_matches(&station.url, url))
+        {
+            self.nav.selected = pos;
+        }
+    }
+}
+```
+
+### Step 2.5: Update `src/app/lifecycle.rs`
+
+Add helper import if not already available via `super::*`:
+
+```rust
+use crate::radio::station_url_matches;
+```
+
+Replace:
+
+```rust
+fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
+    let needle = normalized_playback_url(last_played_url);
+    stations
+        .iter()
+        .position(|station| normalized_playback_url(&station.url) == needle)
+}
+
+fn normalized_playback_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+```
+
+With:
+
+```rust
+fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
+    stations
+        .iter()
+        .position(|station| station_url_matches(&station.url, last_played_url))
+}
+```
+
+Update `handle_track_changed`:
+
+```rust
+fn handle_track_changed(&mut self, url: String, title: String) {
+    if !self
+        .player
+        .playing_url
+        .as_deref()
+        .is_some_and(|playing_url| station_url_matches(playing_url, &url))
+    {
+        return;
+    }
+
+    // existing body unchanged
+}
+```
+
+## Tests to add
+
+### `src/radio/station.rs` tests
+
+Add or extend tests for helpers:
+
+```rust
+#[test]
+fn station_url_matches_ignores_case_whitespace_and_trailing_slash() {
+    assert!(station_url_matches(
+        " HTTP://Example.COM/stream/ ",
+        "http://example.com/stream"
+    ));
+}
+
+#[test]
+fn station_identity_matches_trims_uuid_before_comparing() {
+    let mut a = Station::basic("A", "http://a", "Radio", "US", 128);
+    let mut b = Station::basic("B", "http://b", "Radio", "US", 128);
+    a.station_uuid = Some(" UUID-1 ".to_string());
+    b.station_uuid = Some("uuid-1".to_string());
+
+    assert!(station_identity_matches(&a, &b));
+}
+
+#[test]
+fn station_identity_falls_back_to_normalized_url_when_uuid_missing() {
+    let a = Station::basic("A", "HTTP://STREAM/", "Radio", "US", 128);
+    let b = Station::basic("B", "http://stream", "Radio", "US", 128);
+
+    assert!(station_identity_matches(&a, &b));
+}
+```
+
+### `src/favorites.rs` tests
+
+Add tests near existing `Library` tests:
+
+```rust
+#[test]
+fn remove_matches_normalized_station_url() {
+    let mut library = Library::in_memory(vec![Station::basic(
+        "A",
+        " HTTP://STREAM/ ",
+        "Radio",
+        "US",
+        128,
+    )]);
+
+    assert!(library.remove("http://stream").unwrap());
+    assert!(library.stations.is_empty());
+}
+
+#[test]
+fn contains_matches_normalized_station_url() {
+    let library = Library::in_memory(vec![Station::basic(
+        "A",
+        "HTTP://STREAM/",
+        "Radio",
+        "US",
+        128,
+    )]);
+
+    assert!(library.contains("http://stream"));
+}
+
+#[test]
+fn station_health_matches_normalized_url() {
+    let mut library = Library::in_memory(vec![Station::basic(
+        "A",
+        "HTTP://STREAM/",
+        "Radio",
+        "US",
+        128,
+    )]);
+
+    assert!(library.mark_station_failure(
+        "http://stream",
+        "123".to_string(),
+        "temporary failure",
+    ));
+
+    assert_eq!(library.stations[0].health.failure_count, Some(1));
+}
+```
+
+### `src/app/selectors.rs` tests
+
+Add tests for lookup and selection:
+
+```rust
+#[test]
+fn now_playing_matches_normalized_library_url() {
+    let mut app = App::new(Library::in_memory(vec![station(
+        "A",
+        " HTTP://STREAM/ ",
+    )]));
+    app.player.playing_url = Some("http://stream".to_string());
+
+    assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
+}
+
+#[test]
+fn select_playing_matches_normalized_visible_url() {
+    let mut app = App::new(Library::in_memory(vec![
+        station("A", "http://a"),
+        station("B", " HTTP://STREAM/ "),
+    ]));
+    app.player.playing_url = Some("http://stream".to_string());
+
+    app.select_playing();
+
+    assert_eq!(app.nav.selected, 1);
+}
+```
+
+### `src/app/lifecycle.rs` tests
+
+Existing test already covers `last_played_station_position_matches_normalized_urls`. Update it so it indirectly uses `station_url_matches` and delete references to `normalized_playback_url` if that helper is removed.
+
+Add test for metadata URL normalization if `handle_track_changed` can be exercised through public status polling. One path:
+
+```rust
+#[test]
+fn track_changed_uses_normalized_playing_url() {
+    let mut app = App::new(Library::in_memory(vec![Station::basic(
+        "A",
+        "HTTP://STREAM/",
+        "Radio",
+        "US",
+        128,
+    )]));
+
+    app.player.playing_url = Some("http://stream".to_string());
+    app.handle_track_changed("HTTP://STREAM/".to_string(), "Artist - Title".to_string());
+
+    assert_eq!(app.player.current_track.as_deref(), Some("Artist - Title"));
+}
+```
+
+If `handle_track_changed` remains private and test placement makes this awkward, test via `poll_audio_status` only if injecting status is easy. Do not contort the design for this one test in 0.4.1.
+
+## Pitfalls
+
+### Pitfall: URL normalization is not URL canonicalization
+
+This helper intentionally does only:
+
+```text
+trim whitespace
+trim trailing slash
+lowercase ASCII
+```
+
+Do not add query sorting, percent-decoding, default-port removal, or HTTP-to-HTTPS equivalence in this patch. Those are semantic changes and can merge different stations incorrectly.
+
+### Pitfall: UUID comparison with empty strings
+
+A blank UUID must not override URL matching. Keep this guard:
+
+```rust
+(Some(left), Some(right)) if !left.trim().is_empty() && !right.trim().is_empty()
+```
+
+### Pitfall: Station UUID conflict
+
+If both stations have non-empty UUIDs and they differ, `station_identity_matches` should return false even if URLs happen to match. This preserves Radio Browser identity semantics.
+
+Add test:
+
+```rust
+#[test]
+fn station_identity_prefers_uuid_mismatch_over_url_match() {
+    let mut a = Station::basic("A", "http://same", "Radio", "US", 128);
+    let mut b = Station::basic("B", "http://same/", "Radio", "US", 128);
+    a.station_uuid = Some("uuid-a".to_string());
+    b.station_uuid = Some("uuid-b".to_string());
+
+    assert!(!station_identity_matches(&a, &b));
+}
+```
+
+### Pitfall: now-playing may search undo history
+
+`src/app/selectors.rs::now_playing` searches library, search results, then `undo_history`. Keep that ordering. The station should prefer the current library copy because it may have enriched metadata and health fields.
+
+### Pitfall: extra allocation in `visible_stations`
+
+`select_playing` currently calls `visible_stations()` which allocates a `Vec<&Station>`. Do not optimize this in 0.4.1 unless needed. The identity fix is already enough.
+
+## Definition of done for Fix 2
+
+```text
+[ ] src/radio/station.rs exposes station_url_matches.
+[ ] src/radio/station.rs exposes normalized_station_url only if needed outside tests.
+[ ] station_identity_matches trims UUIDs before comparing.
+[ ] src/favorites.rs remove/contains/health use station_url_matches.
+[ ] src/favorites.rs duplicate normalized_url_match removed.
+[ ] src/app/selectors.rs now_playing/select_playing use station_url_matches.
+[ ] src/app/lifecycle.rs no longer has normalized_playback_url duplicate.
+[ ] Track metadata URL check uses station_url_matches or is consciously left exact with a comment.
+[ ] Tests cover URL case/whitespace/trailing slash for remove, contains, now-playing, and health.
+[ ] cargo test passes.
+```
+
+---
+
+# Fix 3: Stabilize active audio engine loop without changing playback semantics
+
+## Goal
+
+Make the active audio engine harder to break by extracting state and adding observable failure behavior, while preserving existing playback behavior.
+
+This fix is not a rewrite. The mission is to make `src/audio/engine_loop.rs::audio_loop` understandable enough that the next audio fix is not a blindfolded knife throw.
+
+## Files involved
+
+Primary:
+
+```text
 src/audio.rs
 src/audio/engine_loop.rs
 src/audio/session.rs
 src/audio/stream_reader.rs
-src/ui/settings.rs
+src/app/playback.rs
+src/app/lifecycle.rs
+src/app/settings.rs
 ```
 
-### Current connection path
+Secondary verification:
 
-```rust
-// src/app/lifecycle.rs
-app.sync_output_device();
-app.sync_stream_metadata();
-app.sync_volume();
+```text
+src/audio/output.rs
+src/audio/metadata.rs
+src/app/reconnect.rs
+src/app/playback_error.rs
+src/ui/playback_doctor.rs
 ```
+
+## Current active command/status contracts
+
+Commands:
 
 ```rust
 // src/audio.rs
@@ -188,165 +1038,10 @@ pub enum AudioCommand {
 }
 ```
 
-```rust
-// src/audio/session.rs
-let mut request = client.get(url);
-if context.request_stream_metadata {
-    request = request.header("Icy-MetaData", "1");
-}
-
-let metaint = if context.request_stream_metadata {
-    response
-        .headers()
-        .get("icy-metaint")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-} else {
-    None
-};
-```
-
-### Follow-up tests to add
-
-Add direct settings serialization tests in `src/favorites.rs`:
+Statuses:
 
 ```rust
-#[test]
-fn settings_default_enables_stream_metadata() {
-    assert!(Settings::default().stream_metadata_enabled);
-}
-
-#[test]
-fn settings_deserializes_missing_stream_metadata_as_enabled() {
-    let json = r#"{"notifications_enabled":true}"#;
-    let settings: Settings = serde_json::from_str(json).unwrap();
-    assert!(settings.stream_metadata_enabled);
-}
-```
-
-Pitfall: do not call this setting only “metadata” in UI. Users may confuse Radio Browser station metadata with ICY song-title metadata. Preferred UI label:
-
-```text
-Stream Song Info Metadata
-```
-
----
-
-## Phase 2: Playback Doctor overlay
-
-### Goal
-
-Add a diagnostic overlay that explains current playback state and recovery options.
-
-### User experience
-
-Open with `d` in normal mode.
-
-Example overlay:
-
-```text
-Playback Doctor
-
-State: Playing
-Station: SomaFM: Groove Salad
-Track: Tycho - Awake
-URL: https://ice2.somafm.com/groovesalad-128-mp3
-Output: Default
-Song info metadata: On
-Decoder: Playing
-Buffer: 68% / 4s
-Reconnects: 0 / 3
-Last event: Playback started
-Last error: N/A
-Last recovery: N/A
-
-Actions: r retry  s stop  , output  / search  Esc close
-```
-
-### New app state
-
-File: `src/app/types.rs`
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PlaybackDiagnostics {
-    pub output_device: String,
-    pub metadata_enabled: bool,
-    pub reconnect_attempts: u8,
-    pub reconnect_limit: u8,
-    pub buffer_percent: u8,
-    pub buffer_seconds: u32,
-    pub last_event: Option<String>,
-    pub last_error: Option<String>,
-    pub last_recovery: Option<String>,
-    pub decoder_state: DecoderState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecoderState {
-    Idle,
-    Connecting,
-    Probing,
-    Playing,
-    Ended,
-    Failed,
-}
-
-impl Default for DecoderState {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-```
-
-File: `src/app.rs`
-
-```rust
-pub diagnostics: PlaybackDiagnostics,
-```
-
-File: `src/app/lifecycle.rs`
-
-Initialize in `App::new`:
-
-```rust
-diagnostics: PlaybackDiagnostics::default(),
-```
-
-Update in `poll_audio_status()`:
-
-```rust
-AudioStatus::BufferLevel { percent, seconds } => {
-    self.player.buffer_percent = percent;
-    self.player.buffer_seconds = seconds;
-    self.diagnostics.buffer_percent = percent;
-    self.diagnostics.buffer_seconds = seconds;
-}
-AudioStatus::Connecting => {
-    self.player.current_track = None;
-    self.player.state = PlaybackState::Connecting;
-    self.diagnostics.decoder_state = DecoderState::Connecting;
-    self.diagnostics.last_event = Some("Connecting to stream".to_string());
-}
-AudioStatus::Playing => {
-    self.player.state = PlaybackState::Playing;
-    self.reconnect.disarm();
-    self.diagnostics.decoder_state = DecoderState::Playing;
-    self.diagnostics.last_event = Some("Playback started".to_string());
-}
-AudioStatus::Error(error) => {
-    self.diagnostics.decoder_state = DecoderState::Failed;
-    self.diagnostics.last_error = Some(error.clone());
-    self.handle_audio_error(error);
-}
-```
-
-### Optional audio diagnostics event
-
-File: `src/audio.rs`
-
-```rust
-#[derive(Debug, Clone)]
+// src/audio.rs
 pub enum AudioStatus {
     Playing,
     Paused,
@@ -355,1054 +1050,1042 @@ pub enum AudioStatus {
     Connecting,
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
-    BufferLevel { percent: u8, seconds: u32 },
-    Diagnostic(AudioDiagnostic),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AudioDiagnostic {
-    OutputSelected { name: String },
-    StreamConnected { url: String },
-    DecoderProbing,
-    DecoderReady,
-    HardwareRecoveryAttempt { attempt: u8, limit: u8 },
-    MetadataMode { enabled: bool },
 }
 ```
 
-Pitfall: diagnostics must never be required for playback. If a diagnostic send fails, ignore it.
+Important: do not add a new `AudioStatus` variant in this fix unless it is fully handled in `src/app/lifecycle.rs::poll_audio_status` and tested.
 
-### Overlay routing
+## Current audio loop responsibilities
 
-Add `PlaybackDoctor` to the active overlay enum, likely in `src/app/overlays.rs` or `src/app/types.rs`, depending where `ActiveOverlay` lives.
-
-Add action:
+`src/audio/engine_loop.rs::audio_loop` currently owns all of these local variables:
 
 ```rust
-// src/action.rs
-TogglePlaybackDoctor,
+let mut output_stream: Option<OutputStream> = None;
+let mut output_handle: Option<rodio::OutputStreamHandle> = None;
+let mut preferred_output_device_name: Option<String> = None;
+let mut stream_metadata_enabled = true;
+let mut reopen_output_on_next_connection = false;
+
+let mut current_sink: Option<Sink> = None;
+let mut connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>> = None;
+
+let active_conn_id = Arc::new(AtomicU64::new(0));
+let mut current_conn_id: u64 = 0;
+let mut current_url: Option<String> = None;
+let mut hardware_recovery_retries: u8 = 0;
+
+let mut target_volume: f32 = 0.8;
+let mut current_fade_volume: Option<f32> = None;
+let mut pending_action: Option<AudioCommand> = None;
 ```
 
-Map key:
-
-```rust
-// src/event.rs, normal mode
-KeyCode::Char('d') => Some(Action::TogglePlaybackDoctor),
-```
-
-Pitfall: `d` may already mean directional forward inside settings. That is fine if routed only in normal mode.
-
-### UI module
-
-Create:
+This function also handles:
 
 ```text
-src/ui/playback_doctor.rs
+- command receive loop
+- Play/Pause/Resume/Stop semantics
+- volume updates
+- output device switching
+- metadata setting
+- fade-out before switching/stopping
+- fade-in after connection
+- output stream lazy opening
+- connection thread spawning
+- stale connection cancellation via active_conn_id
+- hardware output recovery retry
+- sink-ended detection
+- test-mode fake command handling
 ```
 
-Register in `src/ui/mod.rs`:
-
-```rust
-pub mod playback_doctor;
-```
-
-Render in overlay match:
-
-```rust
-ActiveOverlay::PlaybackDoctor => playback_doctor::render(frame, size, app),
-```
-
-Skeleton:
-
-```rust
-use crate::app::{App, PlaybackState};
-use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use super::theme;
-
-const MIN_DOCTOR_WIDTH: u16 = 64;
-const MIN_DOCTOR_HEIGHT: u16 = 18;
-
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let popup_area = super::centered_rect(64, 72, area);
-    frame.render_widget(Clear, popup_area);
-
-    if popup_area.width < MIN_DOCTOR_WIDTH || popup_area.height < MIN_DOCTOR_HEIGHT {
-        super::render_boundary_warning(
-            frame,
-            popup_area,
-            "Playback Doctor Too Compact",
-            format!("Expand terminal or close doctor (overlay: {}x{})", popup_area.width, popup_area.height),
-        );
-        return;
-    }
-
-    let block = Block::default()
-        .title(Span::styled(" Playback Doctor ", theme::title()))
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(theme::highlight()))
-        .style(theme::clear());
-
-    let inner = block.inner(popup_area);
-    frame.render_widget(block, popup_area);
-
-    let station = app.now_playing().map(|s| s.name.as_str()).unwrap_or("N/A");
-    let url = app.player.playing_url.as_deref().unwrap_or("N/A");
-    let track = app.player.current_track.as_deref().unwrap_or("N/A");
-
-    let lines = vec![
-        row("State", playback_state_label(&app.player.state)),
-        row("Station", station),
-        row("Track", track),
-        row("URL", url),
-        row("Buffer", &format!("{}% / {}s", app.player.buffer_percent, app.player.buffer_seconds)),
-        row("Metadata", if app.library.settings.stream_metadata_enabled { "On" } else { "Off" }),
-        row("Last error", app.diagnostics.last_error.as_deref().unwrap_or("N/A")),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(" r ", theme::cyan()), Span::raw("retry  "),
-            Span::styled(" s ", theme::cyan()), Span::raw("stop  "),
-            Span::styled(" , ", theme::cyan()), Span::raw("output  "),
-            Span::styled(" / ", theme::cyan()), Span::raw("search  "),
-            Span::styled(" Esc ", theme::cyan()), Span::raw("close"),
-        ]),
-    ];
-
-    frame.render_widget(Paragraph::new(lines).style(theme::clear()), inner);
-}
-
-fn row(label: &'static str, value: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label:>12}: "), theme::dim()),
-        Span::styled(value.to_string(), theme::text()),
-    ])
-}
-
-fn playback_state_label(state: &PlaybackState) -> &'static str {
-    match state {
-        PlaybackState::Stopped => "Stopped",
-        PlaybackState::Connecting => "Connecting",
-        PlaybackState::Playing => "Playing",
-        PlaybackState::FadingOut { .. } => "Fading out",
-        PlaybackState::Paused => "Paused",
-        PlaybackState::Error(_) => "Error",
-    }
-}
-```
-
-Pitfall: if `app.now_playing()` is not public to UI modules, expose an existing selector through `src/app/selectors.rs` instead of duplicating station lookup.
-
-### Tests
-
-- `event::tests::normal_mode_d_opens_playback_doctor`
-- `app::overlays::tests::playback_doctor_is_mutually_exclusive`
-- `ui::playback_doctor::tests::doctor_overlay_rejects_tiny_area`
-- `ui::playback_doctor::tests::playback_state_label_formats_all_states`
+This is too much for one function, but it is also fragile. Refactor only in behavior-preserving slices.
 
 ---
 
-## Phase 3: actionable playback errors
+## Step 3.1: Make `AudioEngine::send` observable
 
-### Goal
-
-Error messages should guide recovery. Different failures need different next actions.
-
-### Error classification
-
-Create:
-
-```text
-src/app/playback_error.rs
-```
-
-Register in `src/app.rs` or module tree:
-
-```rust
-mod playback_error;
-pub use playback_error::{classify_playback_error, playback_error_action_hint, PlaybackErrorKind};
-```
-
-Implementation:
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaybackErrorKind {
-    Network,
-    Http,
-    Decode,
-    Output,
-    Timeout,
-    Unknown,
-}
-
-pub fn classify_playback_error(error: &str) -> PlaybackErrorKind {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("soundcard") || lower.contains("hardware output") || lower.contains("sink error") {
-        PlaybackErrorKind::Output
-    } else if lower.contains("decode") || lower.contains("unsupported") {
-        PlaybackErrorKind::Decode
-    } else if lower.contains("http ") {
-        PlaybackErrorKind::Http
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        PlaybackErrorKind::Timeout
-    } else if lower.contains("connection") || lower.contains("network") {
-        PlaybackErrorKind::Network
-    } else {
-        PlaybackErrorKind::Unknown
-    }
-}
-
-pub fn playback_error_action_hint(error: &str) -> &'static str {
-    match classify_playback_error(error) {
-        PlaybackErrorKind::Output => "r retry output  , choose device  s stop",
-        PlaybackErrorKind::Decode => "r retry  / search alternatives  s stop",
-        PlaybackErrorKind::Http | PlaybackErrorKind::Network | PlaybackErrorKind::Timeout => {
-            "r retry  / search alternatives  d inspect"
-        }
-        PlaybackErrorKind::Unknown => "r retry  d inspect  s stop",
-    }
-}
-```
-
-### UI integration
-
-Files likely involved:
-
-```text
-src/ui/controls.rs
-src/ui/header.rs
-src/ui/critical.rs
-```
-
-Wherever `PlaybackState::Error(e)` is rendered, append or replace generic hints with:
-
-```rust
-let hint = crate::app::playback_error_action_hint(error);
-```
-
-Pitfall: keep the hint short and truncate on compact widths. Use `src/ui/text.rs` helpers if available.
-
-### Tests
-
-- output errors classify as `Output`.
-- decode errors classify as `Decode`.
-- HTTP errors classify as `Http`.
-- timeout and connection errors classify separately.
-- footer/critical hint remains compact.
-
----
-
-## Phase 4: initial probe replay buffer
-
-### Goal
-
-Improve decoder compatibility without bringing back fake seek.
-
-0.3.1 fixed a major bug by refusing to seek through live audio. For 0.4.0, support limited decoder probe rewinds inside an initial byte window.
-
-### New module
-
-Create:
-
-```text
-src/audio/probe_reader.rs
-```
-
-Register in `src/audio.rs`:
-
-```rust
-mod probe_reader;
-```
-
-### Rules
-
-- Buffer first 256 KiB of stream bytes.
-- Allow `SeekFrom::Start(n)` only when `n <= buffered_len`.
-- Allow `SeekFrom::Current(0)` as position report.
-- Allow small seeks only inside replay buffer.
-- Refuse `SeekFrom::End`.
-- Refuse seeks beyond buffered bytes.
-- Never implement seeking by reading and discarding live bytes.
-
-### Sketch
-
-```rust
-use std::io::{Read, Seek, SeekFrom};
-
-const INITIAL_PROBE_BYTES: usize = 256 * 1024;
-
-pub struct ProbeReplayReader<R> {
-    inner: R,
-    replay: Vec<u8>,
-    pos: u64,
-}
-
-impl<R: Read> ProbeReplayReader<R> {
-    pub fn new(inner: R) -> Self {
-        Self {
-            inner,
-            replay: Vec::with_capacity(INITIAL_PROBE_BYTES),
-            pos: 0,
-        }
-    }
-}
-
-impl<R: Read> Read for ProbeReplayReader<R> {
-    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        let replay_len = self.replay.len() as u64;
-        if self.pos < replay_len {
-            let available = (replay_len - self.pos) as usize;
-            let n = available.min(out.len());
-            let start = self.pos as usize;
-            out[..n].copy_from_slice(&self.replay[start..start + n]);
-            self.pos += n as u64;
-            return Ok(n);
-        }
-
-        let n = self.inner.read(out)?;
-        if n > 0 && self.replay.len() < INITIAL_PROBE_BYTES {
-            let remaining = INITIAL_PROBE_BYTES - self.replay.len();
-            self.replay.extend_from_slice(&out[..n.min(remaining)]);
-        }
-        self.pos += n as u64;
-        Ok(n)
-    }
-}
-
-impl<R: Read> Seek for ProbeReplayReader<R> {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        let target = match pos {
-            SeekFrom::Start(n) => n,
-            SeekFrom::Current(0) => return Ok(self.pos),
-            SeekFrom::Current(offset) if offset < 0 => {
-                self.pos.checked_sub(offset.unsigned_abs()).ok_or_else(unsupported_seek)?
-            }
-            SeekFrom::Current(offset) => self.pos.saturating_add(offset as u64),
-            SeekFrom::End(_) => return Err(unsupported_seek()),
-        };
-
-        if target <= self.replay.len() as u64 {
-            self.pos = target;
-            Ok(self.pos)
-        } else {
-            Err(unsupported_seek())
-        }
-    }
-}
-
-fn unsupported_seek() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "live radio stream can only seek inside the initial probe buffer",
-    )
-}
-```
-
-Pitfall: this sketch needs careful review. The invariant is: seeking must never advance the live stream by consuming bytes. It may only replay bytes that were already captured.
-
-### Integration
-
-File: `src/audio/session.rs`
+### Problem
 
 Current:
 
 ```rust
-let reader = StreamReader::new(...);
-let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, reader);
-let source = Decoder::new(buffered_reader)?;
+// src/audio.rs
+pub fn send(&self, cmd: AudioCommand) {
+    let _ = self.cmd_tx.send(cmd);
+}
 ```
 
-Target:
+If the audio thread dies, command send failure is swallowed.
+
+### Change
+
+Change `send` to return a boolean:
 
 ```rust
-let reader = StreamReader::new(...);
-let probe_reader = ProbeReplayReader::new(reader);
-let buffered_reader = BufReader::with_capacity(DECODER_READ_BUFFER_SIZE, probe_reader);
-let source = Decoder::new(buffered_reader)?;
+// src/audio.rs
+impl AudioEngine {
+    pub fn send(&self, cmd: AudioCommand) -> bool {
+        self.cmd_tx.send(cmd).is_ok()
+    }
+}
 ```
+
+### Update call sites
+
+Call sites currently include:
+
+```text
+src/app/playback.rs::play_selected
+src/app/playback.rs::retry_stream
+src/app/playback.rs::toggle_pause
+src/app/playback.rs::stop_playback
+src/app/playback.rs::stop_audio_before_quit
+src/app/playback.rs::sync_volume
+src/app/lifecycle.rs::App::new autoplay branch
+src/app/settings.rs::sync_output_device
+src/app/settings.rs::sync_stream_metadata
+```
+
+For 0.4.1, use a small app helper so failure messaging is consistent.
+
+Add in a suitable app module, preferably `src/app/playback.rs` or new `src/app/audio_commands.rs`:
+
+```rust
+impl App {
+    pub(super) fn send_audio_command(&mut self, command: AudioCommand) -> bool {
+        if self.audio.send(command) {
+            true
+        } else {
+            self.player.current_track = None;
+            self.player.buffer_percent = 0;
+            self.player.buffer_seconds = 0;
+            self.player.state = PlaybackState::Error("Audio engine stopped".to_string());
+            self.diagnostics.decoder_state = DecoderState::Failed;
+            self.diagnostics.last_error = Some("Audio engine command channel closed".to_string());
+            self.set_error_notice("Audio engine is not available");
+            false
+        }
+    }
+}
+```
+
+Then replace important command sends:
+
+```rust
+// src/app/playback.rs::play_selected
+if self.send_audio_command(AudioCommand::Play(station.url)) {
+    self.sync_volume();
+}
+```
+
+```rust
+// src/app/playback.rs::retry_stream
+if self.send_audio_command(AudioCommand::Play(url)) {
+    self.sync_volume();
+    self.set_info_notice("Retrying stream");
+}
+```
+
+```rust
+// src/app/playback.rs::toggle_pause
+PlaybackState::Playing => {
+    self.send_audio_command(AudioCommand::Pause);
+}
+PlaybackState::Paused => {
+    self.send_audio_command(AudioCommand::Resume);
+}
+```
+
+```rust
+// src/app/playback.rs::stop_playback
+self.player.intentional_stop = true;
+let sent = self.send_audio_command(AudioCommand::Stop);
+
+if !sent {
+    self.player.playing_url = None;
+    self.player.state = PlaybackState::Error("Audio engine stopped".to_string());
+    return;
+}
+```
+
+For passive sync commands, use a quieter helper if needed:
+
+```rust
+impl App {
+    pub(super) fn try_send_audio_command(&mut self, command: AudioCommand) -> bool {
+        self.audio.send(command)
+    }
+}
+```
+
+But be careful: if every `sync_volume()` failure pops a notice every tick or startup path, it can annoy users. Prefer visible failure only for user-initiated playback commands.
+
+### Pitfalls
+
+#### Pitfall: `sync_volume(&self)` cannot call `set_error_notice`
+
+Current:
+
+```rust
+pub(super) fn sync_volume(&self) {
+    self.audio.send(AudioCommand::SetVolume(
+        self.current_output_volume_fraction(),
+    ));
+}
+```
+
+It takes `&self`, not `&mut self`. Do not mutate notices from here unless you change the signature carefully. For 0.4.1, it is acceptable to ignore volume sync send failure or return `bool`:
+
+```rust
+pub(super) fn sync_volume(&self) -> bool {
+    self.audio.send(AudioCommand::SetVolume(
+        self.current_output_volume_fraction(),
+    ))
+}
+```
+
+Then callers that care can decide what to do.
+
+#### Pitfall: autoplay happens inside `App::new`
+
+`src/app/lifecycle.rs::App::new` currently sends `AudioCommand::Play` during construction:
+
+```rust
+if app.library.settings.autoplay_last {
+    if let Some(url) = app.library.settings.last_played_url.clone() {
+        if let Some(pos) = last_played_station_position(&app.library.stations, &url) {
+            app.nav.selected = pos;
+        }
+        app.player.playing_url = Some(url.clone());
+        app.player.state = PlaybackState::Connecting;
+        app.audio.send(AudioCommand::Play(url));
+        app.sync_volume();
+    }
+}
+```
+
+Since `app` is mutable here, update it to use the same command helper or handle failure inline:
+
+```rust
+if !app.audio.send(AudioCommand::Play(url)) {
+    app.player.state = PlaybackState::Error("Audio engine stopped".to_string());
+    app.set_error_notice("Could not start autoplay: audio engine is not available");
+} else {
+    app.sync_volume();
+}
+```
+
+Do not move autoplay out of `App::new` in 0.4.1 unless doing the larger constructor split deliberately.
 
 ### Tests
 
-- replay reader can read bytes, seek to 0, read same bytes again.
-- seeking beyond replay returns `Unsupported`.
-- `SeekFrom::End` returns `Unsupported`.
-- forward seek beyond replay does not consume inner reader bytes.
-- integration test preserves old `StreamReader` live seek refusal.
+Because `AudioEngine` currently spawns a real thread, directly forcing send failure may require a small test-only constructor.
+
+Add to `src/audio.rs`:
+
+```rust
+#[cfg(test)]
+impl AudioEngine {
+    pub fn disconnected_for_test() -> Self {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
+        drop(cmd_rx);
+        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
+        Self { cmd_tx, status_rx }
+    }
+}
+```
+
+Then in app tests, replace the app's audio engine:
+
+```rust
+#[test]
+fn play_selected_reports_dead_audio_engine() {
+    let mut app = App::new(Library::in_memory(vec![station("A", "http://a")]));
+    app.audio = AudioEngine::disconnected_for_test();
+
+    app.play_selected();
+
+    assert!(matches!(app.player.state, PlaybackState::Error(_)));
+    assert!(matches!(app.notice.current, Some(AppNotice::Error(_))));
+}
+```
+
+If `App::audio` visibility makes this test awkward, put the test inside the appropriate `src/app` submodule where private fields are accessible, or add a `#[cfg(test)]` setter.
 
 ---
 
-## Phase 5: station health memory
+## Step 3.2: Extract `AudioLoopState` without changing behavior
 
-### Goal
+### Current smell
 
-Saved stations should remember local playback reliability.
-
-### Data model
-
-Prefer nested health struct in `src/radio/station.rs`:
+`SpawnConnectionState<'a>` currently carries many mutable references:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct StationHealth {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_success_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_failure_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_count: Option<u32>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub last_error_summary: String,
-}
-
-impl StationHealth {
-    pub fn is_empty(&self) -> bool {
-        self.last_success_at.is_none()
-            && self.last_failure_at.is_none()
-            && self.failure_count.unwrap_or(0) == 0
-            && self.last_error_summary.is_empty()
-    }
+struct SpawnConnectionState<'a> {
+    conn_id_ref: &'a mut u64,
+    active_ref: &'a Arc<AtomicU64>,
+    connect_ref: &'a mut Option<std::thread::JoinHandle<Result<Sink, String>>>,
+    output_stream: &'a mut Option<OutputStream>,
+    output_handle: &'a mut Option<rodio::OutputStreamHandle>,
+    status_tx: &'a mpsc::Sender<AudioStatus>,
+    sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
+    preferred_output_device_name: &'a Option<String>,
+    stream_metadata_enabled: bool,
+    reopen_output_on_next_connection: &'a mut bool,
 }
 ```
 
-In `Station`:
+This is an argument-bag, which means the real state object is missing.
+
+### Target structure
+
+Create a private state object inside `src/audio/engine_loop.rs`:
 
 ```rust
-#[serde(default, skip_serializing_if = "StationHealth::is_empty")]
-pub health: StationHealth,
-```
+struct AudioLoopState {
+    output_stream: Option<OutputStream>,
+    output_handle: Option<rodio::OutputStreamHandle>,
+    preferred_output_device_name: Option<String>,
+    stream_metadata_enabled: bool,
+    reopen_output_on_next_connection: bool,
 
-Update `Station::basic`:
+    current_sink: Option<Sink>,
+    connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>>,
 
-```rust
-health: StationHealth::default(),
-```
+    active_conn_id: Arc<AtomicU64>,
+    current_conn_id: u64,
+    current_url: Option<String>,
+    hardware_recovery_retries: u8,
 
-### Library update helpers
+    target_volume: f32,
+    current_fade_volume: Option<f32>,
+    pending_action: Option<AudioCommand>,
+}
 
-File: `src/favorites.rs`
-
-```rust
-impl Library {
-    pub fn mark_station_success(&mut self, url: &str, now: String) -> bool {
-        if let Some(station) = self.stations.iter_mut().find(|s| normalized_url_match(&s.url, url)) {
-            station.health.last_success_at = Some(now);
-            station.health.last_error_summary.clear();
-            return true;
+impl AudioLoopState {
+    fn new() -> Self {
+        Self {
+            output_stream: None,
+            output_handle: None,
+            preferred_output_device_name: None,
+            stream_metadata_enabled: true,
+            reopen_output_on_next_connection: false,
+            current_sink: None,
+            connect_thread: None,
+            active_conn_id: Arc::new(AtomicU64::new(0)),
+            current_conn_id: 0,
+            current_url: None,
+            hardware_recovery_retries: 0,
+            target_volume: 0.8,
+            current_fade_volume: None,
+            pending_action: None,
         }
-        false
-    }
-
-    pub fn mark_station_failure(&mut self, url: &str, now: String, error: &str) -> bool {
-        if let Some(station) = self.stations.iter_mut().find(|s| normalized_url_match(&s.url, url)) {
-            station.health.last_failure_at = Some(now);
-            station.health.failure_count = Some(station.health.failure_count.unwrap_or(0).saturating_add(1));
-            station.health.last_error_summary = compact_error_summary(error);
-            return true;
-        }
-        false
     }
 }
 ```
 
-Pitfall: if URL has been resolved differently since save, URL matching may miss. Later improvement can mark by station UUID if the audio layer carries UUID. For 0.4.0, URL is acceptable.
+Then shrink `audio_loop`:
 
-### UI badges
+```rust
+pub(super) fn audio_loop(
+    cmd_rx: mpsc::Receiver<AudioCommand>,
+    status_tx: mpsc::Sender<AudioStatus>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+) {
+    let mut state = AudioLoopState::new();
 
-File: `src/ui/stations.rs`
+    loop {
+        match cmd_rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(cmd) => {
+                if cfg!(test) {
+                    handle_test_audio_command(cmd, &status_tx);
+                    continue;
+                }
 
-Add compact labels:
+                state.handle_command(cmd, &status_tx, &sample_buffer);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        state.tick_pending_action(&status_tx, &sample_buffer);
+        state.tick_fade_in();
+        state.tick_connection(&status_tx, &sample_buffer);
+        state.tick_sink_end(&status_tx);
+    }
+}
+```
+
+### Extract methods one at a time
+
+Do not extract everything in one commit. Recommended commit slices:
 
 ```text
-OK
-FAIL
-NEW
+Commit A: Introduce AudioLoopState::new and move fields only.
+Commit B: Move Play/Pause/Resume/Stop command handling into handle_command.
+Commit C: Move fade-out pending action into tick_pending_action.
+Commit D: Move fade-in into tick_fade_in.
+Commit E: Move connection completion into tick_connection.
+Commit F: Move sink empty check into tick_sink_end.
 ```
 
-Keep visual noise low. Health should be a hint, not a siren.
+Run tests after each commit or at least after A, C, and E.
 
-### Tests
+### Method details
 
-- old libraries without health load.
-- success stores timestamp and clears error.
-- failure increments count.
-- compact row stays inside width.
+#### `AudioLoopState::handle_command`
 
----
-
-## Phase 6: search result explanations
-
-### Goal
-
-A highlighted result should explain why it ranks well.
-
-### Add explanation model
-
-File: `src/radio/rank.rs`
+Skeleton:
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RankExplanation {
-    pub signals: Vec<RankSignal>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RankSignal {
-    ExactName,
-    ExactTag,
-    CountryCode,
-    Language,
-    Codec,
-    LastCheckOk,
-    HighVotes,
-    HighClicks,
-    AlreadySaved,
-    Https,
-}
-
-pub fn explain_station_match(
-    query: &StationSearchQuery,
-    station: &Station,
-    is_saved: bool,
-) -> RankExplanation {
-    let mut signals = Vec::new();
-
-    match query.field() {
-        SearchField::Tag if station.tags.iter().any(|t| t.eq_ignore_ascii_case(query.value())) => {
-            signals.push(RankSignal::ExactTag);
-        }
-        SearchField::CountryCode if station.country_code.eq_ignore_ascii_case(query.value()) => {
-            signals.push(RankSignal::CountryCode);
-        }
-        SearchField::Language if station.language.eq_ignore_ascii_case(query.value()) => {
-            signals.push(RankSignal::Language);
-        }
-        SearchField::Codec if station.codec.eq_ignore_ascii_case(query.value()) => {
-            signals.push(RankSignal::Codec);
-        }
-        SearchField::Name if station.name.eq_ignore_ascii_case(query.value()) => {
-            signals.push(RankSignal::ExactName);
-        }
-        _ => {}
-    }
-
-    if station.last_check_ok == Some(true) {
-        signals.push(RankSignal::LastCheckOk);
-    }
-    if station.url.starts_with("https://") {
-        signals.push(RankSignal::Https);
-    }
-    if is_saved {
-        signals.push(RankSignal::AlreadySaved);
-    }
-
-    RankExplanation { signals }
-}
-```
-
-### UI display
-
-File: `src/ui/search.rs`
-
-```rust
-fn highlighted_result_explanation(app: &App) -> Option<String> {
-    let station = app.search.results.get(app.nav.selected)?;
-    let query = StationSearchQuery::parse(&app.search.query);
-    let is_saved = app.library.contains_station(station);
-    let explanation = crate::radio::explain_station_match(&query, station, is_saved);
-    Some(explanation_label(&explanation))
-}
-```
-
-Example labels:
-
-```text
-Exact tag + Last check OK + Saved
-Country BA + MP3 + High clicks
-```
-
-Pitfall: keep explanation one line. The search list already carries metadata.
-
-### Tests
-
-- exact tag explanation.
-- country-code explanation.
-- saved explanation.
-- explanation label truncates safely.
-
----
-
-## Phase 7: command palette
-
-### Goal
-
-Make features discoverable without adding permanent UI clutter.
-
-### User story
-
-Press `:` or `Ctrl+p`. Type a command. Press Enter.
-
-Commands:
-
-```text
-search stations
-retry stream
-stop playback
-open settings
-change theme
-toggle song info metadata
-open playback doctor
-export library
-open help
-```
-
-### State and actions
-
-File: `src/app/types.rs`
-
-```rust
-pub enum InputMode {
-    Normal,
-    Search,
-    SleepTimer,
-    CommandPalette,
-}
-```
-
-File: `src/app/command_palette.rs`
-
-```rust
-#[derive(Default)]
-pub struct CommandPaletteState {
-    pub query: String,
-    pub selected: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaletteCommand {
-    SearchStations,
-    RetryStream,
-    StopPlayback,
-    OpenSettings,
-    ToggleHelp,
-    TogglePlaybackDoctor,
-    ToggleHistory,
-    ToggleMetadata,
-    CycleTheme,
-    ExportLibrary,
-}
-
-pub fn command_label(cmd: PaletteCommand) -> &'static str { ... }
-pub fn command_action(cmd: PaletteCommand) -> Action { ... }
-pub fn filtered_commands(query: &str, app: &App) -> Vec<PaletteCommand> { ... }
-```
-
-File: `src/action.rs`
-
-```rust
-OpenCommandPalette,
-CommandPaletteConfirm,
-CommandPaletteClose,
-CommandPaletteBackspace,
-CommandPaletteInput(char),
-```
-
-Pitfall: commands like retry should be hidden or disabled when unavailable. Do not let the palette execute nonsense.
-
-### UI
-
-Create:
-
-```text
-src/ui/command_palette.rs
-```
-
-Render input and filtered list in centered overlay.
-
-### Tests
-
-- opens only in normal mode.
-- filters commands case-insensitively.
-- Enter executes selected command.
-- Esc closes cleanly.
-- disabled context commands are not executed.
-
----
-
-## Phase 8: library metadata refresh
-
-### Goal
-
-Users with older saved stations can enrich metadata without re-adding stations.
-
-### Radio lookup function
-
-File: `src/radio.rs`
-
-```rust
-pub async fn lookup_station_metadata(station: &Station) -> anyhow::Result<Option<Station>> {
-    // Prefer UUID lookup if supported by client.
-    // Fallback to name search.
-    // Return best identity match or highest-ranked candidate.
-}
-```
-
-If Radio Browser UUID endpoint is not already supported, start with name search and conservative matching.
-
-### Library helper already exists
-
-File: `src/favorites.rs`
-
-```rust
-pub fn enrich_matching_station(&mut self, station: &Station) -> bool
-```
-
-Do not replace user-facing name, URL, or genre.
-
-### Refresh summary
-
-```rust
-pub struct MetadataRefreshSummary {
-    pub checked: usize,
-    pub enriched: usize,
-    pub unchanged: usize,
-    pub failed: usize,
-}
-```
-
-Notice:
-
-```text
-Metadata refresh: 12 checked, 5 enriched, 6 unchanged, 1 failed
-```
-
-Pitfall: do not run this automatically at startup. Make it user-triggered through command palette first.
-
-### Tests
-
-- fills missing metadata.
-- preserves name, URL, genre.
-- duplicate UUID does not create duplicate station.
-- summary counts changed, unchanged, failed.
-
----
-
-## Phase 9: import preview
-
-### Goal
-
-Make import safe and explainable.
-
-### Core model
-
-File: `src/favorites.rs` or `src/playlist.rs`
-
-```rust
-pub struct ImportPreview {
-    pub new_stations: Vec<Station>,
-    pub duplicates: Vec<Station>,
-    pub enrichments: Vec<Station>,
-    pub skipped: Vec<ImportSkip>,
-}
-
-pub struct ImportSkip {
-    pub name: String,
-    pub reason: String,
-}
-
-pub enum ImportMode {
-    All,
-    EnrichExistingOnly,
-}
-```
-
-Library methods:
-
-```rust
-impl Library {
-    pub fn preview_import(&self, stations: Vec<Station>) -> ImportPreview { ... }
-
-    pub fn apply_import_preview(
+impl AudioLoopState {
+    fn handle_command(
         &mut self,
-        preview: ImportPreview,
-        mode: ImportMode,
-    ) -> anyhow::Result<ImportSummary> { ... }
+        cmd: AudioCommand,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        match cmd {
+            AudioCommand::Play(url) => {
+                if self.current_sink.is_some() {
+                    self.pending_action = Some(AudioCommand::Play(url));
+                } else {
+                    self.start_connection(url, true, status_tx, sample_buffer);
+                }
+            }
+            AudioCommand::Pause => {
+                if let Some(ref sink) = self.current_sink {
+                    self.pending_action = None;
+                    self.current_fade_volume = None;
+                    sink.pause();
+                    let _ = status_tx.send(AudioStatus::Paused);
+                }
+            }
+            AudioCommand::Resume => {
+                if let Some(ref sink) = self.current_sink {
+                    self.pending_action = None;
+                    sink.play();
+                    let _ = status_tx.send(AudioStatus::Playing);
+                    self.current_fade_volume = Some(0.0);
+                }
+            }
+            AudioCommand::Stop => {
+                if self.current_sink.is_some() {
+                    self.pending_action = Some(AudioCommand::Stop);
+                } else {
+                    self.active_conn_id.store(0, Ordering::SeqCst);
+                    self.connect_thread = None;
+                    let _ = status_tx.send(AudioStatus::Stopped);
+                }
+            }
+            AudioCommand::SetVolume(vol) => {
+                self.target_volume = vol;
+                if self.current_fade_volume.is_none() && self.pending_action.is_none() {
+                    if let Some(ref sink) = self.current_sink {
+                        sink.set_volume(vol);
+                    }
+                }
+            }
+            AudioCommand::SetOutputDevice(device_name) => {
+                self.preferred_output_device_name =
+                    output::normalize_output_device_name(device_name.as_deref());
+
+                if self.current_sink.is_some() {
+                    self.reopen_output_on_next_connection = true;
+                } else {
+                    self.output_stream = None;
+                    self.output_handle = None;
+                    self.reopen_output_on_next_connection = false;
+                }
+            }
+            AudioCommand::SetStreamMetadata(enabled) => {
+                self.stream_metadata_enabled = enabled;
+            }
+        }
+    }
 }
 ```
 
-### CLI behavior
+This should be a mechanical move. Do not “improve” behavior while extracting.
 
-Do not break current automation. Existing command should still import directly.
+#### `AudioLoopState::start_connection`
 
-Add optional modes later:
-
-```text
-pulsedeck import file.m3u --preview
-pulsedeck import file.m3u --enrich-only
-```
-
-### TUI behavior
-
-Expose through command palette first:
-
-```text
-Import library
-Preview import
-```
-
-### Tests
-
-- preview classifies new, duplicate, enrichment.
-- preview mode does not write library.
-- enrich-only does not add new stations.
-- broken entries get stable skip reasons.
-
----
-
-## Phase 10: Station Details grouping
-
-### Goal
-
-Make the rich metadata readable.
-
-### Layout
-
-Group rows:
-
-```text
-Identity
-  Name
-  UUID
-  Saved
-
-Playback
-  Stream
-  Codec
-  Bitrate
-  Now playing
-
-Catalog
-  Genre
-  Tags
-  Country
-  Country ID
-  Language
-  Homepage
-
-Health
-  Last check
-  Local health
-  Votes
-  Clicks
-```
-
-File: `src/ui/station_details.rs`
+Move `start_connection` and `spawn_connection` into methods later:
 
 ```rust
-struct DetailSection {
-    title: &'static str,
-    rows: Vec<DetailRow>,
+impl AudioLoopState {
+    fn start_connection(
+        &mut self,
+        url: String,
+        reset_hardware_retries: bool,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        self.current_url = Some(url.clone());
+        if reset_hardware_retries {
+            self.hardware_recovery_retries = 0;
+        }
+        self.spawn_connection(url, status_tx, sample_buffer);
+    }
+
+    fn spawn_connection(
+        &mut self,
+        url: String,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        if self.reopen_output_on_next_connection {
+            self.output_stream = None;
+            self.output_handle = None;
+            self.reopen_output_on_next_connection = false;
+        }
+
+        let Some(handle) = ensure_output_handle(
+            &mut self.output_stream,
+            &mut self.output_handle,
+            self.preferred_output_device_name.as_deref(),
+            status_tx,
+        ) else {
+            return;
+        };
+
+        self.current_conn_id += 1;
+        self.active_conn_id.store(self.current_conn_id, Ordering::SeqCst);
+        let _ = status_tx.send(AudioStatus::Connecting);
+
+        let context = ConnectionContext {
+            status_tx: status_tx.clone(),
+            conn_id: self.current_conn_id,
+            active_conn_id: self.active_conn_id.clone(),
+            sample_buffer: sample_buffer.clone(),
+            request_stream_metadata: self.stream_metadata_enabled,
+        };
+
+        drop(self.connect_thread.take());
+        self.connect_thread = Some(std::thread::spawn(move || {
+            connect_and_decode(url, handle, context)
+        }));
+    }
 }
+```
 
-struct DetailRow {
-    label: &'static str,
-    value: String,
+Once this exists, `SpawnConnectionState<'a>` can be deleted.
+
+### Preserve current semantics exactly
+
+The following behavior must remain unchanged:
+
+```text
+Play while current_sink exists:
+- set pending_action = Some(AudioCommand::Play(url))
+- fade out current sink before new connection
+
+Stop while current_sink exists:
+- set pending_action = Some(AudioCommand::Stop)
+- fade out before stopping
+
+Stop while no current_sink exists:
+- active_conn_id = 0
+- connect_thread = None
+- send AudioStatus::Stopped
+
+Pause:
+- clear pending action
+- clear fade-in state
+- pause sink
+- send AudioStatus::Paused
+
+Resume:
+- play sink
+- send AudioStatus::Playing
+- set fade-in from 0.0
+
+SetOutputDevice while current_sink exists:
+- do not tear down immediately
+- set reopen_output_on_next_connection = true
+
+SetOutputDevice while no current_sink exists:
+- drop output stream and handle immediately
+
+Hardware output error:
+- retry once when error starts with HARDWARE_OUTPUT_ERROR_PREFIX
+- reset output stream/handle before retry
+```
+
+## Step 3.3: Add behavior tests around helper functions and command failure
+
+Current helper tests cover:
+
+```text
+fade_out_next_volume_uses_exponential_step
+fade_out_complete_triggers_at_low_volume
+clamp_status_volume_keeps_ui_payload_normalized
+hardware_output_error_uses_recovery_prefix
+non_hardware_error_does_not_trigger_recovery
+reset_output_handle_accepts_empty_handles
+```
+
+Keep those tests.
+
+Add tests that do not require real audio hardware:
+
+### Test `AudioEngine::send` failure
+
+```rust
+#[test]
+fn audio_engine_send_returns_false_when_command_channel_is_closed() {
+    let engine = AudioEngine::disconnected_for_test();
+
+    assert!(!engine.send(AudioCommand::Stop));
 }
-
-fn station_detail_sections(app: &App) -> Vec<DetailSection> { ... }
 ```
 
-Pitfall: overlay height. Keep compact warning. Consider compact mode that shows only Identity, Playback, and Health.
-
-### Tests
-
-- sections contain expected fields.
-- missing metadata displays `N/A`.
-- long homepage and UUID truncate safely.
-
----
-
-## Phase 11: README and CHANGELOG updates
-
-### README settings text
-
-Add under Settings:
-
-```markdown
-- **Stream Song Info Metadata**: request ICY now-playing metadata when stations support it. Turn this off if a rare stream behaves better with clean audio bytes only.
-```
-
-Update playback model:
-
-```markdown
-PulseDeck can request ICY song-title metadata when enabled in settings. Metadata is optional and can be disabled without changing saved stations or playback controls.
-```
-
-### Help overlay
-
-File: `src/ui/help.rs`
-
-Update settings line:
+### Test app-level dead-engine handling
 
 ```rust
-shortcut(",", "Settings: output, theme, autoplay, metadata, history"),
+#[test]
+fn play_selected_surfaces_dead_audio_engine() {
+    let mut app = App::new(Library::in_memory(vec![station("A", "http://a")]));
+    app.audio = AudioEngine::disconnected_for_test();
+
+    app.play_selected();
+
+    assert!(matches!(app.player.state, PlaybackState::Error(_)));
+    assert!(matches!(app.notice.current, Some(AppNotice::Error(_))));
+}
 ```
 
-### Changelog skeleton
+### Test volume sync does not mutate UI state
 
-```markdown
-## [0.4.0] - YYYY-MM-DD
-
-### Added
-* **Playback Doctor**: Added a diagnostic overlay for stream state, buffer health, decoder status, output device, reconnect attempts, metadata mode, and recovery actions.
-* **Command Palette**: Added a searchable action palette for core commands, overlays, settings, and recovery actions.
-* **Stream Song Info Metadata setting**: Added a settings row for ICY now-playing metadata, defaulting on with a clean-audio opt-out.
-* **Search Result Explanations**: Highlighted search results now explain matching signals such as exact tag, country code, codec, health, and saved status.
-* **Library Metadata Refresh**: Saved stations can be refreshed with richer Radio Browser metadata without replacing saved names or stream URLs.
-* **Import Preview**: Library imports now summarize new stations, duplicates, metadata refreshes, and skipped entries before committing.
-
-### Improved
-* **Live Stream Decoder Compatibility**: Decoder probing can replay an initial buffered stream window without pretending live radio is fully seekable.
-* **Playback Recovery UX**: Stream, decoder, and audio-output errors now show contextual recovery actions.
-* **Station Details**: Metadata is grouped for faster scanning and clearer trust/health context.
-* **Station Health**: Saved stations remember local success/failure signals for better recovery hints and future ranking.
-
-### Fixed
-* **Repository hygiene**: Removed unused legacy audio experiment files that were not part of the active playback path.
-```
-
----
-
-## Implementation order
-
-1. Cleanup unused audio experiment files.
-2. Finish metadata setting tests and docs.
-3. Playback Doctor diagnostics state and overlay.
-4. Actionable playback error hints.
-5. Initial probe replay buffer.
-6. Search result explanations.
-7. Station health memory.
-8. Library metadata refresh.
-9. Import preview.
-10. Command palette.
-11. Station Details grouping.
-12. README, CHANGELOG, release notes.
-
-Why this order:
-
-- Cleanup removes confusion.
-- Metadata setting is already mostly done.
-- Doctor and error hints improve confidence before deeper audio changes.
-- Probe replay is risky and should be isolated.
-- Search/library features build on stable metadata helpers.
-- Command palette can expose the new features after they exist.
-
----
-
-## Known pitfalls from 0.3.1
-
-### Fake seek bug
-
-Never implement live stream seek by consuming bytes from the live stream. Decoder probing must not eat audio.
-
-Bad pattern:
+If `sync_volume` becomes `-> bool`:
 
 ```rust
-let n = self.read(&mut discard[..to_read])?;
+#[test]
+fn sync_volume_reports_dead_audio_engine_without_changing_playback_state() {
+    let mut app = App::new(Library::in_memory(vec![station("A", "http://a")]));
+    app.audio = AudioEngine::disconnected_for_test();
+    app.player.state = PlaybackState::Playing;
+
+    assert!(!app.sync_volume());
+    assert_eq!(app.player.state, PlaybackState::Playing);
+}
 ```
 
-### Decoded PCM queue experiment
+This prevents passive sync failures from stomping playback state.
 
-Do not resurrect a separate decoded-PCM playback queue unless there is a complete scheduler design and heavy tests. The current passive visualizer tap is the correct architecture.
+## Step 3.4: Add an explicit manual playback checklist
 
-### Metadata blame
+Automated tests cannot fully prove live audio. Before tagging 0.4.1, manually run PulseDeck and verify:
 
-ICY metadata was not the final root cause of the audio bug. Keep it optional, default on, and easy to disable.
+```text
+[ ] Start app with default library.
+[ ] Play NightWave Plaza mp3.
+[ ] Stop playback.
+[ ] Play SomaFM Groove Salad mp3.
+[ ] Switch from Groove Salad to DEF CON while playing; fade-out/fade-in should work.
+[ ] Pause playing station.
+[ ] Resume paused station.
+[ ] Change volume while playing.
+[ ] Mute/unmute while playing.
+[ ] Stop while connecting.
+[ ] Retry after a forced bad URL.
+[ ] Toggle Stream Song Info Metadata off, play MP3 station, confirm playback still works.
+[ ] Toggle Stream Song Info Metadata on, play MP3 station, confirm playback still works.
+[ ] If an output device setting exists, select default output and confirm playback still works.
+[ ] Quit while playing; app exits cleanly.
+```
 
-### Docs drift
+Optional but recommended:
 
-README and CHANGELOG must describe the final design only.
+```text
+[ ] Play Nightride FM .m4a.
+[ ] If it fails, confirm error is visible and not a silent spinner.
+[ ] If it succeeds, add it to release notes as verified.
+```
+
+## Pitfalls
+
+### Pitfall: `cfg!(test)` branch hides real engine behavior in tests
+
+`audio_loop` currently contains:
+
+```rust
+if cfg!(test) {
+    handle_test_audio_command(cmd, &status_tx);
+    continue;
+}
+```
+
+This means tests that exercise `AudioEngine::spawn` do not test the real connection path. That is fine for command/status smoke tests, but it is not playback coverage.
+
+Do not claim automated tests prove live audio. They prove state transitions and helpers.
+
+### Pitfall: dropping a join handle does not stop a thread
+
+Current code uses `active_conn_id` to abandon stale connection threads. Keep that mechanism. Do not assume `drop(self.connect_thread.take())` cancels blocking HTTP or decode work. It only drops the handle.
+
+The cancellation semantics are in `ConnectionContext`:
+
+```text
+src/audio/session.rs::ConnectionContext
+- conn_id
+- active_conn_id
+```
+
+Do not remove or bypass those fields.
+
+### Pitfall: output handle lifetime
+
+Rodio output requires the stream object to stay alive. Current state stores both:
+
+```rust
+output_stream: Option<OutputStream>
+output_handle: Option<rodio::OutputStreamHandle>
+```
+
+Do not “simplify” by storing only the handle. That can kill output unexpectedly.
+
+### Pitfall: hardware recovery retry loops
+
+Current retry limit comes from:
+
+```rust
+// src/audio.rs
+const MAX_HARDWARE_RECOVERY_RETRIES: u8 = 1;
+```
+
+Keep one retry. Do not increase this in 0.4.1. Infinite or repeated retries can create an error storm.
+
+### Pitfall: Stop while connecting
+
+When there is no current sink but a connection thread exists, `Stop` currently does:
+
+```rust
+active_conn_id.store(0, Ordering::SeqCst);
+connect_thread = None;
+let _ = status_tx.send(AudioStatus::Stopped);
+```
+
+Preserve this. Users need to be able to cancel a slow connection.
+
+### Pitfall: stream metadata is not audio correctness
+
+Do not diagnose every playback failure as ICY metadata. The setting is:
+
+```text
+src/favorites.rs::Settings::stream_metadata_enabled
+```
+
+And command is:
+
+```rust
+AudioCommand::SetStreamMetadata(bool)
+```
+
+Metadata can corrupt playback if stripped incorrectly, but the active failure surface also includes network, decoder, sink, output device, and stale connection cancellation.
+
+## Definition of done for Fix 3
+
+```text
+[ ] AudioEngine::send returns bool.
+[ ] User-initiated playback commands surface dead-engine failure.
+[ ] Passive sync commands do not spam notices.
+[ ] AudioLoopState exists and owns previous audio_loop locals.
+[ ] SpawnConnectionState is removed or reduced to a temporary step during refactor.
+[ ] audio_loop top-level loop is readable and delegates to methods.
+[ ] Existing helper tests still pass.
+[ ] New tests cover send failure and app-level dead-engine handling.
+[ ] Manual playback checklist completed before tag.
+```
 
 ---
 
-## Audio stability gate
+# Release sequencing
 
-Live stream bytes are sacred. Any future change to `src/audio/session.rs`, `src/audio/stream_reader.rs`, `src/audio/probe_reader.rs`, `src/audio/engine_loop.rs`, buffering, decoder setup, reconnect behavior, or ICY metadata stripping must preserve this contract:
+## Recommended commit order
 
-- `StreamReader` may report its current position, but it must not implement seek by reading and discarding live bytes.
-- `SeekFrom::End` is always unsupported for live radio.
-- Forward seek outside already captured probe bytes is unsupported and must not consume from the queue.
-- Rewind is only allowed inside `ProbeReplayReader`'s captured initial probe window.
-- ICY metadata remains supported and default-on; metadata must not be treated as the root audio scapegoat.
-- Tests must cover the composed `StreamReader -> ProbeReplayReader` path, not only the individual wrappers.
+### Commit 1: Plan only
 
-Required regression coverage for audio byte-path work:
+```text
+plan.md
+```
 
-- safe initial rewind replays captured bytes without draining the live queue twice.
-- unsafe forward seek fails without consuming queued bytes.
-- ICY metadata stripping still yields clean audio bytes after a safe start rewind.
-- metadata-on and metadata-off manual smoke tests pass on real stations.
+No code changes.
+
+### Commit 2: Remove dead audio files
+
+```text
+src/audio/buffer.rs                 deleted
+src/audio/buffer_meter.rs           deleted
+src/audio/decoded_source.rs         deleted
+src/audio/pcm_buffer.rs             deleted
+src/audio/pcm_buffer2.rs            deleted
+src/audio/probe_reader.rs           deleted
+```
+
+Run:
+
+```bash
+cargo check
+cargo test
+cargo clippy --all-targets --all-features
+```
+
+### Commit 3: Centralize station URL identity
+
+```text
+src/radio/station.rs
+src/radio.rs
+src/favorites.rs
+src/app/selectors.rs
+src/app/lifecycle.rs
+```
+
+Run:
+
+```bash
+cargo test station_url
+cargo test station_identity
+cargo test remove_matches_normalized
+cargo test now_playing
+cargo test
+```
+
+### Commit 4: Make audio send failure observable
+
+```text
+src/audio.rs
+src/app/playback.rs
+src/app/lifecycle.rs
+src/app/settings.rs
+```
+
+Run:
+
+```bash
+cargo test audio_engine_send
+cargo test dead_audio_engine
+cargo test playback
+cargo test
+```
+
+### Commit 5: Extract AudioLoopState fields only
+
+```text
+src/audio/engine_loop.rs
+```
+
+No semantic change. Run:
+
+```bash
+cargo test engine_loop
+cargo test
+```
+
+### Commit 6: Move command handling into AudioLoopState
+
+```text
+src/audio/engine_loop.rs
+```
+
+Run:
+
+```bash
+cargo test engine_loop
+cargo test playback
+cargo test
+```
+
+### Commit 7: Move pending-action, fade-in, connection completion, and sink-end ticks
+
+```text
+src/audio/engine_loop.rs
+```
+
+Run full validation:
+
+```bash
+cargo check
+cargo test
+cargo clippy --all-targets --all-features
+```
+
+### Commit 8: Manual playback QA and release notes
+
+```text
+CHANGELOG.md
+README.md, only if behavior/docs changed
+```
+
+Do manual playback checklist before this commit.
 
 ---
 
-## Acceptance criteria
+# Test strategy
 
-0.4.0 is ready when:
+## Automated tests required
 
-- Dead audio experiment files are removed.
-- Metadata setting is documented and tested.
-- Playback Doctor opens, closes, and shows useful state.
-- Playback errors provide contextual recovery actions.
-- Probe replay allows safe initial rewinds and refuses unsafe live seeks.
-- Composed audio-reader tests prove safe rewind, unsafe forward-seek refusal, and ICY stripping on the active reader path.
-- Search result explanations exist for highlighted results.
-- Station health is stored without breaking old libraries.
-- Metadata refresh enriches saved stations safely.
-- Import preview classifies new, duplicate, enrich, skipped.
-- Command palette exposes recovery and discovery actions.
-- Station Details is grouped and readable.
-- README and CHANGELOG match reality.
-- `cargo test` passes.
-- `cargo clippy --all-targets` passes.
-- Manual metadata-on and metadata-off playback smoke tests pass.
+Run all of these before merging:
+
+```bash
+cargo check
+cargo test
+cargo clippy --all-targets --all-features
+```
+
+Targeted tests to add and keep:
+
+```text
+src/radio/station.rs
+- station_url_matches_ignores_case_whitespace_and_trailing_slash
+- station_identity_matches_trims_uuid_before_comparing
+- station_identity_falls_back_to_normalized_url_when_uuid_missing
+- station_identity_prefers_uuid_mismatch_over_url_match
+
+src/favorites.rs
+- remove_matches_normalized_station_url
+- contains_matches_normalized_station_url
+- station_health_matches_normalized_url
+
+src/app/selectors.rs
+- now_playing_matches_normalized_library_url
+- select_playing_matches_normalized_visible_url
+
+src/audio.rs or src/audio/engine_loop.rs
+- audio_engine_send_returns_false_when_command_channel_is_closed
+
+src/app/playback.rs
+- play_selected_surfaces_dead_audio_engine
+- sync_volume_reports_dead_audio_engine_without_changing_playback_state, if sync_volume returns bool
+```
+
+## Manual playback tests required
+
+Use real terminal and real audio output.
+
+```text
+[ ] MP3 station starts within reasonable time.
+[ ] Stop works while playing.
+[ ] Stop works while connecting.
+[ ] Switching stations fades out old station and starts new station.
+[ ] Pause and resume work.
+[ ] Volume changes while playing.
+[ ] Mute and unmute work.
+[ ] Metadata on/off does not break MP3 playback.
+[ ] Bad URL produces visible error and reconnect behavior is understandable.
+[ ] Quit while playing does not hang.
+```
+
+Use at least these stations:
+
+```text
+NightWave Plaza           https://radio.plaza.one/mp3
+SomaFM Groove Salad       https://ice2.somafm.com/groovesalad-128-mp3
+SomaFM DEF CON            https://ice2.somafm.com/defcon-128-mp3
+Nightride FM              https://stream.nightride.fm/nightride.m4a
+```
+
+If Nightride `.m4a` fails, record it honestly. Do not silently ship a default station that cannot play unless the release notes say MP3-only or the default list is adjusted.
 
 ---
 
-## Manual smoke checklist
+# Rollback strategy
 
-- Start with metadata on.
-- Play a known ICY station.
-- Verify current track updates.
-- Verify Recent Tracks updates.
-- Enable saved history and verify history updates.
-- Turn metadata off.
-- Stop and replay station.
-- Verify playback still works.
-- Verify no new track titles arrive while metadata is off.
-- Open Playback Doctor while connecting.
-- Open Playback Doctor while playing.
-- Open Playback Doctor after an error.
-- Search `tag:ambient`.
-- Search `country:BA`.
-- Search `lang:english`.
-- Search `codec:mp3`.
-- Verify search explanations are short and sensible.
-- Preview import of M3U and JSON sample files.
-- Test 80x24 terminal.
-- Test below-minimum terminal dimensions.
+## If deletion of dead audio files causes trouble
+
+This should not happen because they are uncompiled. If it does:
+
+```bash
+git restore src/audio/buffer.rs
+git restore src/audio/buffer_meter.rs
+git restore src/audio/decoded_source.rs
+git restore src/audio/pcm_buffer.rs
+git restore src/audio/pcm_buffer2.rs
+git restore src/audio/probe_reader.rs
+```
+
+Then investigate why an uncompiled file mattered. That would mean tooling outside Rust compilation depends on it.
+
+## If identity centralization causes duplicate behavior changes
+
+Revert only the call-site changes first, not the helper addition.
+
+High-risk spots:
+
+```text
+src/favorites.rs::remove
+src/favorites.rs::contains
+src/app/selectors.rs::now_playing
+src/app/lifecycle.rs::handle_track_changed
+```
+
+The helper itself is safe. Behavior changes come from adopting it.
+
+## If AudioLoopState extraction breaks playback
+
+Revert the extraction commits, but keep:
+
+```text
+AudioEngine::send -> bool
+app-level dead-engine handling
+```
+
+Those are stabilization improvements independent of the engine-loop refactor.
+
+Do not attempt to fix broken extraction by adding more state flags. If playback breaks after extraction, compare behavior against pre-extraction code and restore exact order of operations.
 
 ---
 
-## Final product shape
+# Known non-goals for 0.4.1
 
-PulseDeck 0.4.0 should feel like this:
+Do not include these unless they are required to fix a regression introduced by the plan:
 
-- If playback works, it is smooth and informative.
-- If playback fails, PulseDeck says why and offers the next action.
-- If search returns results, the user understands why they are good.
-- If the library ages, it can refresh and remember health.
-- If the user forgets a shortcut, the command palette catches them.
-- If a station supports song titles, PulseDeck shows them.
-- If a station behaves better without metadata, the user can turn metadata off.
+```text
+- No new buffering architecture.
+- No decoded PCM queue revival.
+- No async rewrite of the audio thread.
+- No broad Rodio replacement.
+- No new UI overlay.
+- No new search prefixes.
+- No library file format migration except accidental compatibility fixes.
+- No station ranking overhaul.
+- No new Radio Browser server strategy.
+- No large App constructor split unless needed for tests.
+```
 
-This is the confidence release.
+The review suggested splitting `App::new` eventually. That is a good future refactor, but for 0.4.1 audio is the burning room. Split `App::new` later unless tests require a tiny test-only injection point.
+
+---
+
+# Future work after 0.4.1
+
+After this release is stable, consider these for 0.4.2 or 0.5.0:
+
+```text
+1. Split App::new into pure construction and runtime wiring.
+2. Move playlist export out of src/app/playback.rs.
+3. Remove SavedStation duplication and serialize Station directly.
+4. Convert search prefix handling to metadata-driven specs.
+5. Move generic text helpers out of src/ui/text.rs.
+6. Investigate generic decoder support for AAC/M4A/OGG with explicit stream compatibility tests.
+7. Add an AudioPort trait so app tests do not spawn real audio threads.
+```
+
+---
+
+# Final 0.4.1 release gate
+
+Do not tag 0.4.1 until all are true:
+
+```text
+[ ] Dead audio prototype files are gone from src/audio/.
+[ ] cargo check passes.
+[ ] cargo test passes.
+[ ] cargo clippy --all-targets --all-features passes.
+[ ] Station identity tests cover normalized URL matching.
+[ ] Dead audio engine send failure is visible to app state.
+[ ] Manual playback checklist completed on a real machine.
+[ ] CHANGELOG.md says this is a stabilization release.
+[ ] Any known codec limitation is documented honestly.
+```
+
+If any manual playback item fails, 0.4.1 is not ready. No vibes-based shipping. No “works on the CI goblin.” Sound must actually come out of speakers.

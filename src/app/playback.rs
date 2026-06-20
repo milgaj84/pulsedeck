@@ -24,6 +24,21 @@ impl Default for PlaybackView {
 }
 
 impl App {
+    pub(super) fn send_audio_command(&mut self, command: AudioCommand) -> bool {
+        if self.audio.send(command) {
+            true
+        } else {
+            self.player.current_track = None;
+            self.player.buffer_percent = 0;
+            self.player.buffer_seconds = 0;
+            self.player.state = PlaybackState::Error("Audio engine stopped".to_string());
+            self.diagnostics.decoder_state = DecoderState::Failed;
+            self.diagnostics.last_error = Some("Audio engine command channel closed".to_string());
+            self.set_error_notice("Audio engine is not available");
+            false
+        }
+    }
+
     pub(super) fn play_selected(&mut self) {
         let station = self
             .visible_stations()
@@ -40,8 +55,9 @@ impl App {
             self.library.settings.last_played_url = Some(station.url.clone());
             self.mark_library_dirty();
 
-            self.audio.send(AudioCommand::Play(station.url));
-            self.sync_volume();
+            if self.send_audio_command(AudioCommand::Play(station.url)) {
+                self.sync_volume();
+            }
         }
     }
 
@@ -56,18 +72,19 @@ impl App {
         self.player.buffer_percent = 0;
         self.player.buffer_seconds = 0;
         self.player.state = PlaybackState::Connecting;
-        self.audio.send(AudioCommand::Play(url));
-        self.sync_volume();
-        self.set_info_notice("Retrying stream");
+        if self.send_audio_command(AudioCommand::Play(url)) {
+            self.sync_volume();
+            self.set_info_notice("Retrying stream");
+        }
     }
 
     pub(super) fn toggle_pause(&mut self) {
         match self.player.state.clone() {
             PlaybackState::Playing => {
-                self.audio.send(AudioCommand::Pause);
+                self.send_audio_command(AudioCommand::Pause);
             }
             PlaybackState::Paused => {
-                self.audio.send(AudioCommand::Resume);
+                self.send_audio_command(AudioCommand::Resume);
             }
             PlaybackState::Stopped | PlaybackState::Error(_) => {
                 self.play_selected();
@@ -80,7 +97,10 @@ impl App {
 
     pub(super) fn stop_playback(&mut self) {
         self.player.intentional_stop = true;
-        self.audio.send(AudioCommand::Stop);
+        if !self.send_audio_command(AudioCommand::Stop) {
+            self.player.playing_url = None;
+            return;
+        }
 
         if matches!(
             &self.player.state,
@@ -144,10 +164,10 @@ impl App {
     }
 
     /// Sync volume to audio engine, respecting mute state.
-    pub(super) fn sync_volume(&self) {
+    pub(super) fn sync_volume(&self) -> bool {
         self.audio.send(AudioCommand::SetVolume(
             self.current_output_volume_fraction(),
-        ));
+        ))
     }
 
     pub(super) fn export_library(&mut self) {
@@ -293,6 +313,31 @@ mod tests {
 
         assert_eq!(app.player.playing_url, None);
         assert_eq!(app.player.state, PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn play_selected_surfaces_dead_audio_engine() {
+        let mut app = test_app();
+        app.audio = crate::audio::AudioEngine::disconnected_for_test();
+
+        app.play_selected();
+
+        assert!(matches!(app.player.state, PlaybackState::Error(_)));
+        assert!(matches!(app.notice.current, Some(AppNotice::Error(_))));
+        assert_eq!(
+            app.diagnostics.last_error.as_deref(),
+            Some("Audio engine command channel closed")
+        );
+    }
+
+    #[test]
+    fn sync_volume_reports_dead_audio_engine_without_changing_playback_state() {
+        let mut app = test_app();
+        app.audio = crate::audio::AudioEngine::disconnected_for_test();
+        app.player.state = PlaybackState::Playing;
+
+        assert!(!app.sync_volume());
+        assert_eq!(app.player.state, PlaybackState::Playing);
     }
 
     #[test]

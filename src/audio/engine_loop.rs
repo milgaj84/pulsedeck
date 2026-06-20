@@ -16,27 +16,7 @@ pub(super) fn audio_loop(
     status_tx: mpsc::Sender<AudioStatus>,
     sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
-    // Lazily opened on first playback. This keeps browsing/search usable on
-    // systems without an immediately available output device.
-    let mut output_stream: Option<OutputStream> = None;
-    let mut output_handle: Option<rodio::OutputStreamHandle> = None;
-    let mut preferred_output_device_name: Option<String> = None;
-    let mut stream_metadata_enabled = true;
-    let mut reopen_output_on_next_connection = false;
-
-    let mut current_sink: Option<Sink> = None;
-    let mut connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>> = None;
-
-    // Concurrency guard to abandon stale threads instantly
-    let active_conn_id = Arc::new(AtomicU64::new(0));
-    let mut current_conn_id: u64 = 0;
-    let mut current_url: Option<String> = None;
-    let mut hardware_recovery_retries: u8 = 0;
-
-    // Premium non-blocking volume crossfade/ramping parameters
-    let mut target_volume: f32 = 0.8;
-    let mut current_fade_volume: Option<f32> = None;
-    let mut pending_action: Option<AudioCommand> = None;
+    let mut state = AudioLoopState::new();
 
     loop {
         // Non-blocking check for commands (10ms poll)
@@ -47,231 +27,320 @@ pub(super) fn audio_loop(
                     continue;
                 }
 
-                match cmd {
-                    AudioCommand::Play(url) => {
-                        if current_sink.is_some() {
-                            pending_action = Some(AudioCommand::Play(url));
-                        } else {
-                            start_connection(
-                                url,
-                                true,
-                                &mut current_url,
-                                &mut hardware_recovery_retries,
-                                &mut SpawnConnectionState {
-                                    conn_id_ref: &mut current_conn_id,
-                                    active_ref: &active_conn_id,
-                                    connect_ref: &mut connect_thread,
-                                    output_stream: &mut output_stream,
-                                    output_handle: &mut output_handle,
-                                    status_tx: &status_tx,
-                                    sample_buffer: &sample_buffer,
-                                    preferred_output_device_name: &preferred_output_device_name,
-                                    stream_metadata_enabled,
-                                    reopen_output_on_next_connection:
-                                        &mut reopen_output_on_next_connection,
-                                },
-                            );
-                        }
-                    }
-                    AudioCommand::Pause => {
-                        if let Some(ref sink) = current_sink {
-                            pending_action = None;
-                            current_fade_volume = None;
-                            sink.pause();
-                            let _ = status_tx.send(AudioStatus::Paused);
-                        }
-                    }
-                    AudioCommand::Resume => {
-                        if let Some(ref sink) = current_sink {
-                            pending_action = None;
-                            sink.play();
-                            let _ = status_tx.send(AudioStatus::Playing);
-                            // Smooth fade-in
-                            current_fade_volume = Some(0.0);
-                        }
-                    }
-                    AudioCommand::Stop => {
-                        if current_sink.is_some() {
-                            pending_action = Some(AudioCommand::Stop);
-                        } else {
-                            active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
-                            connect_thread = None;
-                            let _ = status_tx.send(AudioStatus::Stopped);
-                        }
-                    }
-                    AudioCommand::SetVolume(vol) => {
-                        target_volume = vol;
-                        if current_fade_volume.is_none() && pending_action.is_none() {
-                            if let Some(ref sink) = current_sink {
-                                sink.set_volume(vol);
-                            }
-                        }
-                    }
-                    AudioCommand::SetOutputDevice(device_name) => {
-                        preferred_output_device_name =
-                            output::normalize_output_device_name(device_name.as_deref());
-
-                        if current_sink.is_some() {
-                            reopen_output_on_next_connection = true;
-                        } else {
-                            output_stream = None;
-                            output_handle = None;
-                            reopen_output_on_next_connection = false;
-                        }
-                    }
-                    AudioCommand::SetStreamMetadata(enabled) => {
-                        stream_metadata_enabled = enabled;
-                    }
-                }
+                state.handle_command(cmd, &status_tx, &sample_buffer);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                break;
-            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        // Process pending action / non-blocking fade-out
-        if let Some(cmd) = pending_action.take() {
-            if let Some(ref sink) = current_sink {
-                let current_vol = sink.volume();
-                if fade_out_complete(current_vol) {
-                    // Fade out completed! Execute pending command
-                    sink.set_volume(0.0);
-                    execute_pending_action(
-                        cmd,
-                        &mut current_sink,
-                        &mut current_url,
-                        &mut hardware_recovery_retries,
-                        &mut SpawnConnectionState {
-                            conn_id_ref: &mut current_conn_id,
-                            active_ref: &active_conn_id,
-                            connect_ref: &mut connect_thread,
-                            output_stream: &mut output_stream,
-                            output_handle: &mut output_handle,
-                            status_tx: &status_tx,
-                            sample_buffer: &sample_buffer,
-                            preferred_output_device_name: &preferred_output_device_name,
-                            stream_metadata_enabled,
-                            reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
-                        },
-                    );
+        state.tick_pending_action(&status_tx, &sample_buffer);
+        state.tick_fade_in();
+        state.tick_connection(&status_tx, &sample_buffer);
+        state.tick_sink_end(&status_tx);
+    }
+}
+
+struct AudioLoopState {
+    // Lazily opened on first playback. This keeps browsing/search usable on
+    // systems without an immediately available output device.
+    output_stream: Option<OutputStream>,
+    output_handle: Option<rodio::OutputStreamHandle>,
+    preferred_output_device_name: Option<String>,
+    stream_metadata_enabled: bool,
+    reopen_output_on_next_connection: bool,
+
+    current_sink: Option<Sink>,
+    connect_thread: Option<std::thread::JoinHandle<Result<Sink, String>>>,
+
+    // Concurrency guard to abandon stale threads instantly.
+    active_conn_id: Arc<AtomicU64>,
+    current_conn_id: u64,
+    current_url: Option<String>,
+    hardware_recovery_retries: u8,
+
+    // Non-blocking volume crossfade/ramping parameters.
+    target_volume: f32,
+    current_fade_volume: Option<f32>,
+    pending_action: Option<AudioCommand>,
+}
+
+impl AudioLoopState {
+    fn new() -> Self {
+        Self {
+            output_stream: None,
+            output_handle: None,
+            preferred_output_device_name: None,
+            stream_metadata_enabled: true,
+            reopen_output_on_next_connection: false,
+            current_sink: None,
+            connect_thread: None,
+            active_conn_id: Arc::new(AtomicU64::new(0)),
+            current_conn_id: 0,
+            current_url: None,
+            hardware_recovery_retries: 0,
+            target_volume: 0.8,
+            current_fade_volume: None,
+            pending_action: None,
+        }
+    }
+
+    fn handle_command(
+        &mut self,
+        cmd: AudioCommand,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        match cmd {
+            AudioCommand::Play(url) => {
+                if self.current_sink.is_some() {
+                    self.pending_action = Some(AudioCommand::Play(url));
                 } else {
-                    pending_action = Some(cmd);
-                    // Exponential step-down for natural dimming.
-                    let next_vol = fade_out_next_volume(current_vol);
-                    sink.set_volume(next_vol);
-                    let _ = status_tx.send(AudioStatus::FadingOut {
-                        current_volume: clamp_status_volume(sink.volume()),
-                    });
+                    self.start_connection(url, true, status_tx, sample_buffer);
                 }
-            } else {
-                // No active sink, just execute pending immediately
-                execute_pending_action(
-                    cmd,
-                    &mut current_sink,
-                    &mut current_url,
-                    &mut hardware_recovery_retries,
-                    &mut SpawnConnectionState {
-                        conn_id_ref: &mut current_conn_id,
-                        active_ref: &active_conn_id,
-                        connect_ref: &mut connect_thread,
-                        output_stream: &mut output_stream,
-                        output_handle: &mut output_handle,
-                        status_tx: &status_tx,
-                        sample_buffer: &sample_buffer,
-                        preferred_output_device_name: &preferred_output_device_name,
-                        stream_metadata_enabled,
-                        reopen_output_on_next_connection: &mut reopen_output_on_next_connection,
-                    },
-                );
             }
-        }
-
-        // Process non-blocking fade-in
-        if pending_action.is_none() && current_fade_volume.is_some() {
-            if let Some(ref sink) = current_sink {
-                let current_vol = sink.volume();
-                if (current_vol - target_volume).abs() <= 0.03 {
-                    sink.set_volume(target_volume);
-                    current_fade_volume = None;
+            AudioCommand::Pause => {
+                if let Some(ref sink) = self.current_sink {
+                    self.pending_action = None;
+                    self.current_fade_volume = None;
+                    sink.pause();
+                    let _ = status_tx.send(AudioStatus::Paused);
+                }
+            }
+            AudioCommand::Resume => {
+                if let Some(ref sink) = self.current_sink {
+                    self.pending_action = None;
+                    sink.play();
+                    let _ = status_tx.send(AudioStatus::Playing);
+                    // Smooth fade-in.
+                    self.current_fade_volume = Some(0.0);
+                }
+            }
+            AudioCommand::Stop => {
+                if self.current_sink.is_some() {
+                    self.pending_action = Some(AudioCommand::Stop);
                 } else {
-                    // Exponential step-up towards target_volume for organic swell
-                    let step = (target_volume - current_vol) * 0.15;
-                    sink.set_volume(current_vol + step);
+                    self.active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
+                    self.connect_thread = None;
+                    let _ = status_tx.send(AudioStatus::Stopped);
                 }
-            } else {
-                current_fade_volume = None;
+            }
+            AudioCommand::SetVolume(vol) => {
+                self.target_volume = vol;
+                if self.current_fade_volume.is_none() && self.pending_action.is_none() {
+                    if let Some(ref sink) = self.current_sink {
+                        sink.set_volume(vol);
+                    }
+                }
+            }
+            AudioCommand::SetOutputDevice(device_name) => {
+                self.preferred_output_device_name =
+                    output::normalize_output_device_name(device_name.as_deref());
+
+                if self.current_sink.is_some() {
+                    self.reopen_output_on_next_connection = true;
+                } else {
+                    self.output_stream = None;
+                    self.output_handle = None;
+                    self.reopen_output_on_next_connection = false;
+                }
+            }
+            AudioCommand::SetStreamMetadata(enabled) => {
+                self.stream_metadata_enabled = enabled;
             }
         }
+    }
 
-        // Check if a pending connection has completed
-        if connect_thread
+    fn tick_pending_action(
+        &mut self,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        let Some(cmd) = self.pending_action.take() else {
+            return;
+        };
+
+        if let Some(ref sink) = self.current_sink {
+            let current_vol = sink.volume();
+            if fade_out_complete(current_vol) {
+                // Fade out completed. Execute pending command.
+                sink.set_volume(0.0);
+                self.execute_pending_action(cmd, status_tx, sample_buffer);
+            } else {
+                self.pending_action = Some(cmd);
+                // Exponential step-down for natural dimming.
+                let next_vol = fade_out_next_volume(current_vol);
+                sink.set_volume(next_vol);
+                let _ = status_tx.send(AudioStatus::FadingOut {
+                    current_volume: clamp_status_volume(sink.volume()),
+                });
+            }
+        } else {
+            // No active sink, just execute pending immediately.
+            self.execute_pending_action(cmd, status_tx, sample_buffer);
+        }
+    }
+
+    fn execute_pending_action(
+        &mut self,
+        cmd: AudioCommand,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        match cmd {
+            AudioCommand::Play(url) => {
+                // Stop current sink before spawning new connection.
+                if let Some(old_sink) = self.current_sink.take() {
+                    old_sink.stop();
+                }
+                self.start_connection(url, true, status_tx, sample_buffer);
+            }
+            AudioCommand::Stop => {
+                self.active_conn_id.store(0, Ordering::SeqCst); // abandon in-flight
+                self.connect_thread = None;
+                if let Some(old_sink) = self.current_sink.take() {
+                    old_sink.stop();
+                }
+                let _ = status_tx.send(AudioStatus::Stopped);
+            }
+            _ => {}
+        }
+    }
+
+    fn tick_fade_in(&mut self) {
+        if self.pending_action.is_some() || self.current_fade_volume.is_none() {
+            return;
+        }
+
+        if let Some(ref sink) = self.current_sink {
+            let current_vol = sink.volume();
+            if (current_vol - self.target_volume).abs() <= 0.03 {
+                sink.set_volume(self.target_volume);
+                self.current_fade_volume = None;
+            } else {
+                // Exponential step-up towards target_volume for organic swell.
+                let step = (self.target_volume - current_vol) * 0.15;
+                sink.set_volume(current_vol + step);
+            }
+        } else {
+            self.current_fade_volume = None;
+        }
+    }
+
+    fn tick_connection(
+        &mut self,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        if !self
+            .connect_thread
             .as_ref()
             .is_some_and(|handle| handle.is_finished())
         {
-            if let Some(finished) = connect_thread.take() {
-                match finished.join() {
-                    Ok(Ok(sink)) => {
-                        // Start playing at 0.0 volume, trigger exponential swell
-                        sink.set_volume(0.0);
-                        current_sink = Some(sink);
-                        let _ = status_tx.send(AudioStatus::Playing);
-                        current_fade_volume = Some(0.0);
-                    }
-                    Ok(Err(e)) => {
-                        // Stale thread errors are ignored (they are "Abandoned" or cancelled)
-                        if e != "Abandoned" {
-                            if is_hardware_output_error(&e)
-                                && hardware_recovery_retries < MAX_HARDWARE_RECOVERY_RETRIES
-                            {
-                                hardware_recovery_retries += 1;
-                                reset_output_handle(&mut output_stream, &mut output_handle);
-                                let _ = status_tx.send(AudioStatus::Connecting);
-
-                                if let Some(url) = current_url.clone() {
-                                    start_connection(
-                                        url,
-                                        false,
-                                        &mut current_url,
-                                        &mut hardware_recovery_retries,
-                                        &mut SpawnConnectionState {
-                                            conn_id_ref: &mut current_conn_id,
-                                            active_ref: &active_conn_id,
-                                            connect_ref: &mut connect_thread,
-                                            output_stream: &mut output_stream,
-                                            output_handle: &mut output_handle,
-                                            status_tx: &status_tx,
-                                            sample_buffer: &sample_buffer,
-                                            preferred_output_device_name:
-                                                &preferred_output_device_name,
-                                            stream_metadata_enabled,
-                                            reopen_output_on_next_connection:
-                                                &mut reopen_output_on_next_connection,
-                                        },
-                                    );
-                                } else {
-                                    let _ = status_tx.send(AudioStatus::Error(e));
-                                }
-                            } else {
-                                let _ = status_tx.send(AudioStatus::Error(e));
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        let _ =
-                            status_tx.send(AudioStatus::Error("Connection thread panicked".into()));
-                    }
-                }
-            }
+            return;
         }
 
-        // Check if current playback ended
-        if let Some(ref sink) = current_sink {
+        let Some(finished) = self.connect_thread.take() else {
+            return;
+        };
+
+        match finished.join() {
+            Ok(Ok(sink)) => {
+                // Start playing at 0.0 volume, trigger exponential swell.
+                sink.set_volume(0.0);
+                self.current_sink = Some(sink);
+                let _ = status_tx.send(AudioStatus::Playing);
+                self.current_fade_volume = Some(0.0);
+            }
+            Ok(Err(error)) => {
+                // Stale thread errors are ignored (they are "Abandoned" or cancelled).
+                if error == "Abandoned" {
+                    return;
+                }
+
+                if is_hardware_output_error(&error)
+                    && self.hardware_recovery_retries < MAX_HARDWARE_RECOVERY_RETRIES
+                {
+                    self.hardware_recovery_retries += 1;
+                    reset_output_handle(&mut self.output_stream, &mut self.output_handle);
+                    let _ = status_tx.send(AudioStatus::Connecting);
+
+                    if let Some(url) = self.current_url.clone() {
+                        self.start_connection(url, false, status_tx, sample_buffer);
+                    } else {
+                        let _ = status_tx.send(AudioStatus::Error(error));
+                    }
+                } else {
+                    let _ = status_tx.send(AudioStatus::Error(error));
+                }
+            }
+            Err(_) => {
+                let _ = status_tx.send(AudioStatus::Error("Connection thread panicked".into()));
+            }
+        }
+    }
+
+    fn tick_sink_end(&mut self, status_tx: &mpsc::Sender<AudioStatus>) {
+        if let Some(ref sink) = self.current_sink {
             if sink.empty() {
-                current_sink = None;
+                self.current_sink = None;
                 let _ = status_tx.send(AudioStatus::Stopped);
             }
         }
+    }
+
+    fn start_connection(
+        &mut self,
+        url: String,
+        reset_hardware_retries: bool,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        self.current_url = Some(url.clone());
+        if reset_hardware_retries {
+            self.hardware_recovery_retries = 0;
+        }
+        self.spawn_connection(url, status_tx, sample_buffer);
+    }
+
+    fn spawn_connection(
+        &mut self,
+        url: String,
+        status_tx: &mpsc::Sender<AudioStatus>,
+        sample_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    ) {
+        if self.reopen_output_on_next_connection {
+            self.output_stream = None;
+            self.output_handle = None;
+            self.reopen_output_on_next_connection = false;
+        }
+
+        let Some(handle) = ensure_output_handle(
+            &mut self.output_stream,
+            &mut self.output_handle,
+            self.preferred_output_device_name.as_deref(),
+            status_tx,
+        ) else {
+            return;
+        };
+
+        self.current_conn_id += 1;
+        self.active_conn_id
+            .store(self.current_conn_id, Ordering::SeqCst);
+        let _ = status_tx.send(AudioStatus::Connecting);
+
+        let conn_id = self.current_conn_id;
+        let context = ConnectionContext {
+            status_tx: status_tx.clone(),
+            conn_id,
+            active_conn_id: self.active_conn_id.clone(),
+            sample_buffer: sample_buffer.clone(),
+            request_stream_metadata: self.stream_metadata_enabled,
+        };
+
+        drop(self.connect_thread.take());
+        self.connect_thread = Some(std::thread::spawn(move || {
+            connect_and_decode(url, handle, context)
+        }));
     }
 }
 
@@ -292,33 +361,6 @@ fn handle_test_audio_command(cmd: AudioCommand, status_tx: &mpsc::Sender<AudioSt
         AudioCommand::SetVolume(_)
         | AudioCommand::SetOutputDevice(_)
         | AudioCommand::SetStreamMetadata(_) => {}
-    }
-}
-
-fn execute_pending_action(
-    cmd: AudioCommand,
-    current_sink: &mut Option<Sink>,
-    current_url: &mut Option<String>,
-    hardware_recovery_retries: &mut u8,
-    state: &mut SpawnConnectionState<'_>,
-) {
-    match cmd {
-        AudioCommand::Play(url) => {
-            // Stop current sink before spawning new connection
-            if let Some(old_sink) = current_sink.take() {
-                old_sink.stop();
-            }
-            start_connection(url, true, current_url, hardware_recovery_retries, state);
-        }
-        AudioCommand::Stop => {
-            state.active_ref.store(0, Ordering::SeqCst); // abandon in-flight
-            *state.connect_ref = None;
-            if let Some(old_sink) = current_sink.take() {
-                old_sink.stop();
-            }
-            let _ = state.status_tx.send(AudioStatus::Stopped);
-        }
-        _ => {}
     }
 }
 
@@ -367,68 +409,6 @@ fn ensure_output_handle(
     }
 
     output_handle.clone()
-}
-
-struct SpawnConnectionState<'a> {
-    conn_id_ref: &'a mut u64,
-    active_ref: &'a Arc<AtomicU64>,
-    connect_ref: &'a mut Option<std::thread::JoinHandle<Result<Sink, String>>>,
-    output_stream: &'a mut Option<OutputStream>,
-    output_handle: &'a mut Option<rodio::OutputStreamHandle>,
-    status_tx: &'a mpsc::Sender<AudioStatus>,
-    sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
-    preferred_output_device_name: &'a Option<String>,
-    stream_metadata_enabled: bool,
-    reopen_output_on_next_connection: &'a mut bool,
-}
-
-fn start_connection(
-    url: String,
-    reset_hardware_retries: bool,
-    current_url: &mut Option<String>,
-    hardware_recovery_retries: &mut u8,
-    state: &mut SpawnConnectionState<'_>,
-) {
-    *current_url = Some(url.clone());
-    if reset_hardware_retries {
-        *hardware_recovery_retries = 0;
-    }
-    spawn_connection(url, state);
-}
-
-fn spawn_connection(url: String, state: &mut SpawnConnectionState<'_>) {
-    if *state.reopen_output_on_next_connection {
-        *state.output_stream = None;
-        *state.output_handle = None;
-        *state.reopen_output_on_next_connection = false;
-    }
-
-    let Some(handle) = ensure_output_handle(
-        state.output_stream,
-        state.output_handle,
-        state.preferred_output_device_name.as_deref(),
-        state.status_tx,
-    ) else {
-        return;
-    };
-
-    *state.conn_id_ref += 1;
-    state.active_ref.store(*state.conn_id_ref, Ordering::SeqCst);
-    let _ = state.status_tx.send(AudioStatus::Connecting);
-
-    let conn_id = *state.conn_id_ref;
-    let context = ConnectionContext {
-        status_tx: state.status_tx.clone(),
-        conn_id,
-        active_conn_id: state.active_ref.clone(),
-        sample_buffer: state.sample_buffer.clone(),
-        request_stream_metadata: state.stream_metadata_enabled,
-    };
-
-    drop(state.connect_ref.take());
-    *state.connect_ref = Some(std::thread::spawn(move || {
-        connect_and_decode(url, handle, context)
-    }));
 }
 
 #[cfg(test)]

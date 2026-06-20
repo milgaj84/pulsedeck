@@ -157,9 +157,9 @@ fn set_option_if_some<T: Copy + PartialEq>(target: &mut Option<T>, incoming: Opt
 pub fn station_identity_matches(a: &Station, b: &Station) -> bool {
     match (a.station_uuid.as_deref(), b.station_uuid.as_deref()) {
         (Some(left), Some(right)) if !left.trim().is_empty() && !right.trim().is_empty() => {
-            left.eq_ignore_ascii_case(right)
+            left.trim().eq_ignore_ascii_case(right.trim())
         }
-        _ => normalized_station_url(&a.url) == normalized_station_url(&b.url),
+        _ => station_url_matches(&a.url, &b.url),
     }
 }
 
@@ -207,8 +207,12 @@ pub fn sanitize_bitrate(value: u32) -> u32 {
     }
 }
 
-fn normalized_station_url(value: &str) -> String {
+pub fn normalized_station_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
+pub fn station_url_matches(left: &str, right: &str) -> bool {
+    normalized_station_url(left) == normalized_station_url(right)
 }
 
 /// Returns hardcoded fallback stations so the app works offline.
@@ -313,6 +317,34 @@ mod tests {
     fn station_identity_does_not_match_by_name_only() {
         let saved = Station::basic("Same", "http://a", "Radio", "US", 128);
         let result = Station::basic("Same", "http://b", "Radio", "US", 128);
+
+        assert!(!station_identity_matches(&saved, &result));
+    }
+
+    #[test]
+    fn station_url_matches_ignores_case_whitespace_and_trailing_slash() {
+        assert!(station_url_matches(
+            " HTTP://Example.COM/stream/ ",
+            "http://example.com/stream"
+        ));
+    }
+
+    #[test]
+    fn station_identity_matches_trims_uuid_before_comparing() {
+        let mut saved = Station::basic("A", "http://a", "Radio", "US", 128);
+        saved.station_uuid = Some(" UUID-1 ".to_string());
+        let mut result = Station::basic("B", "http://b", "Radio", "US", 128);
+        result.station_uuid = Some("uuid-1".to_string());
+
+        assert!(station_identity_matches(&saved, &result));
+    }
+
+    #[test]
+    fn station_identity_prefers_uuid_mismatch_over_url_match() {
+        let mut saved = Station::basic("A", "http://same", "Radio", "US", 128);
+        saved.station_uuid = Some("uuid-a".to_string());
+        let mut result = Station::basic("B", "http://same/", "Radio", "US", 128);
+        result.station_uuid = Some("uuid-b".to_string());
 
         assert!(!station_identity_matches(&saved, &result));
     }

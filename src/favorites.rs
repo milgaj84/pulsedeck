@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::radio::{
     clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
-    sanitize_bitrate, station_identity_matches, Station, StationHealth,
+    sanitize_bitrate, station_identity_matches, station_url_matches, Station, StationHealth,
 };
 
 const LIBRARY_FILE: &str = "library.json";
@@ -480,7 +480,8 @@ impl Library {
     /// Remove a station by URL. Returns true if removed.
     pub fn remove(&mut self, url: &str) -> anyhow::Result<bool> {
         let before = self.stations.len();
-        self.stations.retain(|s| s.url != url);
+        self.stations
+            .retain(|station| !station_url_matches(&station.url, url));
         let removed = self.stations.len() < before;
         if removed {
             self.rebuild_genres();
@@ -522,7 +523,7 @@ impl Library {
         if let Some(station) = self
             .stations
             .iter_mut()
-            .find(|station| normalized_url_match(&station.url, url))
+            .find(|station| station_url_matches(&station.url, url))
         {
             station.health.last_success_at = Some(now);
             station.health.last_error_summary.clear();
@@ -535,7 +536,7 @@ impl Library {
         if let Some(station) = self
             .stations
             .iter_mut()
-            .find(|station| normalized_url_match(&station.url, url))
+            .find(|station| station_url_matches(&station.url, url))
         {
             station.health.last_failure_at = Some(now);
             station.health.failure_count = Some(
@@ -553,7 +554,9 @@ impl Library {
 
     /// Check if a station URL is in the library.
     pub fn contains(&self, url: &str) -> bool {
-        self.stations.iter().any(|s| s.url == url)
+        self.stations
+            .iter()
+            .any(|station| station_url_matches(&station.url, url))
     }
 
     /// Save library to disk (best-effort).
@@ -585,10 +588,6 @@ impl Library {
 /// copy the old file into the new config directory so users keep their library.
 fn config_path() -> Option<PathBuf> {
     crate::config::config_path(LIBRARY_FILE)
-}
-
-fn normalized_url_match(left: &str, right: &str) -> bool {
-    left.trim().trim_end_matches('/').eq_ignore_ascii_case(right.trim().trim_end_matches('/'))
 }
 
 fn compact_error_summary(error: &str) -> String {
@@ -772,6 +771,33 @@ mod tests {
         };
         assert!(lib.contains("http://test"));
         assert!(!lib.contains("http://missing"));
+    }
+
+    #[test]
+    fn contains_matches_normalized_station_url() {
+        let lib = Library::in_memory(vec![station(
+            "Test",
+            " HTTP://STREAM/ ",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        assert!(lib.contains("http://stream"));
+    }
+
+    #[test]
+    fn remove_matches_normalized_station_url() {
+        let mut lib = Library::in_memory(vec![station(
+            "Test",
+            " HTTP://STREAM/ ",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        assert!(lib.remove("http://stream").unwrap());
+        assert!(lib.stations.is_empty());
     }
 
     #[test]

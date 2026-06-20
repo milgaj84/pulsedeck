@@ -8,6 +8,25 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.1] - Unreleased
+
+### Fixed
+*   **Silent audio-engine command failures**: Audio commands now report when the engine command channel is closed, and user-triggered playback actions surface a visible error instead of pretending playback changed.
+*   **Station identity mismatches**: Library remove, contains, health updates, now-playing lookup, selection restoration, last-played selection, and track metadata matching now share normalized stream-URL matching instead of mixing raw URL equality with normalized identity logic.
+*   **UUID whitespace edge cases**: Radio Browser UUID identity comparison now trims both sides before comparing, while still refusing to merge stations with conflicting non-empty UUIDs.
+
+### Changed
+*   **Audio engine loop structure**: Extracted `AudioLoopState` from `src/audio/engine_loop.rs::audio_loop` so command handling, fade ticks, connection completion, sink-end detection, and connection spawning are isolated without changing decoder or buffering behavior.
+*   **Passive audio sync reporting**: Volume, output-device, and stream-metadata sync commands now return send status, allowing important call sites to detect failure without spamming notices from passive sync paths.
+
+### Removed
+*   **Dead audio prototypes**: Removed stale, uncompiled audio experiment files from `src/audio/`: `buffer.rs`, `buffer_meter.rs`, `decoded_source.rs`, `pcm_buffer.rs`, `pcm_buffer2.rs`, and `probe_reader.rs`.
+
+### Internal
+*   Added regression coverage for normalized station URL matching, UUID whitespace and conflict handling, normalized remove/contains/health/now-playing/select-playing behavior, track metadata URL matching, audio command-channel failure, and dead-engine app-state recovery.
+
+---
+
 ## [0.4.0] - Unreleased
 
 ### Added

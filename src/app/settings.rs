@@ -121,17 +121,17 @@ impl App {
         }
     }
 
-    pub(super) fn sync_output_device(&self) {
+    pub(super) fn sync_output_device(&self) -> bool {
         self.audio.send(crate::audio::AudioCommand::SetOutputDevice(
             self.library.settings.output_device_name.clone(),
-        ));
+        ))
     }
 
-    pub(super) fn sync_stream_metadata(&self) {
+    pub(super) fn sync_stream_metadata(&self) -> bool {
         self.audio
             .send(crate::audio::AudioCommand::SetStreamMetadata(
                 self.library.settings.stream_metadata_enabled,
-            ));
+            ))
     }
 
     fn apply_directional_setting(&mut self, forward: bool) -> bool {

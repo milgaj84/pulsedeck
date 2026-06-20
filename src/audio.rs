@@ -64,7 +64,30 @@ impl AudioEngine {
         Self { cmd_tx, status_rx }
     }
 
-    pub fn send(&self, cmd: AudioCommand) {
-        let _ = self.cmd_tx.send(cmd);
+    pub fn send(&self, cmd: AudioCommand) -> bool {
+        self.cmd_tx.send(cmd).is_ok()
+    }
+}
+
+#[cfg(test)]
+impl AudioEngine {
+    pub fn disconnected_for_test() -> Self {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
+        drop(cmd_rx);
+        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
+
+        Self { cmd_tx, status_rx }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_engine_send_returns_false_when_command_channel_is_closed() {
+        let engine = AudioEngine::disconnected_for_test();
+
+        assert!(!engine.send(AudioCommand::Stop));
     }
 }
