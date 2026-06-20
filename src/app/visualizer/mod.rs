@@ -9,14 +9,14 @@ use spectrum::*;
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
     pub fn update_visualizer(&mut self) {
-        if self.player.state == PlaybackState::Connecting && self.visualizer_mode == 0 {
-            update_connecting_spectrum_peaks(&mut self.visualizer_peaks, self.tick_count);
+        if self.playback.view.state == PlaybackState::Connecting && self.ui.visualizer_mode == 0 {
+            update_connecting_spectrum_peaks(&mut self.ui.visualizer_peaks, self.ui.tick_count);
             return;
         }
 
-        if !playback_drives_sample_visualizer(&self.player.state) {
+        if !playback_drives_sample_visualizer(&self.playback.view.state) {
             // Gradually decay peaks when stopped/paused.
-            for peak in &mut self.visualizer_peaks {
+            for peak in &mut self.ui.visualizer_peaks {
                 *peak = (*peak * 0.82).max(0.0);
             }
             return;
@@ -24,7 +24,7 @@ impl App {
 
         // Extract raw samples from the circular buffer.
         let mut samples = Vec::new();
-        if let Ok(buf) = self.sample_buffer.lock() {
+        if let Ok(buf) = self.playback.sample_buffer.lock() {
             let n = buf.len();
             let window_size = 512;
             if n >= window_size {
@@ -58,8 +58,8 @@ impl App {
         // 3. Map bins logarithmically to equal-width frequency bands.
         let bins_count = n / 2;
 
-        if self.visualizer_peaks.len() != SPECTRUM_ANALYSIS_BANDS {
-            self.visualizer_peaks = vec![0.0; SPECTRUM_ANALYSIS_BANDS];
+        if self.ui.visualizer_peaks.len() != SPECTRUM_ANALYSIS_BANDS {
+            self.ui.visualizer_peaks = vec![0.0; SPECTRUM_ANALYSIS_BANDS];
         }
 
         let mut targets = Vec::with_capacity(SPECTRUM_ANALYSIS_BANDS);
@@ -72,17 +72,17 @@ impl App {
 
         let targets = smooth_spectrum_targets(&targets);
         let treble_variance =
-            treble_delta_variance(&targets, &self.visualizer_peaks, SPECTRUM_ANALYSIS_BANDS);
+            treble_delta_variance(&targets, &self.ui.visualizer_peaks, SPECTRUM_ANALYSIS_BANDS);
 
         for (band, target) in targets.iter().copied().enumerate() {
             let target =
                 preserve_treble_variance(target, band, SPECTRUM_ANALYSIS_BANDS, treble_variance);
-            let current = self.visualizer_peaks[band];
+            let current = self.ui.visualizer_peaks[band];
             if target > current {
-                self.visualizer_peaks[band] = target; // Fast rise.
+                self.ui.visualizer_peaks[band] = target; // Fast rise.
             } else {
                 let release = spectrum_release_curve(band, SPECTRUM_ANALYSIS_BANDS);
-                self.visualizer_peaks[band] = (current - release).max(target).max(0.0);
+                self.ui.visualizer_peaks[band] = (current - release).max(target).max(0.0);
             }
         }
     }

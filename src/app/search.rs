@@ -26,21 +26,21 @@ impl Default for SearchState {
 impl App {
     pub(super) fn enter_search(&mut self) {
         self.remember_current_genre_selection();
-        self.nav.normal_selected_snapshot = self.nav.selected;
-        self.input_mode = InputMode::Search;
+        self.ui.nav.normal_selected_snapshot = self.ui.nav.selected;
+        self.ui.input_mode = InputMode::Search;
         self.search.query.clear();
         self.search.results.clear();
         self.search.last_api_query.clear();
         self.search.status = SearchStatus::WaitingForInput;
         self.search.searching_api = false;
         self.search.pending_api_search = None;
-        self.nav.selected =
-            clamped_index(self.nav.search_selected_snapshot, self.search.results.len());
+        self.ui.nav.selected =
+            clamped_index(self.ui.nav.search_selected_snapshot, self.search.results.len());
     }
 
     pub(super) fn exit_search(&mut self) {
-        self.nav.search_selected_snapshot = self.nav.selected;
-        self.input_mode = InputMode::Normal;
+        self.ui.nav.search_selected_snapshot = self.ui.nav.selected;
+        self.ui.input_mode = InputMode::Normal;
         self.search.query.clear();
         self.search.results.clear();
         self.search.last_api_query.clear();
@@ -62,8 +62,8 @@ impl App {
 
     pub(super) fn confirm_search(&mut self) {
         // Add the selected search result to library and play it.
-        let played = if let Some(station) = self.search.results.get(self.nav.selected).cloned() {
-            self.reconnect.disarm();
+        let played = if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
+            self.playback.reconnect.disarm();
             match self.library.add(station.clone()) {
                 Ok(true) => {
                     self.mark_library_dirty();
@@ -77,7 +77,7 @@ impl App {
                 }
                 Err(err) => self.set_error_notice(format!("Could not add station: {err}")),
             }
-            self.player.playing_url = Some(station.url.clone());
+            self.playback.view.playing_url = Some(station.url.clone());
 
             // Persist last played station URL.
             self.library.settings.last_played_url = Some(station.url.clone());
@@ -100,25 +100,25 @@ impl App {
     }
 
     pub(super) fn audition_search_result(&mut self) {
-        if let Some(station) = self.search.results.get(self.nav.selected).cloned() {
-            self.reconnect.disarm();
+        if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
+            self.playback.reconnect.disarm();
             let next_playback = if matches!(
-                &self.player.state,
+                &self.playback.view.state,
                 PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
             ) {
                 PlaybackState::FadingOut {
-                    current_volume: if self.muted {
+                    current_volume: if self.playback.muted {
                         0.0
                     } else {
-                        self.volume as f32 / 100.0
+                        self.playback.volume as f32 / 100.0
                     },
                 }
             } else {
                 PlaybackState::Connecting
             };
 
-            self.player.playing_url = Some(station.url.clone());
-            self.player.state = next_playback;
+            self.playback.view.playing_url = Some(station.url.clone());
+            self.playback.view.state = next_playback;
             if self.send_audio_command(AudioCommand::Play(station.url)) {
                 self.sync_volume();
                 self.set_info_notice("Auditioning stream (not saved to library)");
@@ -137,7 +137,7 @@ impl App {
     /// Mark a debounced query as actively searching.
     pub fn mark_search_started(&mut self, query: &str) -> bool {
         let current_query = self.search.query.trim();
-        if self.input_mode != InputMode::Search || current_query != query {
+        if self.ui.input_mode != InputMode::Search || current_query != query {
             return false;
         }
 
@@ -161,7 +161,7 @@ impl App {
         result: Result<Vec<Station>, String>,
     ) -> bool {
         let current_query = self.search.query.trim().to_string();
-        let is_current_search = self.input_mode == InputMode::Search
+        let is_current_search = self.ui.input_mode == InputMode::Search
             && current_query == query
             && matches!(
                 &self.search.status,
@@ -175,8 +175,8 @@ impl App {
         }
 
         self.search.searching_api = false;
-        self.nav.search_selected_snapshot = 0;
-        self.nav.selected = 0;
+        self.ui.nav.search_selected_snapshot = 0;
+        self.ui.nav.selected = 0;
 
         match result {
             Ok(results) => {
@@ -197,7 +197,7 @@ impl App {
     }
 
     fn note_stale_search_response(&mut self, current_query: &str, received_stale: String) {
-        if self.input_mode != InputMode::Search
+        if self.ui.input_mode != InputMode::Search
             || current_query.chars().count() < types::SEARCH_MIN_CHARS
             || current_query == received_stale
         {
@@ -220,8 +220,8 @@ impl App {
 
         if query.chars().count() < types::SEARCH_MIN_CHARS {
             self.search.results.clear();
-            self.nav.search_selected_snapshot = 0;
-            self.nav.selected = 0;
+            self.ui.nav.search_selected_snapshot = 0;
+            self.ui.nav.selected = 0;
             self.search.searching_api = false;
             self.search.pending_api_search = None;
             self.search.status = SearchStatus::WaitingForInput;
@@ -243,8 +243,8 @@ impl App {
         }
 
         self.search.results.clear();
-        self.nav.search_selected_snapshot = 0;
-        self.nav.selected = 0;
+        self.ui.nav.search_selected_snapshot = 0;
+        self.ui.nav.selected = 0;
         self.search.searching_api = false;
         self.search.pending_api_search = None;
         self.search.status = SearchStatus::Debouncing { query };
@@ -253,9 +253,9 @@ impl App {
     fn restore_normal_selection_snapshot(&mut self) {
         let count = self.visible_count();
         if count == 0 {
-            self.nav.selected = 0;
+            self.ui.nav.selected = 0;
         } else {
-            self.nav.selected = self.nav.normal_selected_snapshot.min(count - 1);
+            self.ui.nav.selected = self.ui.nav.normal_selected_snapshot.min(count - 1);
         }
     }
 }
@@ -284,8 +284,8 @@ mod tests {
     }
 
     fn notice_text(app: &App) -> Option<&str> {
-        match app.notice.current.as_ref() {
-            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message),
+        match app.ui.notice.current.as_ref() {
+            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message.as_str()),
             None => None,
         }
     }
@@ -361,7 +361,7 @@ mod tests {
             }
         );
         assert!(!app.search.searching_api);
-        assert_eq!(app.nav.selected, 0);
+        assert_eq!(app.ui.nav.selected, 0);
     }
 
     #[test]
@@ -512,14 +512,14 @@ mod tests {
         let mut app = test_app();
         app.update(Action::EnterSearch);
         app.search.results = vec![station("Lo-Fi Radio", "http://lofi")];
-        app.nav.selected = 0;
+        app.ui.nav.selected = 0;
         app.library.settings.last_played_url = Some("http://previous".to_string());
 
         app.update(Action::SearchAudition);
 
-        assert_eq!(app.input_mode, InputMode::Search);
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://lofi"));
-        assert_eq!(app.player.state, PlaybackState::Connecting);
+        assert_eq!(app.ui.input_mode, InputMode::Search);
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://lofi"));
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
         assert!(!app.library.contains("http://lofi"));
         assert_eq!(
             app.library.settings.last_played_url.as_deref(),
@@ -539,9 +539,9 @@ mod tests {
 
         app.update(Action::SearchAudition);
 
-        assert_eq!(app.input_mode, InputMode::Search);
-        assert_eq!(app.player.playing_url, None);
-        assert_eq!(app.player.state, PlaybackState::Stopped);
+        assert_eq!(app.ui.input_mode, InputMode::Search);
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.playback.view.state, PlaybackState::Stopped);
         assert!(app.search.results.is_empty());
     }
 
@@ -550,12 +550,12 @@ mod tests {
         let mut app = test_app();
         app.update(Action::EnterSearch);
         app.search.results = vec![station("Lo-Fi Radio", "http://lofi")];
-        app.nav.selected = 0;
+        app.ui.nav.selected = 0;
 
         app.update(Action::SearchConfirm);
 
-        assert_eq!(app.input_mode, InputMode::Normal);
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://lofi"));
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://lofi"));
         assert!(app.library.contains("http://lofi"));
         assert_eq!(app.search.status, SearchStatus::WaitingForInput);
         assert!(app.search.results.is_empty());
@@ -568,8 +568,8 @@ mod tests {
 
         app.update(Action::SearchConfirm);
 
-        assert_eq!(app.input_mode, InputMode::Normal);
-        assert_eq!(app.player.playing_url, None);
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert_eq!(app.playback.view.playing_url, None);
         assert!(app.search.results.is_empty());
     }
 
@@ -579,17 +579,17 @@ mod tests {
             station("Library A", "http://library-a"),
             station("Library B", "http://library-b"),
         ]));
-        app.nav.selected = 1;
+        app.ui.nav.selected = 1;
 
         app.update(Action::EnterSearch);
         app.search.results = vec![station("Search A", "http://search-a")];
-        app.nav.selected = 0;
+        app.ui.nav.selected = 0;
         app.update(Action::ExitSearch);
 
-        assert_eq!(app.input_mode, InputMode::Normal);
-        assert_eq!(app.nav.selected, 1);
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert_eq!(app.ui.nav.selected, 1);
         assert_eq!(
-            app.visible_stations()[app.nav.selected].url,
+            app.visible_stations()[app.ui.nav.selected].url,
             "http://library-b"
         );
     }
@@ -598,7 +598,7 @@ mod tests {
     fn search_response_resets_search_selection_snapshot() {
         let mut app = test_app();
         app.update(Action::EnterSearch);
-        app.nav.search_selected_snapshot = 4;
+        app.ui.nav.search_selected_snapshot = 4;
         app.update(Action::SearchInput('l'));
         app.update(Action::SearchInput('o'));
         app.mark_search_started("lo");
@@ -608,8 +608,8 @@ mod tests {
             Ok(vec![station("Lo-Fi Radio", "http://lofi")]),
         ));
 
-        assert_eq!(app.nav.selected, 0);
-        assert_eq!(app.nav.search_selected_snapshot, 0);
+        assert_eq!(app.ui.nav.selected, 0);
+        assert_eq!(app.ui.nav.search_selected_snapshot, 0);
     }
 
     #[test]

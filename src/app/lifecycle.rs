@@ -65,45 +65,40 @@ impl App {
             parts.library.settings.output_device_name.as_deref(),
         );
         let diagnostics_metadata_enabled = parts.library.settings.stream_metadata_enabled;
+        let ui = UiRuntimeState::from_ui_state(&parts.ui_state);
+        let playback = PlaybackRuntime::new(
+            &parts.ui_state,
+            diagnostics_output_device,
+            diagnostics_metadata_enabled,
+            parts.audio,
+            parts.sample_buffer,
+        );
 
         let mut app = Self {
             library: parts.library,
-            nav: Navigation::default(),
             search: SearchState::default(),
-            command_palette: CommandPaletteState::default(),
-            player: PlaybackView::default(),
-            volume: parts.ui_state.volume(),
-            muted: parts.ui_state.muted(),
-            should_quit: false,
-            notice: NoticeState::default(),
-            input_mode: InputMode::Normal,
-            tick_count: 0,
-            layout_mode: parts.ui_state.layout_mode(),
-            overlays: Overlays::default(),
+            history: parts.history,
             song_history: VecDeque::new(),
             undo_history: VecDeque::new(),
-            reconnect: Reconnect::default(),
-            diagnostics: PlaybackDiagnostics {
-                output_device: diagnostics_output_device,
-                metadata_enabled: diagnostics_metadata_enabled,
-                reconnect_limit: 3,
-                ..PlaybackDiagnostics::default()
-            },
-            sleep_timer: SleepTimer::default(),
-            history: parts.history,
+            ui,
+            playback,
             metadata_refresh_pending: false,
             metadata_refresh_running: false,
             persist: persist::PersistFlags::default(),
-            audio: parts.audio,
-            sample_buffer: parts.sample_buffer,
-            visualizer_mode: parts.ui_state.visualizer_mode(),
-            visualizer_peaks: Vec::new(),
         };
 
         app.sync_startup_audio_settings();
         app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
         app.apply_startup_autoplay();
         app
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.ui.should_quit
+    }
+
+    pub fn input_mode(&self) -> &InputMode {
+        &self.ui.input_mode
     }
 
     fn sync_startup_audio_settings(&mut self) {
@@ -144,74 +139,74 @@ impl App {
         };
 
         if let Some(pos) = last_played_station_position(&self.library.stations, &url) {
-            self.nav.selected = pos;
+            self.ui.nav.selected = pos;
         }
-        self.player.playing_url = Some(url.clone());
-        self.player.state = PlaybackState::Connecting;
+        self.playback.view.playing_url = Some(url.clone());
+        self.playback.view.state = PlaybackState::Connecting;
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();
         }
     }
 
     pub(super) fn set_info_notice(&mut self, message: impl Into<String>) {
-        self.notice.current = Some(AppNotice::Info(message.into()));
-        self.notice.ticks_remaining = NOTICE_INFO_TICKS;
+        self.ui.notice.current = Some(AppNotice::Info(message.into()));
+        self.ui.notice.ticks_remaining = NOTICE_INFO_TICKS;
     }
 
     pub(super) fn set_error_notice(&mut self, message: impl Into<String>) {
-        self.notice.current = Some(AppNotice::Error(message.into()));
-        self.notice.ticks_remaining = NOTICE_ERROR_TICKS;
+        self.ui.notice.current = Some(AppNotice::Error(message.into()));
+        self.ui.notice.ticks_remaining = NOTICE_ERROR_TICKS;
     }
 
     pub(super) fn tick_notice(&mut self) {
-        if self.notice.ticks_remaining > 0 {
-            self.notice.ticks_remaining -= 1;
+        if self.ui.notice.ticks_remaining > 0 {
+            self.ui.notice.ticks_remaining -= 1;
         } else {
-            self.notice.current = None;
+            self.ui.notice.current = None;
         }
     }
 
     pub fn poll_audio_status(&mut self) {
-        while let Ok(status) = self.audio.status_rx.try_recv() {
+        while let Ok(status) = self.playback.audio.status_rx.try_recv() {
             match status {
                 AudioStatus::TrackChanged { url, title } => {
                     self.handle_track_changed(url, title);
                 }
                 AudioStatus::Playing => {
-                    self.player.state = PlaybackState::Playing;
-                    self.reconnect.disarm();
-                    if let Some(url) = self.player.playing_url.clone() {
+                    self.playback.view.state = PlaybackState::Playing;
+                    self.playback.reconnect.disarm();
+                    if let Some(url) = self.playback.view.playing_url.clone() {
                         if self.library.mark_station_success(&url, unix_now_string()) {
                             self.mark_library_dirty();
                         }
                     }
-                    self.diagnostics.decoder_state = DecoderState::Playing;
-                    self.diagnostics.last_event = Some("Playback started".to_string());
-                    self.diagnostics.last_error = None;
+                    self.playback.diagnostics.decoder_state = DecoderState::Playing;
+                    self.playback.diagnostics.last_event = Some("Playback started".to_string());
+                    self.playback.diagnostics.last_error = None;
                 }
                 AudioStatus::Paused => {
-                    self.player.state = PlaybackState::Paused;
-                    self.diagnostics.last_event = Some("Playback paused".to_string());
+                    self.playback.view.state = PlaybackState::Paused;
+                    self.playback.diagnostics.last_event = Some("Playback paused".to_string());
                 }
                 AudioStatus::Stopped => {
                     self.handle_audio_stopped();
                 }
                 AudioStatus::Error(error) => {
-                    self.diagnostics.decoder_state = DecoderState::Failed;
-                    self.diagnostics.last_error = Some(error.clone());
+                    self.playback.diagnostics.decoder_state = DecoderState::Failed;
+                    self.playback.diagnostics.last_error = Some(error.clone());
                     self.handle_audio_error(error);
                 }
                 AudioStatus::FadingOut { current_volume } => {
-                    self.player.state = PlaybackState::FadingOut {
+                    self.playback.view.state = PlaybackState::FadingOut {
                         current_volume: current_volume.clamp(0.0, 1.0),
                     };
-                    self.diagnostics.last_event = Some("Fading out".to_string());
+                    self.playback.diagnostics.last_event = Some("Fading out".to_string());
                 }
                 AudioStatus::Connecting => {
-                    self.player.current_track = None;
-                    self.player.state = PlaybackState::Connecting;
-                    self.diagnostics.decoder_state = DecoderState::Connecting;
-                    self.diagnostics.last_event = Some("Connecting to stream".to_string());
+                    self.playback.view.current_track = None;
+                    self.playback.view.state = PlaybackState::Connecting;
+                    self.playback.diagnostics.decoder_state = DecoderState::Connecting;
+                    self.playback.diagnostics.last_event = Some("Connecting to stream".to_string());
                 }
             }
         }
@@ -219,7 +214,8 @@ impl App {
 
     fn handle_track_changed(&mut self, url: String, title: String) {
         if !self
-            .player
+            .playback
+            .view
             .playing_url
             .as_deref()
             .is_some_and(|playing_url| station_url_matches(playing_url, &url))
@@ -227,8 +223,8 @@ impl App {
             return;
         }
 
-        let is_new = !title.is_empty() && self.player.current_track.as_ref() != Some(&title);
-        self.player.current_track = Some(title.clone());
+        let is_new = !title.is_empty() && self.playback.view.current_track.as_ref() != Some(&title);
+        self.playback.view.current_track = Some(title.clone());
 
         if !title.is_empty() && self.song_history.back() != Some(&title) {
             self.song_history.push_back(title.clone());
@@ -262,28 +258,28 @@ impl App {
     }
 
     fn handle_audio_stopped(&mut self) {
-        let was_playing = self.player.playing_url.is_some();
-        if self.player.intentional_stop || !was_playing {
-            self.player.intentional_stop = false;
-            self.player.playing_url = None;
-            self.player.current_track = None;
-            self.player.buffer_percent = 0;
-            self.player.buffer_seconds = 0;
-            self.player.state = PlaybackState::Stopped;
-            self.diagnostics.decoder_state = DecoderState::Idle;
-            self.diagnostics.buffer_percent = 0;
-            self.diagnostics.buffer_seconds = 0;
-            self.diagnostics.last_event = Some("Playback stopped".to_string());
-            self.reconnect.disarm();
-        } else if let Some(url) = self.player.playing_url.clone() {
-            self.reconnect.arm(url, std::time::Instant::now());
-            self.player.state = PlaybackState::Connecting;
+        let was_playing = self.playback.view.playing_url.is_some();
+        if self.playback.view.intentional_stop || !was_playing {
+            self.playback.view.intentional_stop = false;
+            self.playback.view.playing_url = None;
+            self.playback.view.current_track = None;
+            self.playback.view.buffer_percent = 0;
+            self.playback.view.buffer_seconds = 0;
+            self.playback.view.state = PlaybackState::Stopped;
+            self.playback.diagnostics.decoder_state = DecoderState::Idle;
+            self.playback.diagnostics.buffer_percent = 0;
+            self.playback.diagnostics.buffer_seconds = 0;
+            self.playback.diagnostics.last_event = Some("Playback stopped".to_string());
+            self.playback.reconnect.disarm();
+        } else if let Some(url) = self.playback.view.playing_url.clone() {
+            self.playback.reconnect.arm(url, std::time::Instant::now());
+            self.playback.view.state = PlaybackState::Connecting;
         }
     }
 
     fn handle_audio_error(&mut self, error: String) {
-        if let Some(url) = self.player.playing_url.clone() {
-            self.reconnect.arm(url.clone(), std::time::Instant::now());
+        if let Some(url) = self.playback.view.playing_url.clone() {
+            self.playback.reconnect.arm(url.clone(), std::time::Instant::now());
             if self
                 .library
                 .mark_station_failure(&url, unix_now_string(), &error)
@@ -291,14 +287,14 @@ impl App {
                 self.mark_library_dirty();
             }
         }
-        self.player.current_track = None;
-        self.player.buffer_percent = 0;
-        self.player.buffer_seconds = 0;
-        self.diagnostics.buffer_percent = 0;
-        self.diagnostics.buffer_seconds = 0;
-        self.diagnostics.reconnect_attempts = 1;
-        self.diagnostics.last_recovery = Some("Queued automatic reconnect".to_string());
-        self.player.state = PlaybackState::Error(error);
+        self.playback.view.current_track = None;
+        self.playback.view.buffer_percent = 0;
+        self.playback.view.buffer_seconds = 0;
+        self.playback.diagnostics.buffer_percent = 0;
+        self.playback.diagnostics.buffer_seconds = 0;
+        self.playback.diagnostics.reconnect_attempts = 1;
+        self.playback.diagnostics.last_recovery = Some("Queued automatic reconnect".to_string());
+        self.playback.view.state = PlaybackState::Error(error);
     }
 }
 
@@ -327,10 +323,10 @@ mod tests {
     fn from_parts_uses_injected_ui_state_without_loading_runtime_files() {
         let app = App::from_parts(test_parts(Library::in_memory(vec![])));
 
-        assert_eq!(app.volume, 37);
-        assert!(app.muted);
-        assert_eq!(app.layout_mode, LayoutMode::RightOnly);
-        assert_eq!(app.visualizer_mode, 2);
+        assert_eq!(app.playback.volume, 37);
+        assert!(app.playback.muted);
+        assert_eq!(app.ui.layout_mode, LayoutMode::RightOnly);
+        assert_eq!(app.ui.visualizer_mode, 2);
     }
 
     #[test]
@@ -341,7 +337,7 @@ mod tests {
         let app = App::from_parts(test_parts(library));
 
         assert!(matches!(
-            app.notice.current,
+            app.ui.notice.current,
             Some(AppNotice::Error(ref message)) if message == "bad library"
         ));
     }
@@ -355,7 +351,7 @@ mod tests {
         let app = App::from_parts(parts);
 
         assert!(matches!(
-            app.notice.current,
+            app.ui.notice.current,
             Some(AppNotice::Error(ref message))
                 if message.contains("2 config files had load warnings")
         ));
@@ -375,10 +371,10 @@ mod tests {
 
         let app = App::from_parts(test_parts(library));
 
-        assert_eq!(app.nav.selected, 0);
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://stream"));
+        assert_eq!(app.ui.nav.selected, 0);
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://stream"));
         assert_eq!(
-            app.player.state,
+            app.playback.view.state,
             PlaybackState::Error("Audio engine stopped".to_string())
         );
     }
@@ -406,10 +402,10 @@ mod tests {
             "US",
             128,
         )]));
-        app.player.playing_url = Some("http://stream".to_string());
+        app.playback.view.playing_url = Some("http://stream".to_string());
 
         app.handle_track_changed(" HTTP://STREAM/ ".to_string(), "Artist - Title".to_string());
 
-        assert_eq!(app.player.current_track.as_deref(), Some("Artist - Title"));
+        assert_eq!(app.playback.view.current_track.as_deref(), Some("Artist - Title"));
     }
 }

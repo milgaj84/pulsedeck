@@ -12,7 +12,6 @@ pub mod settings;
 pub mod sleep_timer;
 pub mod station_details;
 pub mod stations;
-pub mod text;
 pub mod theme;
 
 use ratatui::prelude::*;

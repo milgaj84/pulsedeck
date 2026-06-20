@@ -8,6 +8,21 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.6] - Unreleased
+
+### Changed
+*   **App state split**: Added `src/app/ui_runtime.rs::UiRuntimeState` for navigation, overlays, notices, input mode, layout, tick count, and visualizer display state.
+*   **Playback runtime split**: Added `src/app/playback_runtime.rs::PlaybackRuntime` for playback view state, volume/mute state, reconnect state, diagnostics, sleep timer, audio engine access, and the shared visualizer sample buffer.
+*   **Main-loop boundary**: Updated `src/main.rs` to use `App::input_mode()` and `App::should_quit()` so the terminal loop no longer depends on the internal app field layout.
+
+### Internal
+*   Updated `App::from_parts` to construct grouped UI and playback runtime state while preserving startup warning, autoplay, diagnostics, and audio sync behavior.
+*   Updated `UiModel` to snapshot grouped runtime state while keeping render modules on the existing read-model boundary.
+*   Updated app, runtime, and UI tests from flat `App` fields to grouped state paths.
+*   Added regression coverage for `UiRuntimeState` and `PlaybackRuntime` construction.
+
+---
+
 ## [0.4.5] - Unreleased
 
 ### Fixed
@@ -30,9 +45,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 *   **Renderer boundaries**: Kept `ui::draw(frame, &app)` as the public adapter while routing header, controls, search, stations, deck, overlays, command palette, and diagnostics through `UiModel`.
 *   **Visible station snapshots**: Moved visible-station and now-playing snapshots into the UI model so renderers do not recompute app selectors or reach into mutable runtime/audio/persistence internals.
 
+### Removed
+*   **UI text facade**: Removed the `src/ui/text.rs` compatibility facade after updating UI modules to use root-level `crate::text` helpers directly.
+
 ### Internal
 *   Retired production use of several `App` overlay/selection helpers after the equivalent read-only behavior moved behind `UiModel`.
 *   Updated UI helper tests to build `UiModel` snapshots where renderer helpers now expect the read model.
+*   Added regression coverage for `UiModel` selector wiring, overlay helpers, command palette visibility, and borrowed station data.
 
 ---
 

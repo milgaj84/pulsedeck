@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn driver_keeps_existing_deadline_for_same_debounce_query() {
         let mut app = test_app();
-        app.input_mode = InputMode::Search;
+        app.ui.input_mode = InputMode::Search;
         app.search.query = "lofi".to_string();
         app.search.status = SearchStatus::Debouncing {
             query: "lofi".to_string(),
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn driver_replaces_deadline_for_new_debounce_query() {
         let mut app = test_app();
-        app.input_mode = InputMode::Search;
+        app.ui.input_mode = InputMode::Search;
         app.search.query = "ambient".to_string();
         app.search.status = SearchStatus::Debouncing {
             query: "ambient".to_string(),
@@ -185,7 +185,7 @@ mod tests {
         driver.drain_metadata_refresh_responses(&mut app);
 
         assert!(matches!(
-            app.notice.current,
+            app.ui.notice.current,
             Some(crate::app::AppNotice::Info(ref message))
                 if message == "Metadata refresh: 0 checked, 0 enriched, 0 unchanged, 0 failed"
         ));

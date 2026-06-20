@@ -327,9 +327,9 @@ mod tests {
         station.tags = vec!["synthwave".to_string(), "night".to_string()];
         station.last_check_ok = Some(true);
         let mut app = test_app_with(station);
-        app.player.playing_url = Some("http://a".to_string());
-        app.player.state = PlaybackState::Playing;
-        app.player.current_track = Some("Artist - Track".to_string());
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.view.current_track = Some("Artist - Track".to_string());
 
         let model = UiModel::from(&app);
         let sections = station_detail_sections(&model);

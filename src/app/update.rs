@@ -4,12 +4,12 @@ use crate::action::Action;
 impl App {
     /// Process an action and update state accordingly.
     pub fn update(&mut self, action: Action) {
-        if self.input_mode == InputMode::CommandPalette {
+        if self.ui.input_mode == InputMode::CommandPalette {
             self.handle_command_palette_action(action);
             return;
         }
 
-        match self.overlays.active {
+        match self.ui.overlays.active {
             ActiveOverlay::Settings if self.show_settings() => {
                 self.handle_settings_action(action);
                 return;
@@ -79,7 +79,7 @@ impl App {
 
     pub(super) fn tick(&mut self) {
         let now = std::time::Instant::now();
-        self.tick_count += 1;
+        self.ui.tick_count += 1;
         self.tick_notice();
         self.poll_audio_status();
         self.update_visualizer();
@@ -94,23 +94,23 @@ impl App {
         }
 
         self.stop_audio_before_quit();
-        self.should_quit = true;
+        self.ui.should_quit = true;
     }
 
     fn next_station(&mut self) {
         let count = self.visible_count();
         if count > 0 {
-            self.nav.selected = (self.nav.selected + 1) % count;
+            self.ui.nav.selected = (self.ui.nav.selected + 1) % count;
         }
     }
 
     fn prev_station(&mut self) {
         let count = self.visible_count();
         if count > 0 {
-            self.nav.selected = if self.nav.selected == 0 {
+            self.ui.nav.selected = if self.ui.nav.selected == 0 {
                 count - 1
             } else {
-                self.nav.selected - 1
+                self.ui.nav.selected - 1
             };
         }
     }

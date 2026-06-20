@@ -149,12 +149,12 @@ impl super::App {
         let now = Instant::now();
         match action {
             Action::SleepTimerIncrease => {
-                self.sleep_timer
+                self.playback.sleep_timer
                     .increase(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
             Action::SleepTimerDecrease => {
-                self.sleep_timer
+                self.playback.sleep_timer
                     .decrease(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
@@ -163,13 +163,13 @@ impl super::App {
                 self.announce_sleep_timer();
             }
             Action::SleepTimerClear => {
-                self.sleep_timer.clear();
+                self.playback.sleep_timer.clear();
                 self.set_info_notice("Sleep timer off");
             }
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),
             Action::Quit => {
                 self.stop_audio_before_quit();
-                self.should_quit = true;
+                self.ui.should_quit = true;
             }
             Action::Tick => self.tick(),
             _ => {
@@ -179,11 +179,11 @@ impl super::App {
     }
 
     fn announce_sleep_timer(&mut self) {
-        if self.sleep_timer.is_waiting_for_playback() {
-            let label = self.sleep_timer.label();
+        if self.playback.sleep_timer.is_waiting_for_playback() {
+            let label = self.playback.sleep_timer.label();
             self.set_info_notice(format!("Sleep timer: {label} when playback starts"));
-        } else if self.sleep_timer.is_armed() {
-            let label = self.sleep_timer.label();
+        } else if self.playback.sleep_timer.is_armed() {
+            let label = self.playback.sleep_timer.label();
             self.set_info_notice(format!("Sleep timer: {label}"));
         } else {
             self.set_info_notice("Sleep timer off");
@@ -192,13 +192,13 @@ impl super::App {
 
     pub(super) fn check_sleep_timer(&mut self, now: Instant) {
         if self.sleep_timer_should_run() {
-            self.sleep_timer.start(now);
+            self.playback.sleep_timer.start(now);
         } else {
-            self.sleep_timer.pause(now);
+            self.playback.sleep_timer.pause(now);
         }
 
-        if self.sleep_timer.expired(now) {
-            self.player.intentional_stop = true;
+        if self.playback.sleep_timer.expired(now) {
+            self.playback.view.intentional_stop = true;
             self.stop_playback();
             self.set_info_notice("Sleep timer ended playback");
         }
@@ -206,15 +206,15 @@ impl super::App {
 
     fn set_sleep_timer_minutes(&mut self, minutes: u32, now: Instant) {
         if self.sleep_timer_should_run() {
-            self.sleep_timer.set_minutes(minutes, now);
+            self.playback.sleep_timer.set_minutes(minutes, now);
         } else {
-            self.sleep_timer.set_minutes_waiting(minutes);
+            self.playback.sleep_timer.set_minutes_waiting(minutes);
         }
     }
 
     fn sleep_timer_should_run(&self) -> bool {
         matches!(
-            self.player.state,
+            self.playback.view.state,
             PlaybackState::Playing | PlaybackState::Connecting | PlaybackState::FadingOut { .. }
         )
     }

@@ -5,14 +5,14 @@ use crate::radio::station_url_matches;
 impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
     pub fn visible_stations(&self) -> Vec<&Station> {
-        if self.input_mode == InputMode::Search {
+        if self.ui.input_mode == InputMode::Search {
             return self.search.results.iter().collect();
         }
 
         if let Some(genre) = self
             .library
             .available_genres
-            .get(self.nav.selected_genre_idx)
+            .get(self.ui.nav.selected_genre_idx)
         {
             if genre == "All" {
                 self.library.stations.iter().collect()
@@ -31,12 +31,12 @@ impl App {
     /// Get the highlighted station from the currently visible list.
     #[cfg(test)]
     pub fn selected_station(&self) -> Option<&Station> {
-        self.visible_stations().get(self.nav.selected).copied()
+        self.visible_stations().get(self.ui.nav.selected).copied()
     }
 
     /// Get the currently playing station, if any.
     pub fn now_playing(&self) -> Option<&Station> {
-        self.player.playing_url.as_ref().and_then(|url| {
+        self.playback.view.playing_url.as_ref().and_then(|url| {
             self.library
                 .stations
                 .iter()
@@ -57,14 +57,14 @@ impl App {
 
     /// Count visible stations without allocating a Vec.
     pub fn visible_count(&self) -> usize {
-        if self.input_mode == InputMode::Search {
+        if self.ui.input_mode == InputMode::Search {
             return self.search.results.len();
         }
 
         if let Some(genre) = self
             .library
             .available_genres
-            .get(self.nav.selected_genre_idx)
+            .get(self.ui.nav.selected_genre_idx)
         {
             if genre == "All" {
                 self.library.stations.len()
@@ -82,13 +82,13 @@ impl App {
 
     /// Try to select the currently playing station in the visible list.
     pub(super) fn select_playing(&mut self) {
-        if let Some(ref url) = self.player.playing_url {
+        if let Some(ref url) = self.playback.view.playing_url {
             if let Some(pos) = self
                 .visible_stations()
                 .iter()
                 .position(|station| station_url_matches(&station.url, url))
             {
-                self.nav.selected = pos;
+                self.ui.nav.selected = pos;
             }
         }
     }
@@ -110,7 +110,7 @@ mod tests {
             station("A", "http://a"),
             station("B", "http://b"),
         ]));
-        app.nav.selected = 1;
+        app.ui.nav.selected = 1;
 
         assert_eq!(
             app.selected_station().map(|s| s.url.as_str()),
@@ -131,7 +131,7 @@ mod tests {
             "A",
             " HTTP://STREAM/ ",
         )]));
-        app.player.playing_url = Some("http://stream".to_string());
+        app.playback.view.playing_url = Some("http://stream".to_string());
 
         assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
     }
@@ -142,10 +142,10 @@ mod tests {
             station("A", "http://a"),
             station("B", " HTTP://STREAM/ "),
         ]));
-        app.player.playing_url = Some("http://stream".to_string());
+        app.playback.view.playing_url = Some("http://stream".to_string());
 
         app.select_playing();
 
-        assert_eq!(app.nav.selected, 1);
+        assert_eq!(app.ui.nav.selected, 1);
     }
 }

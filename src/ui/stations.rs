@@ -87,9 +87,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
             let meta = station_meta_label(&app.input_mode, station);
             let meta_chip = format!(" {} ", meta);
-            let fixed_width = crate::ui::text::visible_len(cursor)
-                + crate::ui::text::visible_len(save_marker)
-                + crate::ui::text::visible_len(&meta_chip)
+            let fixed_width = crate::text::visible_len(cursor)
+                + crate::text::visible_len(save_marker)
+                + crate::text::visible_len(&meta_chip)
                 + 2;
             let name_width = row_width.saturating_sub(fixed_width).max(8);
             let search_query = if app.input_mode == InputMode::Search {
@@ -99,10 +99,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             };
             let name = truncate_station_name(station.name.as_str(), search_query, name_width);
             let padding = row_width.saturating_sub(
-                crate::ui::text::visible_len(cursor)
-                    + crate::ui::text::visible_len(save_marker)
-                    + crate::ui::text::visible_len(&name)
-                    + crate::ui::text::visible_len(&meta_chip),
+                crate::text::visible_len(cursor)
+                    + crate::text::visible_len(save_marker)
+                    + crate::text::visible_len(&name)
+                    + crate::text::visible_len(&meta_chip),
             );
 
             ListItem::new(Line::from(vec![
@@ -322,7 +322,7 @@ fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> String {
 }
 
 fn search_title_label(raw_query: &str) -> String {
-    crate::ui::text::truncate_with_ellipsis(
+    crate::text::truncate_with_ellipsis(
         &crate::radio::StationSearchQuery::parse(raw_query).display_label(),
         32,
     )
@@ -339,12 +339,12 @@ fn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 fn truncate_station_name(value: &str, query: Option<&str>, max_chars: usize) -> String {
     match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => adaptive_search_truncate(value, query, max_chars),
-        None => crate::ui::text::truncate_with_ellipsis(value, max_chars),
+        None => crate::text::truncate_with_ellipsis(value, max_chars),
     }
 }
 
 fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> String {
-    let value_len = crate::ui::text::visible_len(value);
+    let value_len = crate::text::visible_len(value);
     if value_len <= max_chars {
         return value.to_string();
     }
@@ -354,11 +354,11 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     }
 
     let Some(match_start) = find_case_insensitive_char_index(value, query) else {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     };
 
     if match_start < max_chars.saturating_sub(1) {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     }
 
     let available = max_chars.saturating_sub(2);
@@ -366,7 +366,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
         return "…".to_string();
     }
 
-    let query_len = crate::ui::text::visible_len(query).max(1);
+    let query_len = crate::text::visible_len(query).max(1);
     let context_before = available.saturating_sub(query_len) / 2;
     let start = match_start
         .saturating_sub(context_before)
@@ -374,7 +374,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     let end = start + available;
 
     if start == 0 {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     }
 
     if end >= value_len {
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn truncation_keeps_short_names_unchanged() {
         assert_eq!(
-            crate::ui::text::truncate_with_ellipsis("Nightride FM", 20),
+            crate::text::truncate_with_ellipsis("Nightride FM", 20),
             "Nightride FM"
         );
     }
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn truncation_adds_ellipsis_for_long_names() {
         assert_eq!(
-            crate::ui::text::truncate_with_ellipsis("SomaFM Deep Space One", 10),
+            crate::text::truncate_with_ellipsis("SomaFM Deep Space One", 10),
             "SomaFM De…"
         );
     }
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn search_title_explains_preview_and_save_actions() {
         let mut app = App::new(Library::in_memory(vec![]));
-        app.input_mode = InputMode::Search;
+        app.ui.input_mode = InputMode::Search;
         let model = UiModel::from(&app);
 
         let title = station_list_title(&model, 3);

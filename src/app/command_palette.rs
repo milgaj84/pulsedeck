@@ -72,11 +72,11 @@ pub fn filtered_commands(query: &str, app: &App) -> Vec<PaletteCommand> {
 
 fn available_commands(app: &App) -> Vec<PaletteCommand> {
     let mut commands = ALWAYS_AVAILABLE_COMMANDS.to_vec();
-    if app.player.playing_url.is_some() {
+    if app.playback.view.playing_url.is_some() {
         commands.insert(1, PaletteCommand::RetryStream);
     }
     if matches!(
-        app.player.state,
+        app.playback.view.state,
         PlaybackState::Connecting
             | PlaybackState::Playing
             | PlaybackState::Paused
@@ -104,31 +104,31 @@ fn normalize_query(value: &str) -> String {
 
 impl App {
     pub(super) fn open_command_palette(&mut self) {
-        if self.input_mode != InputMode::Normal {
+        if self.ui.input_mode != InputMode::Normal {
             return;
         }
         self.close_any_overlay();
-        self.input_mode = InputMode::CommandPalette;
-        self.command_palette.query.clear();
-        self.command_palette.selected = 0;
+        self.ui.input_mode = InputMode::CommandPalette;
+        self.ui.command_palette.query.clear();
+        self.ui.command_palette.selected = 0;
     }
 
     pub(super) fn close_command_palette(&mut self) {
-        if self.input_mode == InputMode::CommandPalette {
-            self.input_mode = InputMode::Normal;
-            self.command_palette.query.clear();
-            self.command_palette.selected = 0;
+        if self.ui.input_mode == InputMode::CommandPalette {
+            self.ui.input_mode = InputMode::Normal;
+            self.ui.command_palette.query.clear();
+            self.ui.command_palette.selected = 0;
         }
     }
 
     pub(super) fn handle_command_palette_action(&mut self, action: Action) {
         match action {
             Action::CommandPaletteInput(c) => {
-                self.command_palette.query.push(c);
+                self.ui.command_palette.query.push(c);
                 self.clamp_command_palette_selection();
             }
             Action::CommandPaletteBackspace => {
-                self.command_palette.query.pop();
+                self.ui.command_palette.query.pop();
                 self.clamp_command_palette_selection();
             }
             Action::CommandPaletteNext => self.step_command_palette_selection(true),
@@ -144,7 +144,7 @@ impl App {
     fn confirm_command_palette(&mut self) {
         let Some(command) = self
             .command_palette_commands()
-            .get(self.command_palette.selected)
+            .get(self.ui.command_palette.selected)
             .copied()
         else {
             self.set_error_notice("No matching command");
@@ -158,30 +158,30 @@ impl App {
     fn step_command_palette_selection(&mut self, forward: bool) {
         let len = self.command_palette_commands().len();
         if len == 0 {
-            self.command_palette.selected = 0;
+            self.ui.command_palette.selected = 0;
             return;
         }
 
-        self.command_palette.selected = if forward {
-            (self.command_palette.selected + 1) % len
-        } else if self.command_palette.selected == 0 {
+        self.ui.command_palette.selected = if forward {
+            (self.ui.command_palette.selected + 1) % len
+        } else if self.ui.command_palette.selected == 0 {
             len - 1
         } else {
-            self.command_palette.selected - 1
+            self.ui.command_palette.selected - 1
         };
     }
 
     fn clamp_command_palette_selection(&mut self) {
         let len = self.command_palette_commands().len();
         if len == 0 {
-            self.command_palette.selected = 0;
+            self.ui.command_palette.selected = 0;
         } else {
-            self.command_palette.selected = self.command_palette.selected.min(len - 1);
+            self.ui.command_palette.selected = self.ui.command_palette.selected.min(len - 1);
         }
     }
 
     pub fn command_palette_commands(&self) -> Vec<PaletteCommand> {
-        filtered_commands(&self.command_palette.query, self)
+        filtered_commands(&self.ui.command_palette.query, self)
     }
 }
 
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn retry_is_available_when_stream_exists() {
         let mut app = test_app();
-        app.player.playing_url = Some("http://a".to_string());
+        app.playback.view.playing_url = Some("http://a".to_string());
 
         assert_eq!(filtered_commands("retry", &app), vec![PaletteCommand::RetryStream]);
     }
@@ -236,14 +236,14 @@ mod tests {
     #[test]
     fn opens_only_from_normal_mode() {
         let mut app = test_app();
-        app.input_mode = InputMode::Search;
+        app.ui.input_mode = InputMode::Search;
 
         app.open_command_palette();
-        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.ui.input_mode, InputMode::Search);
 
-        app.input_mode = InputMode::Normal;
+        app.ui.input_mode = InputMode::Normal;
         app.open_command_palette();
-        assert_eq!(app.input_mode, InputMode::CommandPalette);
+        assert_eq!(app.ui.input_mode, InputMode::CommandPalette);
     }
 
     #[test]
@@ -255,7 +255,7 @@ mod tests {
 
         app.update(Action::CommandPaletteConfirm);
 
-        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.ui.input_mode, InputMode::Search);
     }
 
     #[test]
@@ -266,7 +266,7 @@ mod tests {
 
         app.update(Action::CommandPaletteClose);
 
-        assert_eq!(app.input_mode, InputMode::Normal);
-        assert!(app.command_palette.query.is_empty());
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert!(app.ui.command_palette.query.is_empty());
     }
 }

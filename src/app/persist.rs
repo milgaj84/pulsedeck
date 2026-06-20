@@ -135,6 +135,10 @@ impl App {
         self.persist.mark_library_dirty();
     }
 
+    pub(super) fn force_flush_persistence(&mut self) {
+        self.flush_persistence();
+    }
+
     pub(super) fn flush_persistence(&mut self) {
         self.flush_persistence_at(Instant::now(), PersistenceFlushMode::Scheduled);
     }
@@ -159,10 +163,10 @@ impl App {
 
         if self.persist.ui_state_dirty {
             let state = super::ui_state::UiState::from_app_values(
-                self.volume,
-                self.muted,
-                self.layout_mode,
-                self.visualizer_mode,
+                self.playback.volume,
+                self.playback.muted,
+                self.ui.layout_mode,
+                self.ui.visualizer_mode,
             );
 
             match state.save() {
