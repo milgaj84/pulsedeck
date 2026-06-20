@@ -1,4 +1,5 @@
-use crate::app::{App, DecoderState, PlaybackState};
+use crate::app::{DecoderState, PlaybackState};
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -7,7 +8,7 @@ use super::theme;
 const MIN_DOCTOR_WIDTH: u16 = 64;
 const MIN_DOCTOR_HEIGHT: u16 = 18;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(72, 72, area);
     frame.render_widget(Clear, popup_area);
 

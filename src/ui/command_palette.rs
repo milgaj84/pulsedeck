@@ -1,4 +1,5 @@
-use crate::app::{command_label, App};
+use crate::app::command_label;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
@@ -8,7 +9,7 @@ const MIN_COMMAND_PALETTE_WIDTH: u16 = 52;
 const MIN_COMMAND_PALETTE_HEIGHT: u16 = 9;
 const MAX_VISIBLE_COMMANDS: usize = 7;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(58, 36, area);
 
     if command_palette_area_is_compact(popup_area) {
@@ -68,7 +69,7 @@ fn render_input(frame: &mut Frame, area: Rect, query: &str) {
     frame.render_widget(Paragraph::new(vec![input]), area);
 }
 
-fn render_commands(frame: &mut Frame, area: Rect, app: &App) {
+fn render_commands(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let commands = app.command_palette_commands();
     let selected = app.command_palette.selected.min(commands.len().saturating_sub(1));
     let visible = commands.iter().take(MAX_VISIBLE_COMMANDS);

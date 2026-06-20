@@ -2,11 +2,12 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs};
 
 use super::theme;
-use crate::app::{App, InputMode};
+use crate::app::InputMode;
+use crate::ui::model::UiModel;
 
 /// Render the station list.
 /// Normal mode: your library. Search mode: API search results.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let visible = app.visible_stations();
 
     // ── Layout Split for normal mode genre folders ────────────────
@@ -140,7 +141,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn should_render_empty_library_onboarding(app: &App, visible_count: usize) -> bool {
+fn should_render_empty_library_onboarding(app: &UiModel<'_>, visible_count: usize) -> bool {
     app.input_mode == InputMode::Normal && visible_count == 0
 }
 
@@ -289,7 +290,7 @@ fn join_non_empty<const N: usize>(parts: [String; N]) -> String {
         .join(" · ")
 }
 
-fn station_list_title(app: &App, visible_count: usize) -> String {
+fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> String {
     if app.input_mode == InputMode::Search {
         if app.search.query.is_empty() {
             " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
@@ -401,6 +402,7 @@ fn find_case_insensitive_char_index(value: &str, query: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
     use crate::favorites::Library;
 
     #[test]
@@ -465,17 +467,19 @@ mod tests {
     #[test]
     fn empty_library_onboarding_only_renders_for_empty_normal_mode() {
         let app = App::new(Library::in_memory(vec![]));
+        let model = UiModel::from(&app);
 
-        assert!(should_render_empty_library_onboarding(&app, 0));
-        assert!(!should_render_empty_library_onboarding(&app, 1));
+        assert!(should_render_empty_library_onboarding(&model, 0));
+        assert!(!should_render_empty_library_onboarding(&model, 1));
     }
 
     #[test]
     fn search_title_explains_preview_and_save_actions() {
         let mut app = App::new(Library::in_memory(vec![]));
         app.input_mode = InputMode::Search;
+        let model = UiModel::from(&app);
 
-        let title = station_list_title(&app, 3);
+        let title = station_list_title(&model, 3);
 
         assert!(title.contains("Space preview"));
         assert!(title.contains("Enter save"));

@@ -1,4 +1,5 @@
-use crate::app::{App, PlaybackState};
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -9,7 +10,7 @@ mod spectrum;
 
 pub(super) use oscilloscope::render_oscilloscope;
 
-fn visualizer_title(app: &App) -> &'static str {
+fn visualizer_title(app: &UiModel<'_>) -> &'static str {
     match app.visualizer_mode {
         0 => " RTA SPECTRUM ",
         1 => " REAL OSC ",
@@ -32,7 +33,7 @@ fn visualizer_amplitude_gain(playback: &PlaybackState, volume: u8) -> f32 {
     }
 }
 
-fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
+fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let width = area.width as usize;
     let height = area.height as usize;
 

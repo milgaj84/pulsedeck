@@ -8,6 +8,19 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.4] - Unreleased
+
+### Changed
+*   **UI read model**: Added `src/ui/model.rs::UiModel` as the read-only rendering snapshot derived from `App`, so TUI modules render from display-facing state instead of depending directly on the full app controller.
+*   **Renderer boundaries**: Kept `ui::draw(frame, &app)` as the public adapter while routing header, controls, search, stations, deck, overlays, command palette, and diagnostics through `UiModel`.
+*   **Visible station snapshots**: Moved visible-station and now-playing snapshots into the UI model so renderers do not recompute app selectors or reach into mutable runtime/audio/persistence internals.
+
+### Internal
+*   Retired production use of several `App` overlay/selection helpers after the equivalent read-only behavior moved behind `UiModel`.
+*   Updated UI helper tests to build `UiModel` snapshots where renderer helpers now expect the read model.
+
+---
+
 ## [0.4.3] - Unreleased
 
 ### Changed

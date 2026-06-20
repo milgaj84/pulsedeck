@@ -29,6 +29,7 @@ impl App {
     }
 
     /// Get the highlighted station from the currently visible list.
+    #[cfg(test)]
     pub fn selected_station(&self) -> Option<&Station> {
         self.visible_stations().get(self.nav.selected).copied()
     }

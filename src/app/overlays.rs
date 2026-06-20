@@ -79,24 +79,23 @@ impl App {
         self.set_overlay(ActiveOverlay::SleepTimer);
     }
 
+    #[cfg(test)]
     pub fn show_help(&self) -> bool {
         self.overlays.active == ActiveOverlay::Help
     }
 
+    #[cfg(test)]
     pub fn show_station_details(&self) -> bool {
         self.overlays.active == ActiveOverlay::StationDetails
     }
 
+    #[cfg(test)]
     pub fn show_recent_tracks(&self) -> bool {
         self.overlays.active == ActiveOverlay::RecentTracks
     }
 
     pub fn show_settings(&self) -> bool {
         self.overlays.active == ActiveOverlay::Settings
-    }
-
-    pub fn show_sleep_timer(&self) -> bool {
-        self.overlays.active == ActiveOverlay::SleepTimer
     }
 
     pub(super) fn cycle_layout(&mut self) {

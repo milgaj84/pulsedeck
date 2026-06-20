@@ -2,7 +2,8 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{App, SearchStatus};
+use crate::app::SearchStatus;
+use crate::ui::model::UiModel;
 use crate::radio::{
     explain_station_match, has_unknown_prefix, prefix_examples_inline, rank_explanation_label,
     SearchField, StationSearchQuery,
@@ -11,7 +12,7 @@ use crate::radio::{
 const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Render the search input bar.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let result_count = app.search.results.len();
     let selected_saved = app
         .search
@@ -67,7 +68,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(search_bar, area);
 }
 
-fn highlighted_result_explanation(app: &App) -> Option<String> {
+fn highlighted_result_explanation(app: &UiModel<'_>) -> Option<String> {
     let station = app.search.results.get(app.nav.selected)?;
     let query = StationSearchQuery::parse(&app.search.query);
     let is_saved = app.library.contains_station(station);

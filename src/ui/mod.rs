@@ -4,6 +4,7 @@ pub mod critical;
 pub mod deck;
 pub mod header;
 pub mod help;
+pub mod model;
 pub mod playback_doctor;
 pub mod recent_tracks;
 pub mod search;
@@ -18,12 +19,18 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{ActiveOverlay, App, InputMode, LayoutMode};
+use model::UiModel;
 
 const MIN_REQUIRED_WIDTH: u16 = 80;
 const MIN_REQUIRED_HEIGHT: u16 = 24;
 
 /// Render the entire UI. Root layout composition.
 pub fn draw(frame: &mut Frame, app: &App) {
+    let model = UiModel::from(app);
+    draw_model(frame, &model);
+}
+
+fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
     let size = frame.area();
 
     // Fill background with the active theme before any layout work.

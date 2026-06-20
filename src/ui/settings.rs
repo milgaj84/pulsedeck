@@ -1,14 +1,15 @@
 use super::critical;
 use super::theme;
 use super::theme::ThemeName;
-use crate::app::{App, SettingRow};
+use crate::app::SettingRow;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 const MIN_SETTINGS_WIDTH: u16 = 60;
 const MIN_SETTINGS_HEIGHT: u16 = 18;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(54, 64, area);
 
     if settings_area_is_compact(popup_area) {
@@ -69,7 +70,7 @@ fn settings_area_is_compact(area: Rect) -> bool {
     area.width < MIN_SETTINGS_WIDTH || area.height < MIN_SETTINGS_HEIGHT
 }
 
-fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow) {
+fn render_setting_row(frame: &mut Frame, area: Rect, app: &UiModel<'_>, row: SettingRow) {
     let is_selected = app.overlays.selected_setting_idx == row.index();
     let active_style = Style::default()
         .fg(theme::accent_secondary())
@@ -97,7 +98,7 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
     frame.render_widget(paragraph, area);
 }
 
-fn render_selected_description(frame: &mut Frame, area: Rect, app: &App) {
+fn render_selected_description(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let row = SettingRow::from_index(app.overlays.selected_setting_idx)
         .unwrap_or(SettingRow::Notifications);
     let paragraph = Paragraph::new(vec![
@@ -137,7 +138,7 @@ fn setting_description(row: SettingRow) -> &'static str {
     }
 }
 
-fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
+fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
     match row {
         SettingRow::Notifications => checkbox_row(
             app.library.settings.notifications_enabled,

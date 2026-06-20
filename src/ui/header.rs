@@ -2,10 +2,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::theme;
-use crate::app::{App, PlaybackState};
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
 
 /// Render the header area: PulseDeck logo + now-playing info.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -33,7 +34,7 @@ fn render_logo(frame: &mut Frame, area: Rect) {
 }
 
 /// Now-playing status on the right side of the header.
-fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) {
+fn render_now_playing(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let content = match (&app.player.state, app.now_playing()) {
         (PlaybackState::Playing, Some(station)) => Line::from(vec![
             Span::styled("▶ ", theme::playing()),

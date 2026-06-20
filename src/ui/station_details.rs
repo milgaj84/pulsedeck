@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -19,7 +19,7 @@ struct DetailRow {
     value: String,
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(62, 48, area);
 
     if details_area_is_compact(popup_area) {
@@ -67,7 +67,7 @@ fn details_area_is_compact(area: Rect) -> bool {
     area.width < MIN_DETAILS_WIDTH || area.height < MIN_DETAILS_HEIGHT
 }
 
-fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
+fn station_detail_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
     if app.selected_station().is_none() {
         return vec![
             Line::from(Span::styled("No station selected", theme::title())),
@@ -84,7 +84,7 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
     section_lines(station_detail_sections(app))
 }
 
-fn station_detail_sections(app: &App) -> Vec<DetailSection> {
+fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
     let Some(station) = app.selected_station() else {
         return Vec::new();
     };
@@ -331,7 +331,8 @@ mod tests {
         app.player.state = PlaybackState::Playing;
         app.player.current_track = Some("Artist - Track".to_string());
 
-        let sections = station_detail_sections(&app);
+        let model = UiModel::from(&app);
+        let sections = station_detail_sections(&model);
 
         assert_eq!(
             sections.iter().map(|section| section.title).collect::<Vec<_>>(),
@@ -352,8 +353,9 @@ mod tests {
         station.bitrate = 0;
         station.country.clear();
         let app = test_app_with(station);
+        let model = UiModel::from(&app);
 
-        let sections = station_detail_sections(&app);
+        let sections = station_detail_sections(&model);
 
         assert!(sections[1]
             .rows

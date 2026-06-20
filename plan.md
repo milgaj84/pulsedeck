@@ -1,1298 +1,1921 @@
-# PulseDeck 0.4.3 Runtime Separation Plan
+# PulseDeck 0.4.4 UI Read-Model Plan
 
-Release theme: **Constructor Detox, Runtime Wiring, and Testable Background Work**.
+Release theme: **Render From a Window, Not From the Whole House**.
 
-0.4.1 stabilized the active playback path. 0.4.2 removed persistence and search-prefix duplication. 0.4.3 should continue the same maintenance thread by separating pure app state from runtime side effects and moving background task orchestration out of `src/main.rs`.
+0.4.1 stabilized the active audio seam. 0.4.2 removed persistence and search-prefix duplication. 0.4.3 split startup/runtime orchestration away from the terminal loop. 0.4.4 should continue the cleanup by introducing a UI read model so render code no longer needs direct access to the full `App` object.
 
-This release is deliberately structural. It should make PulseDeck easier to test and harder to break, without changing decoder behavior, reconnect behavior, search ranking, UI layout, keybindings, or library file format.
+This is a structural UI release. It must not change visible layout, keybindings, search semantics, playback behavior, station identity, persistence, or audio decoding. The intended user-visible result is boring: PulseDeck should look and behave the same. The intended developer-visible result is important: render modules read a curated `UiModel` instead of rummaging through all of `App`.
 
 ---
 
 ## Current baseline
 
-Important current facts from the 0.4.2 tree:
-
-```text
-src/app/lifecycle.rs::App::new currently:
-- loads UI state from disk
-- creates the visualizer sample buffer
-- spawns AudioEngine
-- loads History from disk
-- builds PlaybackDiagnostics
-- constructs App
-- sends output-device, metadata, and volume commands
-- aggregates startup warnings
-- optionally autoplays the last stream
-
-src/main.rs::main currently:
-- handles CLI short-circuit
-- loads Library
-- applies saved theme
-- constructs App
-- initializes Ratatui
-- owns search channels
-- owns metadata refresh channels
-- owns search debounce timing
-- spawns Radio Browser search tasks
-- spawns library metadata refresh tasks
-- drains worker responses
-- owns the terminal frame loop
-```
-
-Validation before writing this plan:
-
-```text
-cargo check                         passed
-cargo test                          passed, 321 tests
-cargo clippy --all-targets --all-features passed
-```
-
-0.4.3 should preserve that baseline and add tests around the new seams.
-
----
-
-## Non-negotiable rules for 0.4.3
-
-### Rule 1: Do not change audio semantics
-
-The active playback path remains:
-
-```text
-src/app/playback.rs::play_selected
-  -> src/app/playback.rs::send_audio_command
-  -> src/audio.rs::AudioEngine::send
-  -> src/audio/engine_loop.rs::audio_loop
-  -> src/audio/engine_loop.rs::AudioLoopState
-  -> src/audio/session.rs::connect_and_decode
-  -> src/audio/session.rs::try_connect_and_decode_once
-  -> src/audio/stream_reader.rs::StreamReader
-  -> rodio::Sink
-```
-
-0.4.3 may change how the audio engine is injected into `App`, but it must not change:
-
-```text
-- AudioCommand variants
-- AudioStatus variants
-- Decoder::new_mp3 usage
-- StreamReader behavior
-- fade timing
-- reconnect limits
-- hardware output retry count
-- output device switching semantics
-```
-
-### Rule 2: Keep `App::new` as the public convenience constructor
-
-Users of the app code should still be able to call:
+Current UI entrypoint:
 
 ```rust
-let app = App::new(library);
-```
-
-But internally `App::new` should delegate to a testable constructor that accepts already-loaded dependencies.
-
-### Rule 3: Avoid fake trait kingdoms in 0.4.3
-
-A full dependency-inversion pass can wait. The immediate win is to introduce concrete `AppParts` and `AppDriver` seams. Do not create a giant `Services` trait or broad trait-object framework.
-
-Good 0.4.3 abstractions:
-
-```text
-AppParts
-AppRuntimeLoader
-StartupWarnings
-AppDriver
-SearchWorkerResponse
-MetadataRefreshResponse
-```
-
-Bad 0.4.3 abstractions:
-
-```text
-trait EverythingService
-Box<dyn AppWorld>
-generic lifetime-heavy App<'a, TAudio, THistory, TUiState, TClock, TSearch, TMetadata>
-```
-
-### Rule 4: Main loop extraction must be behavior-preserving
-
-`src/main.rs::main` can become smaller, but the frame loop order must remain effectively the same:
-
-```text
-1. draw UI
-2. poll input or tick
-3. update app
-4. run search debounce/background task driver
-5. drain search responses
-6. start metadata refresh if requested
-7. drain metadata refresh responses
-8. break on app.should_quit
-```
-
-Changing this order can create subtle UX regressions, especially for search debounce, stale search responses, notices, and quit handling.
-
-### Rule 5: Tests first where possible
-
-Prefer tests around pure helpers and driver state. For anything involving real terminal rendering or live audio, keep the change mechanical and verify with `cargo check`, `cargo test`, and a manual smoke checklist.
-
----
-
-# Fix A: Split `App::new` into runtime loading and pure state construction
-
-## Goal
-
-Make `App` construction testable without always touching disk and spawning the audio thread.
-
-`App::new(library)` should remain as the ergonomic production constructor, but the actual state assembly should move into `App::from_parts(parts)`.
-
-## Files and symbols
-
-Primary files:
-
-```text
-src/app/lifecycle.rs
-src/app.rs
-src/audio.rs
-src/history.rs
-src/app/ui_state.rs
-```
-
-Primary symbols:
-
-```text
-src/app/lifecycle.rs::App::new
-src/app/lifecycle.rs::App::from_parts
-src/app/lifecycle.rs::AppParts
-src/app/lifecycle.rs::StartupWarnings
-src/audio.rs::AudioEngine
-src/app/ui_state.rs::UiState
-src/history.rs::History
-```
-
-## Current problem
-
-`src/app/lifecycle.rs::App::new` is doing construction and runtime side effects in one function:
-
-```rust
-pub fn new(library: Library) -> Self {
-    let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
-    let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
-    let audio = AudioEngine::spawn(sample_buffer.clone());
-    let (history, history_warning) = crate::history::History::load_with_warning();
-    // builds diagnostics
-    // constructs App
-    // syncs audio settings
-    // aggregates warnings
-    // autoplays last station
-    app
-}
-```
-
-This makes tests pay for runtime side effects even when they only need state transitions. It also makes startup behavior harder to reason about because loading, construction, sync, warning display, and autoplay all happen inside one constructor.
-
-## Desired shape
-
-Add a concrete `AppParts` struct in `src/app/lifecycle.rs`:
-
-```rust
-pub(crate) struct AppParts {
-    pub library: Library,
-    pub ui_state: super::ui_state::UiState,
-    pub ui_state_warning: Option<String>,
-    pub history: crate::history::History,
-    pub history_warning: Option<String>,
-    pub audio: AudioEngine,
-    pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-}
-```
-
-Add a production loader:
-
-```rust
-impl AppParts {
-    pub(crate) fn load(library: Library) -> Self {
-        let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
-        let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
-        let audio = AudioEngine::spawn(sample_buffer.clone());
-        let (history, history_warning) = crate::history::History::load_with_warning();
-
-        Self {
-            library,
-            ui_state,
-            ui_state_warning,
-            history,
-            history_warning,
-            audio,
-            sample_buffer,
-        }
-    }
-}
-```
-
-Then shrink `App::new`:
-
-```rust
-impl App {
-    pub fn new(library: Library) -> Self {
-        Self::from_parts(AppParts::load(library))
-    }
-}
-```
-
-Add the pure constructor:
-
-```rust
-impl App {
-    pub(crate) fn from_parts(parts: AppParts) -> Self {
-        let diagnostics_output_device = crate::audio::output_device_display_name(
-            parts.library.settings.output_device_name.as_deref(),
-        );
-        let diagnostics_metadata_enabled = parts.library.settings.stream_metadata_enabled;
-
-        let mut app = Self {
-            library: parts.library,
-            nav: Navigation::default(),
-            search: SearchState::default(),
-            command_palette: CommandPaletteState::default(),
-            player: PlaybackView::default(),
-            volume: parts.ui_state.volume(),
-            muted: parts.ui_state.muted(),
-            should_quit: false,
-            notice: NoticeState::default(),
-            input_mode: InputMode::Normal,
-            tick_count: 0,
-            layout_mode: parts.ui_state.layout_mode(),
-            overlays: Overlays::default(),
-            song_history: VecDeque::new(),
-            undo_history: VecDeque::new(),
-            reconnect: Reconnect::default(),
-            diagnostics: PlaybackDiagnostics {
-                output_device: diagnostics_output_device,
-                metadata_enabled: diagnostics_metadata_enabled,
-                reconnect_limit: 3,
-                ..PlaybackDiagnostics::default()
-            },
-            sleep_timer: SleepTimer::default(),
-            history: parts.history,
-            metadata_refresh_pending: false,
-            metadata_refresh_running: false,
-            persist: persist::PersistFlags::default(),
-            audio: parts.audio,
-            sample_buffer: parts.sample_buffer,
-            visualizer_mode: parts.ui_state.visualizer_mode(),
-            visualizer_peaks: Vec::new(),
-        };
-
-        app.sync_startup_audio_settings();
-        app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
-        app.apply_startup_autoplay();
-        app
-    }
-}
-```
-
-## Extract startup helpers
-
-### `sync_startup_audio_settings`
-
-Current lines in `App::new`:
-
-```rust
-app.sync_output_device();
-app.sync_stream_metadata();
-app.sync_volume();
-```
-
-Move to:
-
-```rust
-impl App {
-    fn sync_startup_audio_settings(&mut self) {
-        self.sync_output_device();
-        self.sync_stream_metadata();
-        self.sync_volume();
-    }
-}
-```
-
-Keep this private. It is startup glue, not a public API.
-
-### `apply_startup_warnings`
-
-Current warning logic:
-
-```rust
-let mut startup_warnings = app.library.load_warnings.clone();
-if let Some(warning) = ui_state_warning {
-    startup_warnings.push(warning);
-}
-if let Some(warning) = history_warning {
-    startup_warnings.push(warning);
-}
-
-match startup_warnings.len() {
-    0 => {}
-    1 => app.set_error_notice(startup_warnings.remove(0)),
-    count => app.set_error_notice(format!(
-        "{count} config files had load warnings; using safe defaults where needed"
-    )),
-}
-```
-
-Move to:
-
-```rust
-impl App {
-    fn apply_startup_warnings(
-        &mut self,
-        ui_state_warning: Option<String>,
-        history_warning: Option<String>,
-    ) {
-        let mut startup_warnings = self.library.load_warnings.clone();
-        if let Some(warning) = ui_state_warning {
-            startup_warnings.push(warning);
-        }
-        if let Some(warning) = history_warning {
-            startup_warnings.push(warning);
-        }
-
-        match startup_warnings.len() {
-            0 => {}
-            1 => self.set_error_notice(startup_warnings.remove(0)),
-            count => self.set_error_notice(format!(
-                "{count} config files had load warnings; using safe defaults where needed"
-            )),
-        }
-    }
-}
-```
-
-### `apply_startup_autoplay`
-
-Current autoplay logic:
-
-```rust
-if app.library.settings.autoplay_last {
-    if let Some(url) = app.library.settings.last_played_url.clone() {
-        if let Some(pos) = last_played_station_position(&app.library.stations, &url) {
-            app.nav.selected = pos;
-        }
-        app.player.playing_url = Some(url.clone());
-        app.player.state = PlaybackState::Connecting;
-        if app.send_audio_command(AudioCommand::Play(url)) {
-            app.sync_volume();
-        }
-    }
-}
-```
-
-Move to:
-
-```rust
-impl App {
-    fn apply_startup_autoplay(&mut self) {
-        if !self.library.settings.autoplay_last {
-            return;
-        }
-
-        let Some(url) = self.library.settings.last_played_url.clone() else {
-            return;
-        };
-
-        if let Some(pos) = last_played_station_position(&self.library.stations, &url) {
-            self.nav.selected = pos;
-        }
-
-        self.player.playing_url = Some(url.clone());
-        self.player.state = PlaybackState::Connecting;
-        if self.send_audio_command(AudioCommand::Play(url)) {
-            self.sync_volume();
-        }
-    }
-}
-```
-
-## Test support
-
-Add a test-only constructor for connected audio without spawning a thread, if needed.
-
-Current `src/audio.rs` already has:
-
-```rust
-#[cfg(test)]
-impl AudioEngine {
-    pub fn disconnected_for_test() -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
-        drop(cmd_rx);
-        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
-        Self { cmd_tx, status_rx }
-    }
-}
-```
-
-Add a connected inert engine for tests that need sends to succeed but no real audio thread:
-
-```rust
-#[cfg(test)]
-impl AudioEngine {
-    pub fn connected_for_test() -> Self {
-        let (cmd_tx, _cmd_rx) = mpsc::channel::<AudioCommand>();
-        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
-        Self { cmd_tx, status_rx }
-    }
-}
-```
-
-Important pitfall: `_cmd_rx` must stay alive inside the returned `AudioEngine` if sends should succeed. The snippet above drops `_cmd_rx` at function return, so it is wrong for a connected engine.
-
-Correct shape requires keeping the receiver alive. Use a test-only field or wrapper only if necessary. Prefer avoiding this unless tests need successful sends.
-
-Better 0.4.3 option: use `AudioEngine::spawn` in existing broad tests, and only use `disconnected_for_test` for failure tests. Do not contort production `AudioEngine` just for ideal test purity in this release.
-
-## Required tests
-
-Add tests in `src/app/lifecycle.rs` where private helpers are visible.
-
-### Pure constructor uses injected state
-
-```rust
-#[test]
-fn from_parts_uses_loaded_ui_state_and_history_without_loading_runtime_files() {
-    let mut ui_state = super::ui_state::UiState::default();
-    ui_state.volume = Some(37);
-    ui_state.muted = Some(true);
-    ui_state.visualizer_mode = Some(2);
-
-    let app = App::from_parts(AppParts {
-        library: Library::in_memory(vec![]),
-        ui_state,
-        ui_state_warning: None,
-        history: crate::history::History::default(),
-        history_warning: None,
-        audio: AudioEngine::disconnected_for_test(),
-        sample_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(4096))),
-    });
-
-    assert_eq!(app.volume, 37);
-    assert!(app.muted);
-    assert_eq!(app.visualizer_mode, 2);
-}
-```
-
-Adjust fields based on the actual `UiState` API. If fields are private, build using existing constructors or add a small `#[cfg(test)]` helper in `ui_state.rs`.
-
-### Startup warnings aggregate safely
-
-```rust
-#[test]
-fn from_parts_shows_single_startup_warning_verbatim() {
-    let mut library = Library::in_memory(vec![]);
-    library.load_warnings.push("bad library".to_string());
-
-    let app = App::from_parts(test_parts(library)
-        .with_ui_state_warning(None)
-        .with_history_warning(None));
-
-    assert!(matches!(
-        app.notice.current,
-        Some(AppNotice::Error(ref message)) if message == "bad library"
-    ));
-}
-```
-
-### Multiple startup warnings use summary copy
-
-```rust
-#[test]
-fn from_parts_summarizes_multiple_startup_warnings() {
-    let mut parts = test_parts(Library::in_memory(vec![]));
-    parts.ui_state_warning = Some("bad ui".to_string());
-    parts.history_warning = Some("bad history".to_string());
-
-    let app = App::from_parts(parts);
-
-    assert!(matches!(
-        app.notice.current,
-        Some(AppNotice::Error(ref message))
-            if message.contains("2 config files had load warnings")
-    ));
-}
-```
-
-### Autoplay selects normalized last-played station
-
-Existing tests cover `last_played_station_position`. Add a higher-level constructor test only if it does not require a successful audio send.
-
-```rust
-#[test]
-fn from_parts_autoplay_sets_selected_station_and_error_when_audio_engine_is_dead() {
-    let mut library = Library::in_memory(vec![Station::basic(
-        "Saved",
-        "HTTP://STREAM/",
-        "Radio",
-        "US",
-        128,
-    )]);
-    library.settings.autoplay_last = true;
-    library.settings.last_played_url = Some("http://stream".to_string());
-
-    let app = App::from_parts(test_parts(library));
-
-    assert_eq!(app.nav.selected, 0);
-    assert_eq!(app.player.playing_url.as_deref(), Some("http://stream"));
-    assert!(matches!(app.player.state, PlaybackState::Error(_)));
-}
-```
-
-This uses `AudioEngine::disconnected_for_test`, so the test proves failure is visible without real audio.
-
-## Pitfalls
-
-### Pitfall: accidentally changing startup audio command order
-
-Keep the order:
-
-```text
-1. sync output device
-2. sync stream metadata
-3. sync volume
-4. process warnings
-5. autoplay if enabled
-6. sync volume after autoplay send succeeds
-```
-
-If you change this order, output-device and metadata settings can land after playback starts, which may change real behavior.
-
-### Pitfall: tests that spawn audio threads forever
-
-Most existing tests call `App::new`, which spawns an audio thread. 0.4.3 should reduce that over time, but do not try to fix every test in one pass. Start by making new tests use `App::from_parts`.
-
-### Pitfall: making `AppParts` public API
-
-Use `pub(crate)`, not `pub`. This is internal wiring, not a stable API.
-
-### Pitfall: hiding startup warnings behind autoplay errors
-
-If autoplay fails because the test uses `AudioEngine::disconnected_for_test`, it will set an audio error notice after startup warnings. That means warning tests should disable autoplay. Autoplay tests should not assert startup warning notices.
-
-## Definition of done for Fix A
-
-```text
-[ ] App::new delegates to App::from_parts(AppParts::load(library)).
-[ ] AppParts exists and owns loaded UI state, history, audio, and sample buffer.
-[ ] App::from_parts performs pure state assembly from injected parts.
-[ ] Startup warning logic is extracted and tested.
-[ ] Startup autoplay logic is extracted and tested.
-[ ] Existing App::new callers still compile.
-[ ] New tests can construct App without config/history loading.
-```
-
----
-
-# Fix B: Extract background search and metadata task orchestration from `main.rs`
-
-## Goal
-
-Make `src/main.rs::main` a small terminal shell instead of the owner of all background work.
-
-The new object should own:
-
-```text
-- search debounce state
-- search response channel
-- metadata refresh response channel
-- spawning search tasks
-- spawning metadata refresh tasks
-- draining responses into App
-```
-
-It should not own:
-
-```text
-- terminal initialization
-- drawing
-- keyboard polling
-- app update semantics
-- audio playback internals
-```
-
-## Files and symbols
-
-Primary files:
-
-```text
-src/main.rs
-new src/runtime.rs or src/app_driver.rs
-src/app/search.rs
-src/app/library.rs
-src/radio.rs
-```
-
-Recommended new file:
-
-```text
-src/runtime.rs
-```
-
-Recommended new symbols:
-
-```text
-src/runtime.rs::AppDriver
-src/runtime.rs::SearchWorkerResponse
-src/runtime.rs::MetadataRefreshWorkerResponse
-src/runtime.rs::SEARCH_DEBOUNCE
-src/runtime.rs::AppDriver::new
-src/runtime.rs::AppDriver::tick
-src/runtime.rs::AppDriver::update_search_debounce
-src/runtime.rs::AppDriver::spawn_ready_search
-src/runtime.rs::AppDriver::drain_search_responses
-src/runtime.rs::AppDriver::spawn_metadata_refresh_if_requested
-src/runtime.rs::AppDriver::drain_metadata_refresh_responses
-```
-
-## Current problem
-
-`src/main.rs::main` currently has the complete background runtime inline:
-
-```rust
-let (search_tx, mut search_rx) =
-    tokio::sync::mpsc::unbounded_channel::<(String, Result<Vec<radio::Station>, String>)>();
-let (metadata_tx, mut metadata_rx) =
-    tokio::sync::mpsc::unbounded_channel::<Result<(usize, Vec<radio::Station>, usize), String>>();
-let tick_rate = Duration::from_millis(66);
-let mut search_debounce: Option<(String, Instant)> = None;
-```
-
-Then inside the frame loop it manages debounce, spawns tasks, and drains responses. This will grow every time PulseDeck adds background work.
-
-## Desired design
-
-Add a runtime module declaration:
-
-```rust
-// src/main.rs
-mod runtime;
-```
-
-Move debounce constant from `main.rs` into `runtime.rs`:
-
-```rust
-// src/runtime.rs
-use std::time::{Duration, Instant};
-
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
-```
-
-Add response aliases:
-
-```rust
-// src/runtime.rs
-use crate::{app::App, radio};
-
-type SearchWorkerResponse = (String, Result<Vec<radio::Station>, String>);
-type MetadataRefreshWorkerResponse = Result<(usize, Vec<radio::Station>, usize), String>;
-```
-
-Define the driver:
-
-```rust
-pub struct AppDriver {
-    search_tx: tokio::sync::mpsc::UnboundedSender<SearchWorkerResponse>,
-    search_rx: tokio::sync::mpsc::UnboundedReceiver<SearchWorkerResponse>,
-    metadata_tx: tokio::sync::mpsc::UnboundedSender<MetadataRefreshWorkerResponse>,
-    metadata_rx: tokio::sync::mpsc::UnboundedReceiver<MetadataRefreshWorkerResponse>,
-    search_debounce: Option<(String, Instant)>,
-}
-
-impl AppDriver {
-    pub fn new() -> Self {
-        let (search_tx, search_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (metadata_tx, metadata_rx) = tokio::sync::mpsc::unbounded_channel();
-        Self {
-            search_tx,
-            search_rx,
-            metadata_tx,
-            metadata_rx,
-            search_debounce: None,
-        }
-    }
-
-    pub fn tick(&mut self, app: &mut App) {
-        self.update_search_debounce(app);
-        self.spawn_ready_search(app);
-        self.drain_search_responses(app);
-        self.spawn_metadata_refresh_if_requested(app);
-        self.drain_metadata_refresh_responses(app);
-    }
-}
-```
-
-Then `src/main.rs::main` becomes:
-
-```rust
-let mut driver = runtime::AppDriver::new();
-let tick_rate = Duration::from_millis(66);
-
-loop {
-    terminal.draw(|frame| ui::draw(frame, &app))?;
-
-    if let Some(action) = event::poll_action(tick_rate, &app.input_mode) {
-        app.update(action);
-    } else {
-        app.update(action::Action::Tick);
-    }
-
-    driver.tick(&mut app);
-
-    if app.should_quit {
-        break;
-    }
-}
-```
-
-## Method details
-
-### `update_search_debounce`
-
-Move current logic mechanically:
-
-```rust
-fn update_search_debounce(&mut self, app: &App) {
-    if let Some(query) = app.current_debounce_query().map(str::to_string) {
-        match &self.search_debounce {
-            Some((pending_query, _deadline)) if pending_query == &query => {}
-            _ => {
-                self.search_debounce = Some((query, Instant::now() + SEARCH_DEBOUNCE));
-            }
-        }
-    } else {
-        self.search_debounce = None;
-    }
-}
-```
-
-Pitfall: do not use `app.search.query` directly. Use the public `App::current_debounce_query` helper because it encodes status semantics.
-
-### `spawn_ready_search`
-
-Move current logic mechanically:
-
-```rust
-fn spawn_ready_search(&mut self, app: &mut App) {
-    let Some((query, deadline)) = self.search_debounce.as_ref() else {
-        return;
-    };
-
-    if Instant::now() < *deadline {
-        return;
-    }
-
-    let query = query.clone();
-    self.search_debounce = None;
-
-    if app.mark_search_started(&query) {
-        let tx = self.search_tx.clone();
-        tokio::spawn(async move {
-            let result = radio::search_stations(&query)
-                .await
-                .map_err(|err| err.to_string());
-            let _ = tx.send((query, result));
-        });
-    }
-}
-```
-
-Pitfall: `mark_search_started` must be called before spawning the task. If the app has left search mode or the query changed, do not spawn.
-
-### `drain_search_responses`
-
-```rust
-fn drain_search_responses(&mut self, app: &mut App) {
-    while let Ok((query, result)) = self.search_rx.try_recv() {
-        app.apply_search_response(query, result);
-    }
-}
-```
-
-Pitfall: keep draining all available responses, not just one. Stale response handling already lives in `App::apply_search_response`.
-
-### `spawn_metadata_refresh_if_requested`
-
-```rust
-fn spawn_metadata_refresh_if_requested(&mut self, app: &mut App) {
-    let Some(stations) = app.take_metadata_refresh_request() else {
-        return;
-    };
-
-    let tx = self.metadata_tx.clone();
-    tokio::spawn(async move {
-        let checked = stations.len();
-        let mut matches = Vec::new();
-        let mut failed = 0;
-
-        for station in stations {
-            match radio::lookup_station_metadata(&station).await {
-                Ok(Some(metadata)) => matches.push(metadata),
-                Ok(None) => {}
-                Err(_) => failed += 1,
-            }
-        }
-
-        let _ = tx.send(Ok((checked, matches, failed)));
-    });
-}
-```
-
-Pitfall: keep `checked = stations.len()` before consuming the vector.
-
-### `drain_metadata_refresh_responses`
-
-```rust
-fn drain_metadata_refresh_responses(&mut self, app: &mut App) {
-    while let Ok(result) = self.metadata_rx.try_recv() {
-        app.apply_metadata_refresh_response(result);
-    }
-}
-```
-
-## Optional testability hook
-
-Because `AppDriver` uses `Instant::now`, testing debounce timing is awkward. Do not overengineer a clock trait yet. Instead, add a narrow constructor for tests if needed:
-
-```rust
-#[cfg(test)]
-impl AppDriver {
-    fn with_search_debounce_for_test(query: impl Into<String>, deadline: Instant) -> Self {
-        let mut driver = Self::new();
-        driver.search_debounce = Some((query.into(), deadline));
-        driver
-    }
-}
-```
-
-Then test pure state transitions where possible.
-
-## Required tests
-
-### Search debounce resets when app has no debounce query
-
-```rust
-#[test]
-fn driver_clears_search_debounce_when_app_is_not_debouncing() {
-    let mut driver = AppDriver::with_search_debounce_for_test(
-        "lofi",
-        Instant::now() + Duration::from_secs(1),
-    );
-    let app = test_app();
-
-    driver.update_search_debounce(&app);
-
-    assert!(driver.search_debounce.is_none());
-}
-```
-
-This requires the test module to access private driver fields. Put tests in `src/runtime.rs`.
-
-### Search debounce keeps same pending query deadline
-
-```rust
-#[test]
-fn driver_keeps_existing_deadline_for_same_debounce_query() {
-    let mut app = test_app_in_search_with_debouncing_query("lofi");
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let mut driver = AppDriver::with_search_debounce_for_test("lofi", deadline);
-
-    driver.update_search_debounce(&app);
-
-    assert_eq!(driver.search_debounce.as_ref().map(|(_, d)| *d), Some(deadline));
-}
-```
-
-If building `test_app_in_search_with_debouncing_query` needs private access, either put a small `#[cfg(test)]` helper in `src/app/search.rs` or test through `app.update(Action::EnterSearch)` and `app.update(Action::SearchInput(...))`.
-
-### Metadata refresh response drain clears running state
-
-This can be tested by sending directly into `metadata_tx`:
-
-```rust
-#[test]
-fn driver_applies_metadata_refresh_responses() {
-    let mut driver = AppDriver::new();
-    let mut app = test_app();
-    driver
-        .metadata_tx
-        .send(Ok((0, Vec::new(), 0)))
-        .unwrap();
-
-    driver.drain_metadata_refresh_responses(&mut app);
-
-    // Assert through visible notice copy or public state if available.
-}
-```
-
-If `metadata_refresh_running` remains private and no user-visible assertion is easy, skip this micro-test. The app-level metadata refresh tests already cover response application.
-
-## Main loop after extraction
-
-`src/main.rs` should shrink to roughly:
-
-```rust
-mod runtime;
-
-use anyhow::Result;
-use std::time::Duration;
-
-const TICK_RATE: Duration = Duration::from_millis(66);
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    if let cli::CliOutcome::Handled = cli::run(std::env::args())? {
-        return Ok(());
-    }
-
-    let library = Library::load(fallback_stations());
-    let saved_theme = ui::theme::ThemeName::from_key(&library.settings.theme);
-    ui::theme::set_active(saved_theme);
-
-    let mut app = App::new(library);
-    let mut driver = runtime::AppDriver::new();
-    let mut terminal = ratatui::init();
-    let _terminal_restore = TerminalRestoreGuard;
-
-    loop {
-        terminal.draw(|frame| ui::draw(frame, &app))?;
-
-        if let Some(action) = event::poll_action(TICK_RATE, &app.input_mode) {
-            app.update(action);
-        } else {
-            app.update(action::Action::Tick);
-        }
-
-        driver.tick(&mut app);
-
-        if app.should_quit {
-            break;
-        }
-    }
-
-    Ok(())
-}
-```
-
-## Pitfalls
-
-### Pitfall: spawning duplicate searches
-
-If `search_debounce` is not cleared before `mark_search_started`, the next tick may spawn the same query again. Preserve this ordering:
-
-```text
-clone query
-clear self.search_debounce
-call app.mark_search_started
-spawn only if true
-```
-
-### Pitfall: stale responses are normal
-
-Do not try to filter stale responses in `AppDriver`. `App::apply_search_response` intentionally handles stale responses and sets user-facing state.
-
-### Pitfall: metadata refresh task has no cancellation
-
-This is current behavior. Do not add cancellation in 0.4.3 unless a separate design exists. The task loops through cloned stations and reports a summary when done.
-
-### Pitfall: `tokio::spawn` requires runtime context
-
-`AppDriver::tick` is called from `#[tokio::main]`, so `tokio::spawn` is valid. Do not call `AppDriver::tick` from non-Tokio tests that force spawn paths unless using `#[tokio::test]`.
-
-## Definition of done for Fix B
-
-```text
-[ ] src/runtime.rs exists.
-[ ] AppDriver owns search and metadata channels.
-[ ] SEARCH_DEBOUNCE moves out of main.rs.
-[ ] main.rs no longer owns search_debounce or worker channels.
-[ ] main.rs frame loop order remains draw, input/tick, driver tick, quit check.
-[ ] Existing search and metadata tests still pass.
-[ ] Any new runtime tests avoid live network calls.
-```
-
----
-
-# Fix C: Introduce focused startup/runtime constants and helpers
-
-## Goal
-
-Name the remaining magic runtime values and keep time behavior easy to inspect.
-
-## Files and symbols
-
-```text
-src/main.rs::TICK_RATE
-src/runtime.rs::SEARCH_DEBOUNCE
-src/app/lifecycle.rs::NOTICE_INFO_TICKS
-src/app/lifecycle.rs::NOTICE_ERROR_TICKS
-src/app/lifecycle.rs::SONG_HISTORY_CAP
-src/app/lifecycle.rs::NOTIFY_IDLE_MS
-```
-
-## Current situation
-
-Some constants already exist in `src/app/lifecycle.rs`:
-
-```rust
-const NOTICE_INFO_TICKS: u16 = 90;
-const NOTICE_ERROR_TICKS: u16 = 150;
-const SONG_HISTORY_CAP: usize = 100;
-const NOTIFY_IDLE_MS: u64 = 120_000;
-```
-
-`src/main.rs` currently has:
-
-```rust
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
-let tick_rate = Duration::from_millis(66);
-```
-
-After Fix B, use:
-
-```rust
-// src/main.rs
-const TICK_RATE: Duration = Duration::from_millis(66);
-
-// src/runtime.rs
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
-```
-
-## Why this matters
-
-These values are part of the app's feel. They should not be hidden inside loop bodies.
-
-## Required tests
-
-No direct tests required. This is compile-only cleanup. Existing search debounce and notice tests act as behavior coverage.
-
-## Pitfalls
-
-### Pitfall: moving app constants into runtime
-
-Do not move notice or song-history constants into `runtime.rs`. They belong to app lifecycle behavior, not the terminal driver.
-
-### Pitfall: using a public constant too early
-
-Keep `TICK_RATE` and `SEARCH_DEBOUNCE` private unless another module truly needs them.
-
----
-
-# Fix D: Prepare for future UI model extraction without doing it yet
-
-## Goal
-
-Leave small comments or helper seams that make a future `UiModel` extraction easier, but do not convert UI rendering in 0.4.3.
-
-## Current situation
-
-`src/ui/mod.rs::draw` takes the full `&App`:
-
-```rust
+// src/ui/mod.rs
 pub fn draw(frame: &mut Frame, app: &App) {
-    // all UI modules read App directly
+    let size = frame.area();
+    // background
+    // compact terminal guard
+    // header
+    // station list / search / deck layout
+    // controls
+    // overlays
+    // command palette
 }
 ```
 
-This is convenient but creates tight coupling between rendering and `App` internals. A full UI model is a larger refactor and should not be mixed with startup/runtime separation.
+Current top-level dependencies:
 
-## 0.4.3 action
+```text
+src/ui/mod.rs imports:
+- crate::app::App
+- crate::app::ActiveOverlay
+- crate::app::InputMode
+- crate::app::LayoutMode
+```
 
-Do not implement `UiModel` yet. Instead, add a future-work note in `plan.md` and leave code untouched.
+Current render modules still accept `&App` directly:
 
-Future shape for 0.4.4 or later:
+```text
+src/ui/header.rs::render(frame, area, app: &App)
+src/ui/controls.rs::render(frame, area, app: &App)
+src/ui/stations.rs::render(frame, area, app: &App)
+src/ui/search.rs::render(frame, area, app: &App)
+src/ui/deck/mod.rs::render(frame, area, app: &App)
+src/ui/station_details.rs::render(frame, area, app: &App)
+src/ui/recent_tracks.rs::render(frame, area, app: &App)
+src/ui/help.rs::render(frame, area, app: &App)
+src/ui/settings.rs::render(frame, area, app: &App)
+src/ui/playback_doctor.rs::render(frame, area, app: &App)
+src/ui/sleep_timer.rs::render(frame, area, app: &App)
+src/ui/command_palette.rs::render(frame, area, app: &App)
+```
+
+Important `App` selector methods already exist:
+
+```rust
+// src/app/selectors.rs
+pub fn visible_stations(&self) -> Vec<&Station>
+pub fn selected_station(&self) -> Option<&Station>
+pub fn now_playing(&self) -> Option<&Station>
+pub fn visible_count(&self) -> usize
+```
+
+Those selectors are the bridge. 0.4.4 should expose their output through `UiModel`, not reimplement selection logic in UI code.
+
+---
+
+## Non-negotiable rules for 0.4.4
+
+### Rule 1: No behavior changes
+
+The following must stay byte-for-byte equivalent in behavior unless tests prove otherwise:
+
+```text
+- layout modes: Split, Library Focus, Signal Focus
+- overlay priority
+- command palette display condition
+- compact terminal warning threshold
+- visible station ordering
+- selected station logic
+- now-playing station lookup
+- saved/search result markers
+- footer hints
+- Playback Doctor content
+- sleep timer display
+- station details grouping
+```
+
+### Rule 2: Do not touch active audio code
+
+No edits to these unless strictly required by compilation, which should not happen:
+
+```text
+src/audio.rs
+src/audio/engine_loop.rs
+src/audio/session.rs
+src/audio/stream_reader.rs
+src/app/playback.rs audio command behavior
+```
+
+### Rule 3: Migrate in layers, not with a wrecking ball
+
+Do not convert every UI module in one massive pass. The safe order is:
+
+```text
+1. Add src/ui/model.rs.
+2. Make ui::draw build UiModel from &App.
+3. Convert top-level layout decisions in ui::draw to UiModel.
+4. Convert low-risk modules first: header, controls, search.
+5. Convert list/detail overlays next.
+6. Convert deck/visualizer last because it touches sample buffers and timing.
+```
+
+### Rule 4: `UiModel` is read-only
+
+`UiModel` must not own mutation methods. It should expose immutable data and computed view helpers only.
+
+Good:
 
 ```rust
 pub struct UiModel<'a> {
     pub input_mode: InputMode,
     pub layout_mode: LayoutMode,
-    pub overlay: ActiveOverlay,
+    pub active_overlay: ActiveOverlay,
+    pub playback: &'a PlaybackView,
     pub selected_station: Option<&'a Station>,
     pub now_playing: Option<&'a Station>,
-    pub playback: &'a PlaybackView,
+}
+```
+
+Bad:
+
+```rust
+impl UiModel<'_> {
+    pub fn update(&mut self, action: Action) { ... }
+    pub fn remove_station(&mut self) { ... }
+}
+```
+
+### Rule 5: Avoid cloning large state
+
+`UiModel` should borrow from `App`. It should not clone the station library, search results, history, or sample buffer.
+
+Good:
+
+```rust
+pub visible_stations: Vec<&'a Station>
+```
+
+Acceptable for 0.4.4 because `App::visible_stations()` already allocates a `Vec<&Station>` today.
+
+Bad:
+
+```rust
+pub visible_stations: Vec<Station>
+```
+
+---
+
+# Fix A: Add `src/ui/model.rs` with a top-level `UiModel`
+
+## Goal
+
+Create a read-only snapshot of exactly what the UI needs. This is the foundation for all later renderer migration.
+
+## Files and symbols
+
+Add:
+
+```text
+src/ui/model.rs
+```
+
+Update:
+
+```text
+src/ui/mod.rs
+```
+
+New symbols:
+
+```text
+src/ui/model.rs::UiModel
+src/ui/model.rs::UiPlaybackModel, optional later
+src/ui/model.rs::UiLibraryModel, optional later
+src/ui/model.rs::UiSearchModel, optional later
+src/ui/model.rs::UiSettingsModel, optional later
+```
+
+Initial `UiModel` should be broad but shallow. Do not over-nest prematurely.
+
+## Proposed initial model
+
+```rust
+// src/ui/model.rs
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+use crate::app::{
+    ActiveOverlay, App, AppNotice, CommandPaletteState, DecoderState, InputMode, LayoutMode,
+    Overlays, PlaybackDiagnostics, PlaybackState, PlaybackView, SearchState, SettingRow, SleepTimer,
+};
+use crate::favorites::Library;
+use crate::history::History;
+use crate::radio::Station;
+
+pub struct UiModel<'a> {
+    pub input_mode: InputMode,
+    pub layout_mode: LayoutMode,
+    pub active_overlay: ActiveOverlay,
+    pub selected_setting_idx: usize,
+    pub tick_count: u64,
+
+    pub library: &'a Library,
+    pub visible_stations: Vec<&'a Station>,
+    pub selected_station: Option<&'a Station>,
+    pub now_playing: Option<&'a Station>,
+    pub visible_count: usize,
+
+    pub search: &'a SearchState,
+    pub command_palette: &'a CommandPaletteState,
+    pub player: &'a PlaybackView,
+    pub diagnostics: &'a PlaybackDiagnostics,
+    pub sleep_timer: &'a SleepTimer,
+    pub history: &'a History,
+    pub song_history: &'a VecDeque<String>,
     pub notice: Option<&'a AppNotice>,
+
+    pub nav_selected: usize,
+    pub nav_selected_genre_idx: usize,
+    pub volume: u8,
+    pub muted: bool,
+    pub visualizer_mode: usize,
+    pub visualizer_peaks: &'a [f32],
+    pub sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
+}
+
+impl<'a> UiModel<'a> {
+    pub fn from_app(app: &'a App) -> Self {
+        Self {
+            input_mode: app.input_mode,
+            layout_mode: app.layout_mode,
+            active_overlay: app.overlays.active,
+            selected_setting_idx: app.overlays.selected_setting_idx,
+            tick_count: app.tick_count,
+
+            library: &app.library,
+            visible_stations: app.visible_stations(),
+            selected_station: app.selected_station(),
+            now_playing: app.now_playing(),
+            visible_count: app.visible_count(),
+
+            search: &app.search,
+            command_palette: &app.command_palette,
+            player: &app.player,
+            diagnostics: &app.diagnostics,
+            sleep_timer: &app.sleep_timer,
+            history: &app.history,
+            song_history: &app.song_history,
+            notice: app.notice.current.as_ref(),
+
+            nav_selected: app.nav.selected,
+            nav_selected_genre_idx: app.nav.selected_genre_idx,
+            volume: app.volume,
+            muted: app.muted,
+            visualizer_mode: app.visualizer_mode,
+            visualizer_peaks: &app.visualizer_peaks,
+            sample_buffer: &app.sample_buffer,
+        }
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.input_mode == InputMode::Search
+    }
+
+    pub fn show_command_palette(&self) -> bool {
+        self.input_mode == InputMode::CommandPalette
+    }
 }
 
 impl<'a> From<&'a App> for UiModel<'a> {
     fn from(app: &'a App) -> Self {
-        Self {
-            input_mode: app.input_mode,
-            layout_mode: app.layout_mode,
-            overlay: app.overlays.active,
-            selected_station: app.selected_station(),
-            now_playing: app.now_playing(),
-            playback: &app.player,
-            notice: app.notice.current.as_ref(),
-        }
+        Self::from_app(app)
     }
+}
+```
+
+## Why broad and shallow first?
+
+A fully beautiful model would have submodels:
+
+```rust
+UiModel {
+    layout: UiLayoutModel,
+    playback: UiPlaybackModel,
+    library: UiLibraryModel,
+    search: UiSearchModel,
+    overlays: UiOverlayModel,
+}
+```
+
+But doing that immediately risks mixing two hard tasks:
+
+1. introducing a read model
+2. redesigning UI data boundaries
+
+For 0.4.4, prefer the bridge model. Once render modules no longer require `&App`, 0.4.5 or later can split `UiModel` into submodels.
+
+## Required tests
+
+Add tests in `src/ui/model.rs`.
+
+### Model captures core layout flags
+
+```rust
+#[test]
+fn ui_model_captures_layout_overlay_and_input_mode() {
+    let mut app = App::new(Library::in_memory(vec![]));
+    app.input_mode = InputMode::Search;
+    app.layout_mode = LayoutMode::RightOnly;
+    app.overlays.active = ActiveOverlay::Help;
+
+    let model = UiModel::from(&app);
+
+    assert!(model.is_searching());
+    assert_eq!(model.layout_mode, LayoutMode::RightOnly);
+    assert_eq!(model.active_overlay, ActiveOverlay::Help);
+}
+```
+
+### Model uses existing selectors
+
+```rust
+#[test]
+fn ui_model_uses_app_selectors_for_visible_selected_and_now_playing() {
+    let mut app = App::new(Library::in_memory(vec![
+        Station::basic("A", "http://a", "Synthwave", "US", 128),
+        Station::basic("B", "http://b", "Synthwave", "US", 128),
+    ]));
+    app.nav.selected = 1;
+    app.player.playing_url = Some("http://a".to_string());
+
+    let model = UiModel::from(&app);
+
+    assert_eq!(model.visible_stations.len(), 2);
+    assert_eq!(model.selected_station.map(|station| station.name.as_str()), Some("B"));
+    assert_eq!(model.now_playing.map(|station| station.name.as_str()), Some("A"));
+}
+```
+
+### Model does not clone station data
+
+This is mostly a code-review invariant. If you want a lightweight test, compare pointer identity:
+
+```rust
+#[test]
+fn ui_model_borrows_visible_station_data() {
+    let app = App::new(Library::in_memory(vec![Station::basic(
+        "A", "http://a", "Synthwave", "US", 128,
+    )]));
+
+    let model = UiModel::from(&app);
+
+    assert!(std::ptr::eq(model.visible_stations[0], &app.library.stations[0]));
 }
 ```
 
 ## Pitfalls
 
-### Pitfall: doing UI model too soon
+### Pitfall: exposing `Overlays` directly
 
-After Fix A and Fix B, the diff will already be meaningful. Do not mix a rendering-wide signature migration into 0.4.3.
+Avoid this if possible:
 
-### Pitfall: creating a partial UI model with mixed patterns
+```rust
+pub overlays: &'a Overlays
+```
 
-Half the UI using `&App` and half using `&UiModel` can make code more confusing. Defer until there is time to do it consistently.
+That keeps UI coupled to the whole overlay state bag. Prefer fields that the UI currently needs:
+
+```rust
+pub active_overlay: ActiveOverlay
+pub selected_setting_idx: usize
+```
+
+### Pitfall: cloning command lists every frame too early
+
+`command_palette_commands()` currently lives on `App`. If `command_palette.rs` still needs it during the first migration, either:
+
+1. leave command palette on `&App` for the first pass, or
+2. add a model helper that calls the same logic without cloning more than today.
+
+For 0.4.4, it is acceptable to leave command palette conversion for a later step inside this same release, but do not block the top-level `UiModel` on it.
+
+### Pitfall: computing visible stations twice
+
+`selected_station()` currently calls `visible_stations()` internally. If `UiModel::from_app` calls both `visible_stations()` and `selected_station()`, it may allocate twice. That is acceptable as a first pass because UI code already does repeated selector calls. A follow-up optimization can compute selected from `visible_stations`:
+
+```rust
+let visible_stations = app.visible_stations();
+let selected_station = visible_stations.get(app.nav.selected).copied();
+```
+
+Recommended implementation:
+
+```rust
+let visible_stations = app.visible_stations();
+let selected_station = visible_stations.get(app.nav.selected).copied();
+let visible_count = visible_stations.len();
+```
+
+Do not use this if it changes behavior in search mode or genre filtering. It should not, because it reuses the selector output.
+
+---
+
+# Fix B: Convert `src/ui/mod.rs::draw` to use `UiModel`
+
+## Goal
+
+Keep the public draw entrypoint unchanged for `main.rs`, but convert the actual render tree root to use `UiModel`.
+
+`main.rs` should still call:
+
+```rust
+terminal.draw(|frame| ui::draw(frame, &app))?;
+```
+
+`ui::draw` should become a thin adapter:
+
+```rust
+pub fn draw(frame: &mut Frame, app: &App) {
+    let model = UiModel::from(app);
+    draw_model(frame, &model);
+}
+```
+
+Then the real root render function uses the model:
+
+```rust
+fn draw_model(frame: &mut Frame, model: &UiModel<'_>) {
+    let size = frame.area();
+    // same body as before, but top-level decisions read model
+}
+```
+
+## Files and symbols
+
+Update:
+
+```text
+src/ui/mod.rs
+src/ui/model.rs
+```
+
+Add module declaration:
+
+```rust
+// src/ui/mod.rs
+pub mod model;
+```
+
+Update imports:
+
+```rust
+use crate::app::App;
+use model::UiModel;
+```
+
+Top-level decisions should change from:
+
+```rust
+let is_searching = app.input_mode == InputMode::Search;
+match app.layout_mode { ... }
+match app.overlays.active { ... }
+if app.input_mode == InputMode::CommandPalette { ... }
+```
+
+to:
+
+```rust
+let is_searching = model.is_searching();
+match model.layout_mode { ... }
+match model.active_overlay { ... }
+if model.show_command_palette() { ... }
+```
+
+## Transitional renderer calls
+
+At first, `draw_model` may still call module renderers with `&App` if the module has not been migrated yet. But once `draw_model` only has `&UiModel`, that is not possible. Pick one of these strategies:
+
+### Strategy 1: top-level adapter keeps both `app` and `model`
+
+```rust
+pub fn draw(frame: &mut Frame, app: &App) {
+    let model = UiModel::from(app);
+    draw_model(frame, app, &model);
+}
+
+fn draw_model(frame: &mut Frame, app: &App, model: &UiModel<'_>) {
+    // top-level decisions use model
+    header::render(frame, chunks[0], app); // not migrated yet
+}
+```
+
+This is the safest first commit. It proves the model and root decisions without forcing every module to migrate immediately.
+
+### Strategy 2: convert all direct children at once
+
+```rust
+header::render(frame, chunks[0], model);
+stations::render(frame, left_area, model);
+```
+
+This is cleaner but much larger. For 0.4.4, use Strategy 1 first, then migrate direct children one by one.
+
+## Required tests
+
+Existing compact terminal tests should still pass:
+
+```text
+ui::tests::compact_terminal_rejects_width_below_minimum
+ui::tests::compact_terminal_rejects_height_below_minimum
+ui::tests::compact_terminal_accepts_exact_minimum
+ui::tests::compact_terminal_accepts_larger_terminal
+```
+
+Add one small test for the model-powered predicates instead of screenshot testing:
+
+```rust
+#[test]
+fn ui_model_reports_command_palette_visibility() {
+    let mut app = App::new(Library::in_memory(vec![]));
+    app.input_mode = InputMode::CommandPalette;
+
+    let model = UiModel::from(&app);
+
+    assert!(model.show_command_palette());
+}
+```
+
+## Pitfalls
+
+### Pitfall: changing overlay order
+
+Preserve this exact priority:
+
+```rust
+match app.overlays.active {
+    ActiveOverlay::StationDetails => station_details::render(...),
+    ActiveOverlay::RecentTracks => recent_tracks::render(...),
+    ActiveOverlay::Help => help::render(...),
+    ActiveOverlay::Settings => settings::render(...),
+    ActiveOverlay::PlaybackDoctor => playback_doctor::render(...),
+    ActiveOverlay::SleepTimer => sleep_timer::render(...),
+    ActiveOverlay::None => {}
+}
+
+if app.input_mode == InputMode::CommandPalette {
+    command_palette::render(...)
+}
+```
+
+Command palette currently renders after normal overlays. Keep it that way.
+
+### Pitfall: compact terminal guard must run before other model-heavy UI work
+
+Currently `draw` builds no station rows if terminal is too compact. If `UiModel::from(app)` computes visible stations before the compact guard, it may do more work than before on tiny terminals.
+
+Preferred compromise for 0.4.4:
+
+```rust
+pub fn draw(frame: &mut Frame, app: &App) {
+    let size = frame.area();
+    render_background(frame, size);
+
+    if is_compact_terminal(size) {
+        render_compact_terminal_warning(frame, size);
+        return;
+    }
+
+    let model = UiModel::from(app);
+    draw_model(frame, size, app, &model);
+}
+```
+
+This preserves the compact-terminal fast path.
+
+---
+
+# Fix C: Convert low-risk modules from `&App` to `&UiModel`
+
+## Goal
+
+Move the least risky modules away from `&App` first. These modules mostly read scalar fields or existing selector outputs.
+
+Recommended first cluster:
+
+```text
+src/ui/header.rs
+src/ui/search.rs
+src/ui/controls.rs
+```
+
+Do **not** start with `stations.rs` or visualizer modules. Those have more list/selection and sample-buffer details.
+
+---
+
+## C1: Convert `src/ui/header.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::{App, PlaybackState};
+
+pub fn render(frame: &mut Frame, area: Rect, app: &App) { ... }
+fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) { ... }
+```
+
+It uses:
+
+```text
+app.player.state
+app.now_playing()
+app.player.current_track
+```
+
+### Desired signature
+
+```rust
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+fn render_now_playing(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+match (&app.player.state, app.now_playing())
+```
+
+to:
+
+```rust
+match (&model.player.state, model.now_playing)
+```
+
+Change:
+
+```rust
+if let Some(ref track) = app.player.current_track
+```
+
+to:
+
+```rust
+if let Some(ref track) = model.player.current_track
+```
+
+### Tests
+
+Existing header tests, if any, should pass. If there are no header tests, rely on compile plus full UI tests.
+
+### Pitfalls
+
+Do not clone station name or current track just to satisfy lifetimes. Borrow string slices where possible.
+
+---
+
+## C2: Convert `src/ui/search.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::{App, SearchStatus};
+```
+
+It uses:
+
+```text
+app.search.results
+app.nav.selected
+app.library.contains_station(station)
+app.search.status
+app.tick_count
+app.search.query
+```
+
+### Desired signature
+
+```rust
+use crate::app::SearchStatus;
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+fn highlighted_result_explanation(model: &UiModel<'_>) -> Option<String> { ... }
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+let result_count = app.search.results.len();
+let selected_result_saved = app.search.results
+    .get(app.nav.selected)
+    .map(|station| app.library.contains_station(station))
+    .unwrap_or(false);
+```
+
+to:
+
+```rust
+let result_count = model.search.results.len();
+let selected_result_saved = model.search.results
+    .get(model.nav_selected)
+    .map(|station| model.library.contains_station(station))
+    .unwrap_or(false);
+```
+
+Change:
+
+```rust
+Span::styled(debounce_indicator_text(query, app.tick_count), theme::dim())
+```
+
+to:
+
+```rust
+Span::styled(debounce_indicator_text(query, model.tick_count), theme::dim())
+```
+
+Change:
+
+```rust
+let station = app.search.results.get(app.nav.selected)?;
+let query = StationSearchQuery::parse(&app.search.query);
+let is_saved = app.library.contains_station(station);
+```
+
+to:
+
+```rust
+let station = model.search.results.get(model.nav_selected)?;
+let query = StationSearchQuery::parse(&model.search.query);
+let is_saved = model.library.contains_station(station);
+```
+
+### Tests
+
+Existing tests should continue passing:
+
+```text
+ui::search::tests::compact_search_label_truncates_long_queries
+ui::search::tests::compact_explanation_label_truncates_safely
+ui::search::tests::debounce_indicator_text_feels_active_without_saying_soon
+ui::search::tests::search_debounce_frame_wraps_through_spinner_frames
+ui::search::tests::stale_response_text_reports_discarded_query
+```
+
+### Pitfalls
+
+`model.visible_stations` should not be used here. Search bar specifically cares about `model.search.results`, not the visible list title logic.
+
+---
+
+## C3: Convert `src/ui/controls.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState};
+```
+
+It uses many scalar fields:
+
+```text
+app.player.state
+app.now_playing()
+app.player.current_track
+app.layout_mode
+app.visualizer_mode
+app.sleep_timer.remaining(now)
+app.notice.current
+app.muted
+app.volume
+app.show_help()
+app.show_station_details()
+app.show_recent_tracks()
+app.show_sleep_timer()
+app.library.settings.save_history
+app.input_mode
+app.visible_count()
+```
+
+### Desired signature
+
+```rust
+use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState};
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+```
+
+### Required `UiModel` helper methods
+
+Add these helpers to avoid leaking overlay logic back into controls:
+
+```rust
+impl UiModel<'_> {
+    pub fn show_help(&self) -> bool {
+        self.active_overlay == ActiveOverlay::Help
+    }
+
+    pub fn show_station_details(&self) -> bool {
+        self.active_overlay == ActiveOverlay::StationDetails
+    }
+
+    pub fn show_recent_tracks(&self) -> bool {
+        self.active_overlay == ActiveOverlay::RecentTracks
+    }
+
+    pub fn show_sleep_timer(&self) -> bool {
+        self.active_overlay == ActiveOverlay::SleepTimer
+    }
+}
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+match (&app.player.state, app.now_playing())
+```
+
+to:
+
+```rust
+match (&model.player.state, model.now_playing)
+```
+
+Change:
+
+```rust
+layout_label(app.layout_mode)
+visualizer_label(app.visualizer_mode)
+```
+
+to:
+
+```rust
+layout_label(model.layout_mode)
+visualizer_label(model.visualizer_mode)
+```
+
+Change:
+
+```rust
+if let Some(remaining) = app.sleep_timer.remaining(std::time::Instant::now())
+```
+
+to:
+
+```rust
+if let Some(remaining) = model.sleep_timer.remaining(std::time::Instant::now())
+```
+
+Change:
+
+```rust
+if let Some(ref notice) = app.notice.current
+```
+
+to:
+
+```rust
+if let Some(notice) = model.notice
+```
+
+Change:
+
+```rust
+if app.visible_count() == 0
+```
+
+to:
+
+```rust
+if model.visible_count == 0
+```
+
+### Tests
+
+Existing controls tests should continue passing:
+
+```text
+ui::controls::tests::layout_labels_use_user_facing_focus_terms
+ui::controls::tests::visualizer_labels_drop_scope_jargon
+```
+
+Add a model helper test:
+
+```rust
+#[test]
+fn ui_model_overlay_helpers_match_active_overlay() {
+    let mut app = App::new(Library::in_memory(vec![]));
+    app.overlays.active = ActiveOverlay::RecentTracks;
+
+    let model = UiModel::from(&app);
+
+    assert!(model.show_recent_tracks());
+    assert!(!model.show_help());
+}
+```
+
+### Pitfalls
+
+`notice` is an `Option<&AppNotice>`. Pattern matching changes slightly:
+
+```rust
+match notice {
+    AppNotice::Info(message) => ...
+    AppNotice::Error(message) => ...
+}
+```
+
+not:
+
+```rust
+match &notice { ... }
+```
+
+---
+
+# Fix D: Convert station list and detail overlays after the first cluster
+
+## Goal
+
+Once top-level, header, search, and controls compile through `UiModel`, migrate the modules that read station collections and selected stations.
+
+Recommended second cluster:
+
+```text
+src/ui/stations.rs
+src/ui/station_details.rs
+src/ui/recent_tracks.rs
+```
+
+---
+
+## D1: Convert `src/ui/stations.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::{App, InputMode};
+```
+
+It uses:
+
+```text
+app.visible_stations()
+app.input_mode
+app.library.available_genres
+app.nav.selected_genre_idx
+app.nav.selected
+app.player.playing_url
+app.library.contains_station(station)
+app.search.query
+app.search.searching_api
+```
+
+### Desired signature
+
+```rust
+use crate::app::InputMode;
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+let visible = app.visible_stations();
+```
+
+to:
+
+```rust
+let visible = &model.visible_stations;
+```
+
+Be careful: existing code may expect `Vec<&Station>` and iterate by value. With `&Vec<&Station>`, iteration yields `&&Station`. Prefer:
+
+```rust
+for (idx, station) in model.visible_stations.iter().copied().enumerate() {
+    // station: &Station
+}
+```
+
+Change:
+
+```rust
+let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
+```
+
+to:
+
+```rust
+let is_playing = model.player.playing_url.as_ref() == Some(&station.url);
+```
+
+Change:
+
+```rust
+let is_selected = app.nav.selected == idx;
+```
+
+to:
+
+```rust
+let is_selected = model.nav_selected == idx;
+```
+
+Change:
+
+```rust
+app.library.contains_station(station)
+```
+
+to:
+
+```rust
+model.library.contains_station(station)
+```
+
+Change title helper:
+
+```rust
+fn station_list_title(app: &App, visible_count: usize) -> String
+```
+
+to:
+
+```rust
+fn station_list_title(model: &UiModel<'_>, visible_count: usize) -> String
+```
+
+### Required tests
+
+Existing station tests are critical. Keep them green:
+
+```text
+ui::stations::tests::empty_library_onboarding_only_renders_for_empty_normal_mode
+ui::stations::tests::search_title_explains_preview_and_save_actions
+ui::stations::tests::search_truncation_*
+ui::stations::tests::station_meta_*
+ui::stations::tests::station_health_badge_compares_numeric_timestamps
+ui::stations::tests::truncation_*
+```
+
+### Pitfalls
+
+#### `visible` type mismatch
+
+A common bug after this conversion:
+
+```rust
+let visible = &model.visible_stations;
+let station = visible[idx]; // station: &Station, fine
+for station in visible { ... } // station: &&Station, maybe not fine
+```
+
+Use `.iter().copied()` in loops.
+
+#### Search-mode saved marker
+
+Do not change this condition:
+
+```rust
+model.input_mode == InputMode::Search && model.library.contains_station(station)
+```
+
+Saved markers in normal library mode are different from saved markers in search mode.
+
+#### Empty onboarding
+
+Do not change:
+
+```rust
+model.input_mode == InputMode::Normal && visible_count == 0
+```
+
+Search mode with no results should not show first-run library onboarding.
+
+---
+
+## D2: Convert `src/ui/station_details.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::App;
+```
+
+It uses:
+
+```text
+app.selected_station()
+app.library.contains_station(station)
+app.player.playing_url
+app.player.current_track
+app.player.state
+```
+
+### Desired signature
+
+```rust
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+fn station_detail_lines(model: &UiModel<'_>) -> Vec<Line<'static>> { ... }
+fn station_detail_sections(model: &UiModel<'_>) -> Vec<DetailSection> { ... }
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+let Some(station) = app.selected_station() else { ... };
+```
+
+to:
+
+```rust
+let Some(station) = model.selected_station else { ... };
+```
+
+Change:
+
+```rust
+let saved = if app.library.contains_station(station) { ... }
+```
+
+to:
+
+```rust
+let saved = if model.library.contains_station(station) { ... }
+```
+
+Change:
+
+```rust
+.filter(|_| app.player.playing_url.as_ref() == Some(&station.url))
+```
+
+to:
+
+```rust
+.filter(|_| model.player.playing_url.as_ref() == Some(&station.url))
+```
+
+### Required tests
+
+Existing details tests should stay green:
+
+```text
+ui::station_details::tests::detail_sections_group_expected_fields
+ui::station_details::tests::detail_sections_use_missing_metadata_fallbacks
+ui::station_details::tests::local_health_prefers_newer_numeric_failure_over_older_success
+ui::station_details::tests::metadata_list_uses_fallback_or_joined_values
+ui::station_details::tests::compact_detail_value_truncates_long_metadata
+```
+
+### Pitfalls
+
+Some tests inside `station_details.rs` may construct an `App` directly and call private helper functions. After migration, tests should create a `UiModel` from the app before calling helper functions:
+
+```rust
+let model = UiModel::from(&app);
+let sections = station_detail_sections(&model);
+```
+
+Keep the `app` alive for at least as long as `model`.
+
+---
+
+## D3: Convert `src/ui/recent_tracks.rs`
+
+### Current dependencies
+
+```rust
+use crate::app::App;
+```
+
+It uses:
+
+```text
+app.library.settings.save_history
+app.history
+app.song_history
+app.player.state
+```
+
+### Desired signature
+
+```rust
+use crate::ui::model::UiModel;
+
+pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
+fn recent_track_lines(model: &UiModel<'_>) -> Vec<Line<'static>> { ... }
+```
+
+### Replacement logic
+
+Change:
+
+```rust
+if app.library.settings.save_history { ... }
+```
+
+to:
+
+```rust
+if model.library.settings.save_history { ... }
+```
+
+Change:
+
+```rust
+for (idx, entry) in app.history.recent(MAX_VISIBLE_TRACKS).enumerate()
+```
+
+to:
+
+```rust
+for (idx, entry) in model.history.recent(MAX_VISIBLE_TRACKS).enumerate()
+```
+
+Change:
+
+```rust
+if app.song_history.is_empty()
+```
+
+to:
+
+```rust
+if model.song_history.is_empty()
+```
+
+### Required tests
+
+Existing tests should pass:
+
+```text
+ui::recent_tracks::tests::recent_title_reflects_history_persistence
+ui::recent_tracks::tests::recent_overlay_accepts_minimum_area
+ui::recent_tracks::tests::recent_overlay_rejects_tiny_area
+```
+
+---
+
+# Fix E: Convert settings, help, sleep timer, Playback Doctor, command palette
+
+## Goal
+
+Migrate overlays and command palette once the lower-risk modules are stable.
+
+Recommended third cluster:
+
+```text
+src/ui/help.rs
+src/ui/settings.rs
+src/ui/sleep_timer.rs
+src/ui/playback_doctor.rs
+src/ui/command_palette.rs
+```
+
+---
+
+## E1: Convert `src/ui/help.rs`
+
+### Current dependencies
+
+```text
+app.player.state
+```
+
+Only needed for critical engine fault banner.
+
+### Desired change
+
+```rust
+critical::split_overlay_alert_area(inner_area, &model.player.state);
+critical::render_engine_fault_banner(frame, alert_area, &model.player.state);
+```
+
+### Pitfall
+
+No behavior change. This is mostly mechanical.
+
+---
+
+## E2: Convert `src/ui/settings.rs`
+
+### Current dependencies
+
+```text
+app.overlays.selected_setting_idx
+app.library.settings.notifications_enabled
+app.library.settings.autoplay_last
+app.library.settings.output_device_name
+app.library.settings.theme
+app.library.settings.stream_metadata_enabled
+app.library.settings.save_history
+app.player.state
+```
+
+### Desired changes
+
+```rust
+let is_selected = model.selected_setting_idx == row.index();
+let row = SettingRow::from_index(model.selected_setting_idx)
+```
+
+Settings rows:
+
+```rust
+model.library.settings.notifications_enabled
+model.library.settings.autoplay_last
+model.library.settings.output_device_name.as_deref()
+model.library.settings.theme
+model.library.settings.stream_metadata_enabled
+model.library.settings.save_history
+```
+
+### Pitfall
+
+Do not move settings mutation into `UiModel`. This is render-only.
+
+---
+
+## E3: Convert `src/ui/sleep_timer.rs`
+
+### Current dependencies
+
+```text
+app.sleep_timer.remaining(now)
+app.sleep_timer.is_waiting_for_playback()
+app.sleep_timer.minutes()
+app.player.state
+```
+
+### Desired changes
+
+```rust
+model.sleep_timer.remaining(now)
+model.sleep_timer.is_waiting_for_playback()
+model.sleep_timer.minutes()
+model.player.state
+```
+
+### Pitfall
+
+Calls to `Instant::now()` remain inside UI for now. Do not introduce a clock abstraction in this release.
+
+---
+
+## E4: Convert `src/ui/playback_doctor.rs`
+
+### Current dependencies
+
+```text
+app.now_playing()
+app.player.playing_url
+app.player.current_track
+app.player.state
+app.diagnostics
+```
+
+### Desired changes
+
+```rust
+let station = model.now_playing.map(|s| s.name.as_str()).unwrap_or("N/A");
+let url = model.player.playing_url.as_deref().unwrap_or("N/A");
+let track = model.player.current_track.as_deref().unwrap_or("N/A");
+let last_error = model.diagnostics.last_error.as_deref().unwrap_or("N/A");
+```
+
+### Pitfall
+
+Playback Doctor is a troubleshooting surface. Copy and ordering should not change.
+
+---
+
+## E5: Convert `src/ui/command_palette.rs`
+
+### Current dependencies
+
+```text
+app.command_palette.query
+app.command_palette_commands()
+app.command_palette.selected
+command_label(command)
+```
+
+This is the trickiest non-visualizer overlay because `command_palette_commands()` is currently an `App` method.
+
+### Recommended 0.4.4 option
+
+Add commands to `UiModel` as an owned vector computed once per frame:
+
+```rust
+use crate::app::CommandPaletteCommand;
+
+pub struct UiModel<'a> {
+    // ...
+    pub command_palette_commands: Vec<CommandPaletteCommand>,
+}
+
+impl<'a> UiModel<'a> {
+    pub fn from_app(app: &'a App) -> Self {
+        Self {
+            // ...
+            command_palette_commands: app.command_palette_commands(),
+        }
+    }
+}
+```
+
+Then command palette rendering becomes:
+
+```rust
+let commands = &model.command_palette_commands;
+let selected = model
+    .command_palette
+    .selected
+    .min(commands.len().saturating_sub(1));
+```
+
+### Pitfall
+
+If `CommandPaletteCommand` is not exported, either export it from `app` or leave `command_palette.rs` as the last module still taking `&App`. Prefer exporting only if the enum is already UI-facing through labels.
+
+Avoid recomputing `command_palette_commands()` inside multiple render helpers.
+
+---
+
+# Fix F: Convert deck and visualizer last
+
+## Goal
+
+Migrate signal-deck rendering to `UiModel` after every other module is stable.
+
+Recommended final cluster:
+
+```text
+src/ui/deck/mod.rs
+src/ui/deck/meta.rs
+src/ui/deck/cassette.rs
+src/ui/deck/visualizer/mod.rs
+src/ui/deck/visualizer/spectrum.rs
+src/ui/deck/visualizer/oscilloscope.rs
+```
+
+---
+
+## F1: Convert `src/ui/deck/mod.rs`
+
+### Current dependencies
+
+```text
+app.layout_mode
+```
+
+### Desired changes
+
+```rust
+let full_deck = model.layout_mode == LayoutMode::RightOnly;
+```
+
+---
+
+## F2: Convert `src/ui/deck/meta.rs`
+
+### Current dependencies
+
+```text
+app.player.state
+app.now_playing()
+app.player.buffer_percent
+app.player.buffer_seconds
+```
+
+### Desired changes
+
+```rust
+match model.player.state { ... }
+let station = model.now_playing;
+let filled = (model.player.buffer_percent / 10) as usize;
+```
+
+---
+
+## F3: Convert `src/ui/deck/cassette.rs`
+
+### Current dependencies
+
+```text
+app.tick_count
+app.player.state
+```
+
+### Desired changes
+
+```rust
+let lines = build_deck_lines(DECK_INNER_WIDTH, model.tick_count, &model.player.state);
+```
+
+---
+
+## F4: Convert visualizer modules
+
+### Current dependencies
+
+```text
+app.visualizer_mode
+app.player.state
+app.volume
+app.sample_buffer
+app.tick_count
+app.visualizer_peaks
+```
+
+### Desired changes
+
+```rust
+model.visualizer_mode
+model.player.state
+model.volume
+model.sample_buffer
+model.tick_count
+model.visualizer_peaks
+```
+
+### Pitfalls
+
+#### Sample buffer lock behavior must not change
+
+Current visualizer behavior:
+
+```rust
+if let Ok(buf) = app.sample_buffer.lock() {
+    // read samples
+}
+```
+
+Keep the same non-blocking failure behavior. Do not unwrap the lock.
+
+#### Do not clone sample buffers
+
+`UiModel` should borrow the `Arc<Mutex<VecDeque<f32>>>`. Do not clone the `VecDeque` for rendering.
+
+#### Connecting/fading visualizer behavior must stay
+
+Tests already cover:
+
+```text
+ui::deck::visualizer::tests::spectrum_renderer_stays_active_while_connecting
+ui::deck::visualizer::tests::spectrum_renderer_stays_active_while_fading_out
+ui::deck::visualizer::tests::fading_out_visualizer_gain_uses_audio_ramp_volume
+```
+
+Keep those green.
+
+---
+
+# Fix G: Remove `crate::ui::text` compatibility facade if safe
+
+## Goal
+
+Finish the text helper migration started earlier. This is optional for 0.4.4 but pairs well with UI boundary cleanup.
+
+Current situation:
+
+```text
+src/text.rs contains the real helpers.
+src/ui/text.rs re-exports them.
+UI modules still call crate::ui::text::*.
+```
+
+Current callers include:
+
+```text
+src/ui/stations.rs
+src/ui/deck/cassette.rs
+```
+
+## Desired change
+
+Replace:
+
+```rust
+crate::ui::text::visible_len(value)
+crate::ui::text::truncate_to_chars(value, max)
+crate::ui::text::truncate_with_ellipsis(value, max)
+```
+
+with:
+
+```rust
+crate::text::visible_len(value)
+crate::text::truncate_to_chars(value, max)
+crate::text::truncate_with_ellipsis(value, max)
+```
+
+Then delete module declaration:
+
+```rust
+// src/ui/mod.rs
+pub mod text;
+```
+
+And delete file:
+
+```text
+src/ui/text.rs
+```
+
+## Shell command if deletion is needed locally
+
+If the connected workspace cannot delete the file directly, run locally:
+
+```bash
+git rm src/ui/text.rs
+```
+
+## Required tests
+
+```text
+cargo test text
+cargo test ui::stations
+cargo test ui::deck
+```
+
+## Pitfalls
+
+This is pure path cleanup. Do not change the implementation of char counting or truncation.
 
 ---
 
 # Implementation order
 
-## Step 1: Plan only
-
-Write this `plan.md` and do not change code in the same commit if using small commits.
+## Step 1: Add `UiModel`
 
 Files:
 
 ```text
-plan.md
-```
-
-Validation:
-
-```text
-No compile needed for plan-only commit.
-```
-
-## Step 2: Extract `AppParts` and `App::from_parts`
-
-Files:
-
-```text
-src/app/lifecycle.rs
-src/app.rs, only if re-exports are needed
-src/audio.rs, only if a test helper is genuinely needed
+src/ui/model.rs
+src/ui/mod.rs
 ```
 
 Work:
 
 ```text
-1. Add AppParts.
-2. Add AppParts::load.
-3. Move current App::new body into App::from_parts.
-4. Change App::new to delegate.
-5. Extract sync_startup_audio_settings.
-6. Extract apply_startup_warnings.
-7. Extract apply_startup_autoplay.
-8. Add constructor tests.
+1. Add `pub mod model;`.
+2. Add `UiModel<'a>` with shallow borrowed fields.
+3. Add `UiModel::from_app` and `impl From<&App>`.
+4. Add helper methods: `is_searching`, `show_command_palette`, overlay helpers.
+5. Add model tests.
 ```
 
-Targeted validation:
+Validation:
 
 ```text
-cargo test app::lifecycle
+cargo test ui::model
 cargo check
 ```
 
-## Step 3: Convert new or fragile tests to `App::from_parts`
+## Step 2: Convert top-level `ui::draw`
 
 Files:
 
 ```text
-src/app/lifecycle.rs
-src/app/playback.rs, only if tests need helper migration
-src/app/search.rs, only if tests need helper migration
+src/ui/mod.rs
 ```
 
 Work:
 
 ```text
-1. Add a local test_parts helper in lifecycle tests.
-2. Use from_parts for new tests.
-3. Do not churn every existing test unless needed.
+1. Keep public `draw(frame, app)` signature.
+2. Keep compact terminal guard before creating `UiModel`.
+3. Create `UiModel` after compact guard.
+4. Move current body into `draw_model(frame, size, app, model)` as a transitional helper.
+5. Convert top-level layout/overlay/command-palette decisions to `model`.
+6. Leave child renderers on `app` for this step if needed.
 ```
 
 Validation:
 
 ```text
-cargo test app
+cargo test ui::tests
+cargo check
 ```
 
-## Step 4: Extract `AppDriver` into `src/runtime.rs`
+## Step 3: Convert first renderer cluster
 
 Files:
 
 ```text
-src/main.rs
-src/runtime.rs
+src/ui/header.rs
+src/ui/search.rs
+src/ui/controls.rs
+src/ui/mod.rs
 ```
 
 Work:
 
 ```text
-1. Add mod runtime.
-2. Add AppDriver with channels and debounce state.
-3. Move search debounce update.
-4. Move search spawn.
-5. Move search response drain.
-6. Move metadata refresh spawn.
-7. Move metadata response drain.
-8. Shrink main loop.
+1. Change render signatures from `&App` to `&UiModel`.
+2. Update top-level calls.
+3. Replace direct app field access with model fields.
+4. Keep tests green.
 ```
 
-Targeted validation:
+Validation:
+
+```text
+cargo test ui::controls
+cargo test ui::search
+cargo check
+```
+
+## Step 4: Convert station/detail/history cluster
+
+Files:
+
+```text
+src/ui/stations.rs
+src/ui/station_details.rs
+src/ui/recent_tracks.rs
+src/ui/mod.rs
+```
+
+Work:
+
+```text
+1. Change render/helper signatures to `&UiModel`.
+2. Use `model.visible_stations`, `model.selected_station`, `model.now_playing`.
+3. Fix iterator `&&Station` issues with `.iter().copied()`.
+4. Update tests to create `UiModel` where helper functions require it.
+```
+
+Validation:
+
+```text
+cargo test ui::stations
+cargo test ui::station_details
+cargo test ui::recent_tracks
+cargo check
+```
+
+## Step 5: Convert overlay/control cluster
+
+Files:
+
+```text
+src/ui/help.rs
+src/ui/settings.rs
+src/ui/sleep_timer.rs
+src/ui/playback_doctor.rs
+src/ui/command_palette.rs
+src/ui/mod.rs
+```
+
+Work:
+
+```text
+1. Convert simple overlays first: help, sleep_timer, playback_doctor.
+2. Convert settings using `selected_setting_idx` and borrowed settings.
+3. Convert command palette last, adding `command_palette_commands` to `UiModel` if needed.
+```
+
+Validation:
+
+```text
+cargo test ui::settings
+cargo test ui::sleep_timer
+cargo test ui::playback_doctor
+cargo test ui::command_palette
+cargo check
+```
+
+## Step 6: Convert deck/visualizer cluster
+
+Files:
+
+```text
+src/ui/deck/mod.rs
+src/ui/deck/meta.rs
+src/ui/deck/cassette.rs
+src/ui/deck/visualizer/mod.rs
+src/ui/deck/visualizer/spectrum.rs
+src/ui/deck/visualizer/oscilloscope.rs
+src/ui/mod.rs
+```
+
+Work:
+
+```text
+1. Convert deck root to `&UiModel`.
+2. Convert meta and cassette.
+3. Convert visualizer modules carefully.
+4. Preserve sample-buffer lock behavior.
+```
+
+Validation:
+
+```text
+cargo test ui::deck
+cargo check
+```
+
+## Step 7: Remove transitional `&App` use from UI render modules
+
+Goal search:
+
+```text
+rg "use crate::app::App|&App" src/ui
+```
+
+Allowed remaining matches after this release:
+
+```text
+src/ui/model.rs uses App to build UiModel
+src/ui/mod.rs public draw adapter accepts &App
+unit tests may construct App
+```
+
+Not allowed:
+
+```text
+render(frame, area, app: &App)
+helper(app: &App)
+```
+
+Validation:
 
 ```text
 cargo check
-cargo test app::search
-cargo test app::library
 ```
 
-## Step 5: Add runtime tests where they are cheap
+## Step 8: Optional text facade cleanup
 
 Files:
 
 ```text
-src/runtime.rs
+src/ui/stations.rs
+src/ui/deck/cassette.rs
+src/ui/mod.rs
+src/ui/text.rs
 ```
 
 Work:
 
 ```text
-1. Test debounce clearing.
-2. Test same-query debounce deadline is preserved if building test app is easy.
-3. Avoid tests that hit Radio Browser.
+1. Replace `crate::ui::text::*` with `crate::text::*`.
+2. Remove `pub mod text;`.
+3. Delete `src/ui/text.rs`.
 ```
 
 Validation:
 
 ```text
-cargo test runtime
+cargo test text
+cargo test ui::stations
+cargo test ui::deck
+cargo check
 ```
 
-## Step 6: Full validation and docs
+## Step 9: Docs and release notes
 
 Files:
 
 ```text
 CHANGELOG.md
-README.md, only if user-visible startup behavior changed
+README.md, only if code-quality section should mention UiModel
 ```
 
 Expected changelog entry:
 
 ```markdown
-## [0.4.3] - Unreleased
+## [0.4.4] - Unreleased
 
 ### Changed
-* **App construction**: Split runtime dependency loading from pure `App` state assembly through `AppParts` and `App::from_parts`.
-* **Runtime orchestration**: Moved search debounce, search workers, metadata refresh workers, and response draining out of `src/main.rs` into `src/runtime.rs::AppDriver`.
+* **UI rendering boundary**: Introduced `src/ui/model.rs::UiModel` so render modules consume a read-only view model instead of direct access to the full `App` object.
+* **Render module migration**: Migrated header, controls, search, station list, overlays, command palette, and deck rendering to `UiModel`.
+
+### Removed
+* **UI text facade**: Removed the `src/ui/text.rs` compatibility facade after updating UI modules to use root-level `crate::text` helpers directly.
 
 ### Internal
-* Added focused tests around startup warning aggregation, autoplay state setup, and driver debounce behavior.
+* Added regression coverage for `UiModel` selector wiring, overlay helpers, command palette visibility, and borrowed station data.
 ```
 
-Full validation:
+If `src/ui/text.rs` is not removed in this release, omit the `Removed` entry.
+
+Validation:
 
 ```text
 cargo check
@@ -1302,153 +1925,316 @@ cargo clippy --all-targets --all-features
 
 ---
 
-# Manual smoke checklist
+# Full validation gate
 
-0.4.3 should not require deep audio QA because it does not touch decoder or engine-loop behavior. Still run a light smoke test because startup wiring and autoplay are touched.
+Before tagging 0.4.4:
 
 ```text
-[ ] Start PulseDeck normally.
-[ ] Confirm saved theme still applies before first draw.
-[ ] Search opens with `/`.
-[ ] Type `tag:ambient`; results debounce and load.
-[ ] Stale search behavior still feels sane when typing quickly.
-[ ] Open command palette and trigger metadata refresh on a small library.
-[ ] Export library still creates an M3U file.
-[ ] Play an MP3 station.
-[ ] Stop playback.
-[ ] Quit cleanly.
+cargo fmt
+cargo check
+cargo test
+cargo clippy --all-targets --all-features
 ```
 
-Autoplay smoke if enabled locally:
+If `cargo fmt` is blocked in the connected workspace, run locally before commit:
+
+```bash
+cargo fmt
+```
+
+Expected high-signal targeted tests:
 
 ```text
-[ ] Enable autoplay last station.
-[ ] Play a station and quit.
-[ ] Restart PulseDeck.
-[ ] Last station selection is restored.
-[ ] Playback attempts to start.
-[ ] Any audio-engine failure is visible, not silent.
+cargo test ui::model
+cargo test ui::tests
+cargo test ui::controls
+cargo test ui::search
+cargo test ui::stations
+cargo test ui::station_details
+cargo test ui::recent_tracks
+cargo test ui::settings
+cargo test ui::sleep_timer
+cargo test ui::playback_doctor
+cargo test ui::command_palette
+cargo test ui::deck
+```
+
+Search checks:
+
+```text
+rg "render\(frame: &mut Frame, area: Rect, app: &App\)" src/ui
+rg "use crate::app::App" src/ui
+rg "crate::ui::text" src/ui
+```
+
+Expected after full migration:
+
+```text
+- `use crate::app::App` remains only in src/ui/model.rs and src/ui/mod.rs adapter/tests.
+- No production renderer accepts `app: &App`.
+- No production UI code calls `crate::ui::text::*` if optional text cleanup is completed.
+```
+
+---
+
+# Manual smoke checklist
+
+Because 0.4.4 changes render data plumbing, run a UI smoke pass even though behavior should be unchanged.
+
+## Layout
+
+```text
+[ ] Start app in normal mode.
+[ ] Split View renders header, library, deck, and controls.
+[ ] `b` cycles Library Focus and Signal Focus.
+[ ] Compact terminal warning still appears below 80x24.
+```
+
+## Search
+
+```text
+[ ] `/` opens search.
+[ ] Typing `tag:ambient` shows debounce indicator and results.
+[ ] Search result saved markers still appear.
+[ ] Search empty/error/stale states still render correctly.
+[ ] `Space` audition and `Enter` save-play still show correct footer hints.
+```
+
+## Station list and details
+
+```text
+[ ] Genre tabs still show and selection remains correct.
+[ ] Current playing station marker still appears.
+[ ] Selected row still highlights correctly.
+[ ] Empty library onboarding still appears only in normal mode.
+[ ] `i` opens Station Details with grouped sections.
+```
+
+## Overlays
+
+```text
+[ ] `h` help overlay renders.
+[ ] `,` settings overlay renders selected row and description.
+[ ] `d` Playback Doctor renders state/output/decoder/reconnect info.
+[ ] `g` Recent Tracks or Listening History renders depending on setting.
+[ ] `t` Sleep Timer renders remaining/waiting/off state.
+[ ] Critical playback error banner still appears inside overlays.
+```
+
+## Deck
+
+```text
+[ ] Cassette/deck renders in Split View and Signal Focus.
+[ ] Spectrum mode still animates while connecting.
+[ ] Visualizer still reacts during playback.
+[ ] Fade-out keeps deck visually active.
+```
+
+## Command palette
+
+```text
+[ ] `:` or `Ctrl+p` opens command palette above other UI.
+[ ] Filtering still works.
+[ ] Selected command highlight still works.
+[ ] Commands still execute after selection.
+```
+
+---
+
+# Edge cases to guard
+
+## Edge case: `UiModel` lifetime with temporary visible list
+
+This is valid:
+
+```rust
+let visible_stations = app.visible_stations();
+let selected_station = visible_stations.get(app.nav.selected).copied();
+```
+
+because `visible_stations` stores references into `app`, and `selected_station` also references `app`. Both live inside `UiModel`.
+
+Do not build selected station from a temporary that is dropped before the model:
+
+```rust
+// Bad pattern if not stored in model
+let selected_station = app.visible_stations().get(app.nav.selected).copied();
+```
+
+The compiler may catch this, but avoid it.
+
+## Edge case: command palette command vector ownership
+
+If `UiModel` owns:
+
+```rust
+pub command_palette_commands: Vec<CommandPaletteCommand>
+```
+
+then helpers must borrow it:
+
+```rust
+let commands = &model.command_palette_commands;
+```
+
+Do not clone it repeatedly inside nested render functions.
+
+## Edge case: settings selected row out of bounds
+
+Keep current defensive behavior:
+
+```rust
+SettingRow::from_index(model.selected_setting_idx).unwrap_or(SettingRow::Notifications)
+```
+
+or whatever fallback the current code uses. Do not unwrap.
+
+## Edge case: visible station list empty but nav selected nonzero
+
+Keep `ListState` selection behavior safe:
+
+```rust
+if !model.visible_stations.is_empty() {
+    state.select(Some(model.nav_selected));
+}
+```
+
+Do not select row 0 when the list is empty.
+
+## Edge case: visualizer lock poisoning
+
+Keep:
+
+```rust
+if let Ok(buf) = model.sample_buffer.lock() {
+    // render from samples
+}
+```
+
+Do not use:
+
+```rust
+model.sample_buffer.lock().unwrap()
+```
+
+## Edge case: compact terminal path
+
+Do not build full `UiModel` before returning compact warning unless you intentionally accept that extra work. Preferred path:
+
+```rust
+let size = frame.area();
+render_background(frame, size);
+if is_compact_terminal(size) {
+    render_compact_terminal_warning(frame, size);
+    return;
+}
+let model = UiModel::from(app);
 ```
 
 ---
 
 # Rollback strategy
 
-## If `AppParts` extraction causes startup regressions
+## If `UiModel` causes broad compile churn
 
-Revert only the constructor split commit. Keep any pure helper tests that still make sense.
-
-High-risk areas:
+Rollback to the first safe checkpoint:
 
 ```text
-src/app/lifecycle.rs::App::new
-src/app/lifecycle.rs::apply_startup_autoplay
-src/app/lifecycle.rs::apply_startup_warnings
+Keep src/ui/model.rs and its tests.
+Keep ui::draw adapter if it compiles.
+Revert individual renderer migrations.
 ```
 
-Check for changed order of startup actions first. Most regressions will be ordering bugs, not type bugs.
+The release can still ship with top-level `draw` using `UiModel` and child renderers using `&App` as a transitional step if needed.
 
-## If `AppDriver` extraction causes search regressions
+## If station list behavior changes
 
-Revert `src/runtime.rs` and restore the previous inline block in `src/main.rs`. Search task orchestration is isolated enough that rollback should be straightforward.
-
-High-risk areas:
+Check first:
 
 ```text
-src/runtime.rs::update_search_debounce
-src/runtime.rs::spawn_ready_search
-src/runtime.rs::drain_search_responses
+src/ui/model.rs::visible_stations
+src/ui/stations.rs iteration over model.visible_stations
+src/ui/stations.rs station_list_title
+src/ui/stations.rs ListState selection
 ```
 
-Compare line-by-line with the previous main loop before inventing new behavior.
+Most bugs here will be `&&Station` iterator mistakes or using `visible_count` from the wrong source.
 
-## If metadata refresh stops completing
+## If command palette behavior changes
 
 Check:
 
 ```text
-src/runtime.rs::spawn_metadata_refresh_if_requested
-src/runtime.rs::drain_metadata_refresh_responses
-src/app/library.rs::take_metadata_refresh_request
-src/app/library.rs::apply_metadata_refresh_response
+src/ui/model.rs command_palette_commands field
+src/ui/command_palette.rs selected index clamp
+src/app/command_palette.rs command_palette_commands implementation
 ```
 
-The most likely bug is forgetting to drain `metadata_rx` every tick or moving drain before spawn in a way that delays completion by a tick. A one-tick delay is fine. Never draining is not.
+Rollback command palette migration if needed. It can remain on `&App` longer than other modules.
+
+## If visualizer behavior changes
+
+Rollback only the deck/visualizer cluster. Keep `UiModel` and other migrated modules. The visualizer is the most timing-sensitive render area because it reads sample buffers and tick counters.
 
 ---
 
-# Known non-goals for 0.4.3
+# Known non-goals for 0.4.4
 
-Do not include these:
+Do not include:
 
 ```text
-- No decoder changes.
-- No AAC/M4A compatibility work.
-- No audio buffering architecture.
-- No UI model migration.
+- No audio decoder changes.
+- No stream compatibility changes.
+- No persistence retry throttling.
 - No keybinding changes.
-- No Radio Browser ranking changes.
-- No library JSON format migration.
-- No cancellation system for metadata refresh tasks.
-- No broad trait-based dependency injection framework.
-- No async terminal input rewrite.
+- No UI redesign.
+- No new layout mode.
+- No station ranking or search API changes.
+- No settings model redesign.
+- No broad app-state split.
+- No generic trait-based UI framework.
 ```
 
 ---
 
-# Future work after 0.4.3
+# Future work after 0.4.4
 
-Good next candidates:
-
-```text
-0.4.4: UI read model extraction so rendering no longer depends directly on the full App object.
-0.4.5: Focused LibraryStore abstraction for config/history persistence tests.
-0.5.0: Audio compatibility release with explicit MP3/AAC/M4A/OGG stream matrix and decoder strategy.
-```
-
-Potential `UiModel` path:
+Good next releases:
 
 ```text
-src/ui/model.rs
-src/ui/mod.rs::draw(frame, &UiModel::from(&app))
-render modules gradually take &UiModel instead of &App
+0.4.5: Persistence retry throttling so failed saves do not retry every tick.
+0.4.6: Split `UiModel` into focused submodels once renderers depend on it consistently.
+0.5.0: Dedicated audio compatibility release with explicit codec/stream QA matrix.
 ```
 
-Potential persistence abstraction path:
+Potential post-0.4.4 submodel shape:
 
-```text
-src/storage.rs::LibraryStore
-src/storage.rs::HistoryStore
-src/config.rs remains path resolver
-favorites.rs remains domain plus serialization
+```rust
+pub struct UiModel<'a> {
+    pub layout: UiLayoutModel,
+    pub playback: UiPlaybackModel<'a>,
+    pub library: UiLibraryModel<'a>,
+    pub search: UiSearchModel<'a>,
+    pub overlays: UiOverlayModel<'a>,
+    pub diagnostics: UiDiagnosticsModel<'a>,
+}
 ```
 
-Potential audio compatibility path:
-
-```text
-src/audio/session.rs::choose_decoder
-explicit stream codec hints from Station.codec
-manual stream matrix in docs/releases/0.5.0.md
-```
+Only do this after the first migration proves stable.
 
 ---
 
-# Final 0.4.3 release gate
+# Final release smell test
 
-Do not tag 0.4.3 until all are true:
+0.4.4 is successful if:
 
 ```text
-[ ] App::new remains available and production-safe.
-[ ] App::from_parts exists for testable state construction.
-[ ] Startup warnings still surface correctly.
-[ ] Autoplay behavior is preserved.
-[ ] main.rs no longer owns search/metadata worker channels.
-[ ] runtime driver does not perform network calls in unit tests.
-[ ] cargo check passes.
-[ ] cargo test passes.
-[ ] cargo clippy --all-targets --all-features passes.
-[ ] Light manual smoke test passes.
-[ ] CHANGELOG.md has a 0.4.3 entry.
+- main.rs still calls ui::draw(frame, &app).
+- ui::draw immediately adapts App into UiModel after the compact-terminal guard.
+- production UI render modules no longer accept &App directly, except the transitional adapter if intentionally left.
+- UI behavior looks unchanged.
+- full tests and clippy pass.
+- no audio files changed.
 ```
 
-The success smell for 0.4.3: `main.rs` reads like a doorway, `App::new` reads like a recipe, and the audio path remains untouched enough that the speaker gremlin keeps sleeping.
+In human terms: the cockpit still looks identical, but the dashboard now gets a clean instrument feed instead of reaching through the firewall with a handful of wires.

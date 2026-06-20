@@ -1,9 +1,9 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-pub(super) fn render_spectrum_analyzer(frame: &mut Frame, area: Rect, app: &App) {
+pub(super) fn render_spectrum_analyzer(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let width = area.width as usize;
     let height = area.height as usize;
     let peaks = &app.visualizer_peaks;

@@ -24,7 +24,7 @@ use crate::radio::Station;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-pub use command_palette::{command_label, CommandPaletteState};
+pub use command_palette::{command_label, CommandPaletteState, PaletteCommand};
 pub use lifecycle::NoticeState;
 pub use nav::Navigation;
 pub use overlays::{ActiveOverlay, Overlays};

@@ -1,4 +1,5 @@
-use crate::app::{App, PlaybackState};
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -9,7 +10,7 @@ const DECK_REEL_CELL_WIDTH: usize = 10;
 const DECK_SIGNAL_WIDTH: usize = 4;
 pub(super) const DECK_ART_HEIGHT: u16 = 9;
 
-pub(super) fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
+pub(super) fn render_cassette(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let lines = build_deck_lines(DECK_INNER_WIDTH, app.tick_count, &app.player.state);
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);

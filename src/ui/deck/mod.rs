@@ -1,4 +1,5 @@
-use crate::app::{App, LayoutMode};
+use crate::app::LayoutMode;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
@@ -7,7 +8,7 @@ mod cassette;
 mod meta;
 mod visualizer;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())

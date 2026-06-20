@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table};
 
@@ -7,7 +7,7 @@ use super::{critical, theme};
 const MIN_HELP_WIDTH: u16 = 60;
 const MIN_HELP_HEIGHT: u16 = 14;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     // Keep the help compact so it still fits when terminal fonts are large.
     let popup_area = super::centered_rect(70, 60, area);
 
