@@ -8,6 +8,20 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.3] - Unreleased
+
+### Changed
+*   **App construction**: Split production runtime loading from pure app state assembly with internal `AppParts` and `App::from_parts`, keeping `App::new(library)` as the public convenience constructor.
+*   **Startup lifecycle wiring**: Extracted startup audio sync, warning aggregation, and autoplay setup into focused helpers so config/history loading, warning display, and auto-resume behavior are easier to test without changing playback semantics.
+*   **Runtime orchestration**: Moved search debounce, Radio Browser search worker spawning, library metadata refresh worker spawning, and response draining out of `src/main.rs` into `src/runtime.rs::AppDriver`.
+*   **Main loop clarity**: Reduced `src/main.rs` to CLI short-circuit, library/theme startup, terminal initialization, event polling, app updates, runtime ticking, and quit handling.
+
+### Internal
+*   Added regression coverage for injected app construction, startup warning behavior, autoplay failure visibility with a dead audio engine, runtime debounce state, and metadata refresh response draining.
+*   Named the frame tick duration as `TICK_RATE` and moved search debounce timing into the runtime driver.
+
+---
+
 ## [0.4.2] - Unreleased
 
 ### Changed

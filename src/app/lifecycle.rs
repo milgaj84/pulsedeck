@@ -26,30 +26,59 @@ pub struct NoticeState {
     ticks_remaining: u16,
 }
 
-impl App {
-    pub fn new(library: Library) -> Self {
+pub(super) struct AppParts {
+    pub library: Library,
+    pub ui_state: super::ui_state::UiState,
+    pub ui_state_warning: Option<String>,
+    pub history: crate::history::History,
+    pub history_warning: Option<String>,
+    pub audio: AudioEngine,
+    pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+}
+
+impl AppParts {
+    pub(super) fn load(library: Library) -> Self {
         let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
         let (history, history_warning) = crate::history::History::load_with_warning();
+
+        Self {
+            library,
+            ui_state,
+            ui_state_warning,
+            history,
+            history_warning,
+            audio,
+            sample_buffer,
+        }
+    }
+}
+
+impl App {
+    pub fn new(library: Library) -> Self {
+        Self::from_parts(AppParts::load(library))
+    }
+
+    pub(super) fn from_parts(parts: AppParts) -> Self {
         let diagnostics_output_device = crate::audio::output_device_display_name(
-            library.settings.output_device_name.as_deref(),
+            parts.library.settings.output_device_name.as_deref(),
         );
-        let diagnostics_metadata_enabled = library.settings.stream_metadata_enabled;
+        let diagnostics_metadata_enabled = parts.library.settings.stream_metadata_enabled;
 
         let mut app = Self {
-            library,
+            library: parts.library,
             nav: Navigation::default(),
             search: SearchState::default(),
             command_palette: CommandPaletteState::default(),
             player: PlaybackView::default(),
-            volume: ui_state.volume(),
-            muted: ui_state.muted(),
+            volume: parts.ui_state.volume(),
+            muted: parts.ui_state.muted(),
             should_quit: false,
             notice: NoticeState::default(),
             input_mode: InputMode::Normal,
             tick_count: 0,
-            layout_mode: ui_state.layout_mode(),
+            layout_mode: parts.ui_state.layout_mode(),
             overlays: Overlays::default(),
             song_history: VecDeque::new(),
             undo_history: VecDeque::new(),
@@ -61,21 +90,34 @@ impl App {
                 ..PlaybackDiagnostics::default()
             },
             sleep_timer: SleepTimer::default(),
-            history,
+            history: parts.history,
             metadata_refresh_pending: false,
             metadata_refresh_running: false,
             persist: persist::PersistFlags::default(),
-            audio,
-            sample_buffer,
-            visualizer_mode: ui_state.visualizer_mode(),
+            audio: parts.audio,
+            sample_buffer: parts.sample_buffer,
+            visualizer_mode: parts.ui_state.visualizer_mode(),
             visualizer_peaks: Vec::new(),
         };
 
-        app.sync_output_device();
-        app.sync_stream_metadata();
-        app.sync_volume();
+        app.sync_startup_audio_settings();
+        app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
+        app.apply_startup_autoplay();
+        app
+    }
 
-        let mut startup_warnings = app.library.load_warnings.clone();
+    fn sync_startup_audio_settings(&mut self) {
+        self.sync_output_device();
+        self.sync_stream_metadata();
+        self.sync_volume();
+    }
+
+    fn apply_startup_warnings(
+        &mut self,
+        ui_state_warning: Option<String>,
+        history_warning: Option<String>,
+    ) {
+        let mut startup_warnings = self.library.load_warnings.clone();
         if let Some(warning) = ui_state_warning {
             startup_warnings.push(warning);
         }
@@ -85,26 +127,30 @@ impl App {
 
         match startup_warnings.len() {
             0 => {}
-            1 => app.set_error_notice(startup_warnings.remove(0)),
-            count => app.set_error_notice(format!(
+            1 => self.set_error_notice(startup_warnings.remove(0)),
+            count => self.set_error_notice(format!(
                 "{count} config files had load warnings; using safe defaults where needed"
             )),
         }
+    }
 
-        if app.library.settings.autoplay_last {
-            if let Some(url) = app.library.settings.last_played_url.clone() {
-                if let Some(pos) = last_played_station_position(&app.library.stations, &url) {
-                    app.nav.selected = pos;
-                }
-                app.player.playing_url = Some(url.clone());
-                app.player.state = PlaybackState::Connecting;
-                if app.send_audio_command(AudioCommand::Play(url)) {
-                    app.sync_volume();
-                }
-            }
+    fn apply_startup_autoplay(&mut self) {
+        if !self.library.settings.autoplay_last {
+            return;
         }
 
-        app
+        let Some(url) = self.library.settings.last_played_url.clone() else {
+            return;
+        };
+
+        if let Some(pos) = last_played_station_position(&self.library.stations, &url) {
+            self.nav.selected = pos;
+        }
+        self.player.playing_url = Some(url.clone());
+        self.player.state = PlaybackState::Connecting;
+        if self.send_audio_command(AudioCommand::Play(url)) {
+            self.sync_volume();
+        }
     }
 
     pub(super) fn set_info_notice(&mut self, message: impl Into<String>) {
@@ -259,6 +305,83 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_parts(library: Library) -> AppParts {
+        AppParts {
+            library,
+            ui_state: super::super::ui_state::UiState::from_app_values(
+                37,
+                true,
+                LayoutMode::RightOnly,
+                2,
+            ),
+            ui_state_warning: None,
+            history: crate::history::History::default(),
+            history_warning: None,
+            audio: AudioEngine::disconnected_for_test(),
+            sample_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(4096))),
+        }
+    }
+
+    #[test]
+    fn from_parts_uses_injected_ui_state_without_loading_runtime_files() {
+        let app = App::from_parts(test_parts(Library::in_memory(vec![])));
+
+        assert_eq!(app.volume, 37);
+        assert!(app.muted);
+        assert_eq!(app.layout_mode, LayoutMode::RightOnly);
+        assert_eq!(app.visualizer_mode, 2);
+    }
+
+    #[test]
+    fn from_parts_shows_single_startup_warning_verbatim() {
+        let mut library = Library::in_memory(vec![]);
+        library.load_warnings.push("bad library".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        assert!(matches!(
+            app.notice.current,
+            Some(AppNotice::Error(ref message)) if message == "bad library"
+        ));
+    }
+
+    #[test]
+    fn from_parts_summarizes_multiple_startup_warnings() {
+        let mut parts = test_parts(Library::in_memory(vec![]));
+        parts.ui_state_warning = Some("bad ui".to_string());
+        parts.history_warning = Some("bad history".to_string());
+
+        let app = App::from_parts(parts);
+
+        assert!(matches!(
+            app.notice.current,
+            Some(AppNotice::Error(ref message))
+                if message.contains("2 config files had load warnings")
+        ));
+    }
+
+    #[test]
+    fn from_parts_autoplay_uses_normalized_last_played_url_and_reports_dead_engine() {
+        let mut library = Library::in_memory(vec![Station::basic(
+            "Saved",
+            "HTTP://STREAM/",
+            "Radio",
+            "US",
+            128,
+        )]);
+        library.settings.autoplay_last = true;
+        library.settings.last_played_url = Some("http://stream".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        assert_eq!(app.nav.selected, 0);
+        assert_eq!(app.player.playing_url.as_deref(), Some("http://stream"));
+        assert_eq!(
+            app.player.state,
+            PlaybackState::Error("Audio engine stopped".to_string())
+        );
+    }
 
     #[test]
     fn last_played_station_position_matches_normalized_urls() {
