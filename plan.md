@@ -1,2240 +1,1025 @@
-# PulseDeck 0.4.4 UI Read-Model Plan
+# PulseDeck 0.4.5 Plan: Persistence Backoff and Save Safety
 
-Release theme: **Render From a Window, Not From the Whole House**.
+## Release intent
 
-0.4.1 stabilized the active audio seam. 0.4.2 removed persistence and search-prefix duplication. 0.4.3 split startup/runtime orchestration away from the terminal loop. 0.4.4 should continue the cleanup by introducing a UI read model so render code no longer needs direct access to the full `App` object.
+0.4.5 is a small reliability release focused on persistence behavior. The goal is to make failed saves boring, visible, and non-destructive instead of letting them retry on every UI tick like a tiny disk-writing woodpecker.
 
-This is a structural UI release. It must not change visible layout, keybindings, search semantics, playback behavior, station identity, persistence, or audio decoding. The intended user-visible result is boring: PulseDeck should look and behave the same. The intended developer-visible result is important: render modules read a curated `UiModel` instead of rummaging through all of `App`.
+This release must not change audio playback, stream decoding, station search, station identity, UI layout, or file formats. It only changes when dirty state is flushed after failures and how those failures are reported.
 
----
+## Current problem
 
-## Current baseline
-
-Current UI entrypoint:
+`App::tick` calls `flush_persistence()` every frame:
 
 ```rust
-// src/ui/mod.rs
-pub fn draw(frame: &mut Frame, app: &App) {
-    let size = frame.area();
-    // background
-    // compact terminal guard
-    // header
-    // station list / search / deck layout
-    // controls
-    // overlays
-    // command palette
+// src/app/update.rs
+pub(super) fn tick(&mut self) {
+    let now = std::time::Instant::now();
+    self.tick_count += 1;
+    self.tick_notice();
+    self.poll_audio_status();
+    self.update_visualizer();
+    self.drive_reconnect(now);
+    self.check_sleep_timer(now);
+    self.flush_persistence();
 }
 ```
 
-Current top-level dependencies:
-
-```text
-src/ui/mod.rs imports:
-- crate::app::App
-- crate::app::ActiveOverlay
-- crate::app::InputMode
-- crate::app::LayoutMode
-```
-
-Current render modules still accept `&App` directly:
-
-```text
-src/ui/header.rs::render(frame, area, app: &App)
-src/ui/controls.rs::render(frame, area, app: &App)
-src/ui/stations.rs::render(frame, area, app: &App)
-src/ui/search.rs::render(frame, area, app: &App)
-src/ui/deck/mod.rs::render(frame, area, app: &App)
-src/ui/station_details.rs::render(frame, area, app: &App)
-src/ui/recent_tracks.rs::render(frame, area, app: &App)
-src/ui/help.rs::render(frame, area, app: &App)
-src/ui/settings.rs::render(frame, area, app: &App)
-src/ui/playback_doctor.rs::render(frame, area, app: &App)
-src/ui/sleep_timer.rs::render(frame, area, app: &App)
-src/ui/command_palette.rs::render(frame, area, app: &App)
-```
-
-Important `App` selector methods already exist:
+`flush_persistence()` immediately retries every dirty save on every tick:
 
 ```rust
-// src/app/selectors.rs
-pub fn visible_stations(&self) -> Vec<&Station>
-pub fn selected_station(&self) -> Option<&Station>
-pub fn now_playing(&self) -> Option<&Station>
-pub fn visible_count(&self) -> usize
-```
-
-Those selectors are the bridge. 0.4.4 should expose their output through `UiModel`, not reimplement selection logic in UI code.
-
----
-
-## Non-negotiable rules for 0.4.4
-
-### Rule 1: No behavior changes
-
-The following must stay byte-for-byte equivalent in behavior unless tests prove otherwise:
-
-```text
-- layout modes: Split, Library Focus, Signal Focus
-- overlay priority
-- command palette display condition
-- compact terminal warning threshold
-- visible station ordering
-- selected station logic
-- now-playing station lookup
-- saved/search result markers
-- footer hints
-- Playback Doctor content
-- sleep timer display
-- station details grouping
-```
-
-### Rule 2: Do not touch active audio code
-
-No edits to these unless strictly required by compilation, which should not happen:
-
-```text
-src/audio.rs
-src/audio/engine_loop.rs
-src/audio/session.rs
-src/audio/stream_reader.rs
-src/app/playback.rs audio command behavior
-```
-
-### Rule 3: Migrate in layers, not with a wrecking ball
-
-Do not convert every UI module in one massive pass. The safe order is:
-
-```text
-1. Add src/ui/model.rs.
-2. Make ui::draw build UiModel from &App.
-3. Convert top-level layout decisions in ui::draw to UiModel.
-4. Convert low-risk modules first: header, controls, search.
-5. Convert list/detail overlays next.
-6. Convert deck/visualizer last because it touches sample buffers and timing.
-```
-
-### Rule 4: `UiModel` is read-only
-
-`UiModel` must not own mutation methods. It should expose immutable data and computed view helpers only.
-
-Good:
-
-```rust
-pub struct UiModel<'a> {
-    pub input_mode: InputMode,
-    pub layout_mode: LayoutMode,
-    pub active_overlay: ActiveOverlay,
-    pub playback: &'a PlaybackView,
-    pub selected_station: Option<&'a Station>,
-    pub now_playing: Option<&'a Station>,
-}
-```
-
-Bad:
-
-```rust
-impl UiModel<'_> {
-    pub fn update(&mut self, action: Action) { ... }
-    pub fn remove_station(&mut self) { ... }
-}
-```
-
-### Rule 5: Avoid cloning large state
-
-`UiModel` should borrow from `App`. It should not clone the station library, search results, history, or sample buffer.
-
-Good:
-
-```rust
-pub visible_stations: Vec<&'a Station>
-```
-
-Acceptable for 0.4.4 because `App::visible_stations()` already allocates a `Vec<&Station>` today.
-
-Bad:
-
-```rust
-pub visible_stations: Vec<Station>
-```
-
----
-
-# Fix A: Add `src/ui/model.rs` with a top-level `UiModel`
-
-## Goal
-
-Create a read-only snapshot of exactly what the UI needs. This is the foundation for all later renderer migration.
-
-## Files and symbols
-
-Add:
-
-```text
-src/ui/model.rs
-```
-
-Update:
-
-```text
-src/ui/mod.rs
-```
-
-New symbols:
-
-```text
-src/ui/model.rs::UiModel
-src/ui/model.rs::UiPlaybackModel, optional later
-src/ui/model.rs::UiLibraryModel, optional later
-src/ui/model.rs::UiSearchModel, optional later
-src/ui/model.rs::UiSettingsModel, optional later
-```
-
-Initial `UiModel` should be broad but shallow. Do not over-nest prematurely.
-
-## Proposed initial model
-
-```rust
-// src/ui/model.rs
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-
-use crate::app::{
-    ActiveOverlay, App, AppNotice, CommandPaletteState, DecoderState, InputMode, LayoutMode,
-    Overlays, PlaybackDiagnostics, PlaybackState, PlaybackView, SearchState, SettingRow, SleepTimer,
-};
-use crate::favorites::Library;
-use crate::history::History;
-use crate::radio::Station;
-
-pub struct UiModel<'a> {
-    pub input_mode: InputMode,
-    pub layout_mode: LayoutMode,
-    pub active_overlay: ActiveOverlay,
-    pub selected_setting_idx: usize,
-    pub tick_count: u64,
-
-    pub library: &'a Library,
-    pub visible_stations: Vec<&'a Station>,
-    pub selected_station: Option<&'a Station>,
-    pub now_playing: Option<&'a Station>,
-    pub visible_count: usize,
-
-    pub search: &'a SearchState,
-    pub command_palette: &'a CommandPaletteState,
-    pub player: &'a PlaybackView,
-    pub diagnostics: &'a PlaybackDiagnostics,
-    pub sleep_timer: &'a SleepTimer,
-    pub history: &'a History,
-    pub song_history: &'a VecDeque<String>,
-    pub notice: Option<&'a AppNotice>,
-
-    pub nav_selected: usize,
-    pub nav_selected_genre_idx: usize,
-    pub volume: u8,
-    pub muted: bool,
-    pub visualizer_mode: usize,
-    pub visualizer_peaks: &'a [f32],
-    pub sample_buffer: &'a Arc<Mutex<VecDeque<f32>>>,
-}
-
-impl<'a> UiModel<'a> {
-    pub fn from_app(app: &'a App) -> Self {
-        Self {
-            input_mode: app.input_mode,
-            layout_mode: app.layout_mode,
-            active_overlay: app.overlays.active,
-            selected_setting_idx: app.overlays.selected_setting_idx,
-            tick_count: app.tick_count,
-
-            library: &app.library,
-            visible_stations: app.visible_stations(),
-            selected_station: app.selected_station(),
-            now_playing: app.now_playing(),
-            visible_count: app.visible_count(),
-
-            search: &app.search,
-            command_palette: &app.command_palette,
-            player: &app.player,
-            diagnostics: &app.diagnostics,
-            sleep_timer: &app.sleep_timer,
-            history: &app.history,
-            song_history: &app.song_history,
-            notice: app.notice.current.as_ref(),
-
-            nav_selected: app.nav.selected,
-            nav_selected_genre_idx: app.nav.selected_genre_idx,
-            volume: app.volume,
-            muted: app.muted,
-            visualizer_mode: app.visualizer_mode,
-            visualizer_peaks: &app.visualizer_peaks,
-            sample_buffer: &app.sample_buffer,
+// src/app/persist.rs
+pub(super) fn flush_persistence(&mut self) {
+    if self.persist.ui_state_dirty {
+        let state = super::ui_state::UiState::from_app_values(
+            self.volume,
+            self.muted,
+            self.layout_mode,
+            self.visualizer_mode,
+        );
+        match state.save() {
+            Ok(()) => self.persist.ui_state_dirty = false,
+            Err(err) => self.set_error_notice(format!("Could not save UI state: {err}")),
         }
     }
 
-    pub fn is_searching(&self) -> bool {
-        self.input_mode == InputMode::Search
+    if self.persist.history_dirty {
+        match self.history.save() {
+            Ok(()) => self.persist.history_dirty = false,
+            Err(err) => self.set_error_notice(format!("Could not save history: {err}")),
+        }
     }
 
-    pub fn show_command_palette(&self) -> bool {
-        self.input_mode == InputMode::CommandPalette
-    }
-}
-
-impl<'a> From<&'a App> for UiModel<'a> {
-    fn from(app: &'a App) -> Self {
-        Self::from_app(app)
+    if self.persist.library_dirty {
+        match self.library.save() {
+            Ok(()) => self.persist.library_dirty = false,
+            Err(err) => self.set_error_notice(format!("Could not save library: {err}")),
+        }
     }
 }
 ```
 
-## Why broad and shallow first?
+If saving fails because the config directory is missing, permissions are wrong, the disk is full, or an antivirus/file-lock tantrum occurs, dirty flags remain true. That is correct. The problem is retry cadence: the next tick tries again, and the next tick tries again, roughly every 66ms.
 
-A fully beautiful model would have submodels:
+## Release goals
 
-```rust
-UiModel {
-    layout: UiLayoutModel,
-    playback: UiPlaybackModel,
-    library: UiLibraryModel,
-    search: UiSearchModel,
-    overlays: UiOverlayModel,
-}
-```
+1. Keep dirty flags set after failed saves.
+2. Retry failed persistence after a cooldown, not every tick.
+3. Avoid repeating the same error notice every frame.
+4. Let new user changes request a save without waiting forever behind stale failure state.
+5. Preserve `stop_audio_before_quit()` behavior: quit should still attempt one final flush.
+6. Add focused tests for retry timing, dirty flag preservation, and notice behavior.
+7. Keep the JSON formats unchanged:
+   - UI state file format unchanged.
+   - history file format unchanged.
+   - library file format unchanged.
 
-But doing that immediately risks mixing two hard tasks:
+## Non-goals
 
-1. introducing a read model
-2. redesigning UI data boundaries
+Do not do these in 0.4.5:
 
-For 0.4.4, prefer the bridge model. Once render modules no longer require `&App`, 0.4.5 or later can split `UiModel` into submodels.
+- Do not change audio engine code.
+- Do not change `AudioEngine::send` behavior.
+- Do not change stream decoder selection.
+- Do not change `LibraryFile` JSON shape.
+- Do not make persistence asynchronous.
+- Do not add a database.
+- Do not add background save threads.
+- Do not change UI layout or notice rendering.
+- Do not move config paths.
 
-## Required tests
+This release is a brake pedal, not a new vehicle.
 
-Add tests in `src/ui/model.rs`.
+## Current connections
 
-### Model captures core layout flags
+### Save producers
 
-```rust
-#[test]
-fn ui_model_captures_layout_overlay_and_input_mode() {
-    let mut app = App::new(Library::in_memory(vec![]));
-    app.input_mode = InputMode::Search;
-    app.layout_mode = LayoutMode::RightOnly;
-    app.overlays.active = ActiveOverlay::Help;
-
-    let model = UiModel::from(&app);
-
-    assert!(model.is_searching());
-    assert_eq!(model.layout_mode, LayoutMode::RightOnly);
-    assert_eq!(model.active_overlay, ActiveOverlay::Help);
-}
-```
-
-### Model uses existing selectors
-
-```rust
-#[test]
-fn ui_model_uses_app_selectors_for_visible_selected_and_now_playing() {
-    let mut app = App::new(Library::in_memory(vec![
-        Station::basic("A", "http://a", "Synthwave", "US", 128),
-        Station::basic("B", "http://b", "Synthwave", "US", 128),
-    ]));
-    app.nav.selected = 1;
-    app.player.playing_url = Some("http://a".to_string());
-
-    let model = UiModel::from(&app);
-
-    assert_eq!(model.visible_stations.len(), 2);
-    assert_eq!(model.selected_station.map(|station| station.name.as_str()), Some("B"));
-    assert_eq!(model.now_playing.map(|station| station.name.as_str()), Some("A"));
-}
-```
-
-### Model does not clone station data
-
-This is mostly a code-review invariant. If you want a lightweight test, compare pointer identity:
-
-```rust
-#[test]
-fn ui_model_borrows_visible_station_data() {
-    let app = App::new(Library::in_memory(vec![Station::basic(
-        "A", "http://a", "Synthwave", "US", 128,
-    )]));
-
-    let model = UiModel::from(&app);
-
-    assert!(std::ptr::eq(model.visible_stations[0], &app.library.stations[0]));
-}
-```
-
-## Pitfalls
-
-### Pitfall: exposing `Overlays` directly
-
-Avoid this if possible:
-
-```rust
-pub overlays: &'a Overlays
-```
-
-That keeps UI coupled to the whole overlay state bag. Prefer fields that the UI currently needs:
-
-```rust
-pub active_overlay: ActiveOverlay
-pub selected_setting_idx: usize
-```
-
-### Pitfall: cloning command lists every frame too early
-
-`command_palette_commands()` currently lives on `App`. If `command_palette.rs` still needs it during the first migration, either:
-
-1. leave command palette on `&App` for the first pass, or
-2. add a model helper that calls the same logic without cloning more than today.
-
-For 0.4.4, it is acceptable to leave command palette conversion for a later step inside this same release, but do not block the top-level `UiModel` on it.
-
-### Pitfall: computing visible stations twice
-
-`selected_station()` currently calls `visible_stations()` internally. If `UiModel::from_app` calls both `visible_stations()` and `selected_station()`, it may allocate twice. That is acceptable as a first pass because UI code already does repeated selector calls. A follow-up optimization can compute selected from `visible_stations`:
-
-```rust
-let visible_stations = app.visible_stations();
-let selected_station = visible_stations.get(app.nav.selected).copied();
-```
-
-Recommended implementation:
-
-```rust
-let visible_stations = app.visible_stations();
-let selected_station = visible_stations.get(app.nav.selected).copied();
-let visible_count = visible_stations.len();
-```
-
-Do not use this if it changes behavior in search mode or genre filtering. It should not, because it reuses the selector output.
-
----
-
-# Fix B: Convert `src/ui/mod.rs::draw` to use `UiModel`
-
-## Goal
-
-Keep the public draw entrypoint unchanged for `main.rs`, but convert the actual render tree root to use `UiModel`.
-
-`main.rs` should still call:
-
-```rust
-terminal.draw(|frame| ui::draw(frame, &app))?;
-```
-
-`ui::draw` should become a thin adapter:
-
-```rust
-pub fn draw(frame: &mut Frame, app: &App) {
-    let model = UiModel::from(app);
-    draw_model(frame, &model);
-}
-```
-
-Then the real root render function uses the model:
-
-```rust
-fn draw_model(frame: &mut Frame, model: &UiModel<'_>) {
-    let size = frame.area();
-    // same body as before, but top-level decisions read model
-}
-```
-
-## Files and symbols
-
-Update:
+Dirty flags are set by these paths:
 
 ```text
-src/ui/mod.rs
-src/ui/model.rs
+src/app/playback.rs::volume_up
+src/app/playback.rs::volume_down
+src/app/playback.rs::toggle_mute
+src/app/overlays.rs::toggle_station_details
+src/app/overlays.rs::toggle_recent_tracks
+src/app/library.rs::remove_library_selection
+src/app/library.rs::undo_remove_library_selection
+src/app/search.rs::confirm_search
+src/app/settings.rs settings mutations
+src/app/sleep_timer.rs sleep timer mutations, if persisted later
 ```
 
-Add module declaration:
+Search for:
 
-```rust
-// src/ui/mod.rs
-pub mod model;
+```text
+mark_ui_state_dirty
+mark_history_dirty
+mark_library_dirty
 ```
 
-Update imports:
+### Save consumer
 
-```rust
-use crate::app::App;
-use model::UiModel;
+The consumer is:
+
+```text
+src/app/update.rs::tick
+  -> src/app/persist.rs::flush_persistence
 ```
 
-Top-level decisions should change from:
+Quit path also calls persistence manually:
+
+```text
+src/app/playback.rs::stop_audio_before_quit
+  -> self.flush_persistence()
+  -> self.audio.send(AudioCommand::Stop)
+```
+
+0.4.5 must treat the quit path carefully. A cooldown that prevents normal tick retries should not prevent an explicit final flush before quit.
+
+## Design summary
+
+Add retry bookkeeping to `PersistFlags`:
 
 ```rust
-let is_searching = app.input_mode == InputMode::Search;
-match app.layout_mode { ... }
-match app.overlays.active { ... }
-if app.input_mode == InputMode::CommandPalette { ... }
+// src/app/persist.rs
+#[derive(Default)]
+pub(super) struct PersistFlags {
+    ui_state_dirty: bool,
+    history_dirty: bool,
+    library_dirty: bool,
+    retry: PersistenceRetry,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PersistenceRetry {
+    next_retry_at: Option<std::time::Instant>,
+    last_error_key: Option<PersistenceErrorKey>,
+    last_error_notice_at: Option<std::time::Instant>,
+}
+
+impl Default for PersistenceRetry {
+    fn default() -> Self {
+        Self {
+            next_retry_at: None,
+            last_error_key: None,
+            last_error_notice_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PersistenceErrorKey {
+    target: PersistTarget,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PersistTarget {
+    UiState,
+    History,
+    Library,
+}
+```
+
+Use a cooldown constant:
+
+```rust
+// src/app/persist.rs
+const PERSIST_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+const PERSIST_NOTICE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+```
+
+The 5-second retry cooldown prevents frame-by-frame disk writes. The 30-second notice cooldown prevents a visual error flood if the same failure persists. These values should be constants so later releases can tune them without hunting literals.
+
+## Implementation phase 1: split persistence flush API
+
+### Files
+
+```text
+src/app/persist.rs
+src/app/update.rs
+src/app/playback.rs
+```
+
+### Add flush modes
+
+Introduce an explicit mode so `tick()` and quit can behave differently.
+
+```rust
+// src/app/persist.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PersistenceFlushMode {
+    Scheduled,
+    Force,
+}
+```
+
+Change the current method from:
+
+```rust
+pub(super) fn flush_persistence(&mut self) {
+    // immediate save attempts
+}
 ```
 
 to:
 
 ```rust
-let is_searching = model.is_searching();
-match model.layout_mode { ... }
-match model.active_overlay { ... }
-if model.show_command_palette() { ... }
-```
-
-## Transitional renderer calls
-
-At first, `draw_model` may still call module renderers with `&App` if the module has not been migrated yet. But once `draw_model` only has `&UiModel`, that is not possible. Pick one of these strategies:
-
-### Strategy 1: top-level adapter keeps both `app` and `model`
-
-```rust
-pub fn draw(frame: &mut Frame, app: &App) {
-    let model = UiModel::from(app);
-    draw_model(frame, app, &model);
+pub(super) fn flush_persistence(&mut self) {
+    self.flush_persistence_with_mode(PersistenceFlushMode::Scheduled);
 }
 
-fn draw_model(frame: &mut Frame, app: &App, model: &UiModel<'_>) {
-    // top-level decisions use model
-    header::render(frame, chunks[0], app); // not migrated yet
-}
-```
-
-This is the safest first commit. It proves the model and root decisions without forcing every module to migrate immediately.
-
-### Strategy 2: convert all direct children at once
-
-```rust
-header::render(frame, chunks[0], model);
-stations::render(frame, left_area, model);
-```
-
-This is cleaner but much larger. For 0.4.4, use Strategy 1 first, then migrate direct children one by one.
-
-## Required tests
-
-Existing compact terminal tests should still pass:
-
-```text
-ui::tests::compact_terminal_rejects_width_below_minimum
-ui::tests::compact_terminal_rejects_height_below_minimum
-ui::tests::compact_terminal_accepts_exact_minimum
-ui::tests::compact_terminal_accepts_larger_terminal
-```
-
-Add one small test for the model-powered predicates instead of screenshot testing:
-
-```rust
-#[test]
-fn ui_model_reports_command_palette_visibility() {
-    let mut app = App::new(Library::in_memory(vec![]));
-    app.input_mode = InputMode::CommandPalette;
-
-    let model = UiModel::from(&app);
-
-    assert!(model.show_command_palette());
-}
-```
-
-## Pitfalls
-
-### Pitfall: changing overlay order
-
-Preserve this exact priority:
-
-```rust
-match app.overlays.active {
-    ActiveOverlay::StationDetails => station_details::render(...),
-    ActiveOverlay::RecentTracks => recent_tracks::render(...),
-    ActiveOverlay::Help => help::render(...),
-    ActiveOverlay::Settings => settings::render(...),
-    ActiveOverlay::PlaybackDoctor => playback_doctor::render(...),
-    ActiveOverlay::SleepTimer => sleep_timer::render(...),
-    ActiveOverlay::None => {}
+pub(super) fn force_flush_persistence(&mut self) {
+    self.flush_persistence_with_mode(PersistenceFlushMode::Force);
 }
 
-if app.input_mode == InputMode::CommandPalette {
-    command_palette::render(...)
-}
-```
+fn flush_persistence_with_mode(&mut self, mode: PersistenceFlushMode) {
+    let now = std::time::Instant::now();
 
-Command palette currently renders after normal overlays. Keep it that way.
-
-### Pitfall: compact terminal guard must run before other model-heavy UI work
-
-Currently `draw` builds no station rows if terminal is too compact. If `UiModel::from(app)` computes visible stations before the compact guard, it may do more work than before on tiny terminals.
-
-Preferred compromise for 0.4.4:
-
-```rust
-pub fn draw(frame: &mut Frame, app: &App) {
-    let size = frame.area();
-    render_background(frame, size);
-
-    if is_compact_terminal(size) {
-        render_compact_terminal_warning(frame, size);
+    if mode == PersistenceFlushMode::Scheduled && !self.persist.retry_due(now) {
         return;
     }
 
-    let model = UiModel::from(app);
-    draw_model(frame, size, app, &model);
-}
-```
-
-This preserves the compact-terminal fast path.
-
----
-
-# Fix C: Convert low-risk modules from `&App` to `&UiModel`
-
-## Goal
-
-Move the least risky modules away from `&App` first. These modules mostly read scalar fields or existing selector outputs.
-
-Recommended first cluster:
-
-```text
-src/ui/header.rs
-src/ui/search.rs
-src/ui/controls.rs
-```
-
-Do **not** start with `stations.rs` or visualizer modules. Those have more list/selection and sample-buffer details.
-
----
-
-## C1: Convert `src/ui/header.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::{App, PlaybackState};
-
-pub fn render(frame: &mut Frame, area: Rect, app: &App) { ... }
-fn render_now_playing(frame: &mut Frame, area: Rect, app: &App) { ... }
-```
-
-It uses:
-
-```text
-app.player.state
-app.now_playing()
-app.player.current_track
-```
-
-### Desired signature
-
-```rust
-use crate::app::PlaybackState;
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-fn render_now_playing(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-```
-
-### Replacement logic
-
-Change:
-
-```rust
-match (&app.player.state, app.now_playing())
-```
-
-to:
-
-```rust
-match (&model.player.state, model.now_playing)
-```
-
-Change:
-
-```rust
-if let Some(ref track) = app.player.current_track
-```
-
-to:
-
-```rust
-if let Some(ref track) = model.player.current_track
-```
-
-### Tests
-
-Existing header tests, if any, should pass. If there are no header tests, rely on compile plus full UI tests.
-
-### Pitfalls
-
-Do not clone station name or current track just to satisfy lifetimes. Borrow string slices where possible.
-
----
-
-## C2: Convert `src/ui/search.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::{App, SearchStatus};
-```
-
-It uses:
-
-```text
-app.search.results
-app.nav.selected
-app.library.contains_station(station)
-app.search.status
-app.tick_count
-app.search.query
-```
-
-### Desired signature
-
-```rust
-use crate::app::SearchStatus;
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-fn highlighted_result_explanation(model: &UiModel<'_>) -> Option<String> { ... }
-```
-
-### Replacement logic
-
-Change:
-
-```rust
-let result_count = app.search.results.len();
-let selected_result_saved = app.search.results
-    .get(app.nav.selected)
-    .map(|station| app.library.contains_station(station))
-    .unwrap_or(false);
-```
-
-to:
-
-```rust
-let result_count = model.search.results.len();
-let selected_result_saved = model.search.results
-    .get(model.nav_selected)
-    .map(|station| model.library.contains_station(station))
-    .unwrap_or(false);
-```
-
-Change:
-
-```rust
-Span::styled(debounce_indicator_text(query, app.tick_count), theme::dim())
-```
-
-to:
-
-```rust
-Span::styled(debounce_indicator_text(query, model.tick_count), theme::dim())
-```
-
-Change:
-
-```rust
-let station = app.search.results.get(app.nav.selected)?;
-let query = StationSearchQuery::parse(&app.search.query);
-let is_saved = app.library.contains_station(station);
-```
-
-to:
-
-```rust
-let station = model.search.results.get(model.nav_selected)?;
-let query = StationSearchQuery::parse(&model.search.query);
-let is_saved = model.library.contains_station(station);
-```
-
-### Tests
-
-Existing tests should continue passing:
-
-```text
-ui::search::tests::compact_search_label_truncates_long_queries
-ui::search::tests::compact_explanation_label_truncates_safely
-ui::search::tests::debounce_indicator_text_feels_active_without_saying_soon
-ui::search::tests::search_debounce_frame_wraps_through_spinner_frames
-ui::search::tests::stale_response_text_reports_discarded_query
-```
-
-### Pitfalls
-
-`model.visible_stations` should not be used here. Search bar specifically cares about `model.search.results`, not the visible list title logic.
-
----
-
-## C3: Convert `src/ui/controls.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState};
-```
-
-It uses many scalar fields:
-
-```text
-app.player.state
-app.now_playing()
-app.player.current_track
-app.layout_mode
-app.visualizer_mode
-app.sleep_timer.remaining(now)
-app.notice.current
-app.muted
-app.volume
-app.show_help()
-app.show_station_details()
-app.show_recent_tracks()
-app.show_sleep_timer()
-app.library.settings.save_history
-app.input_mode
-app.visible_count()
-```
-
-### Desired signature
-
-```rust
-use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState};
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-```
-
-### Required `UiModel` helper methods
-
-Add these helpers to avoid leaking overlay logic back into controls:
-
-```rust
-impl UiModel<'_> {
-    pub fn show_help(&self) -> bool {
-        self.active_overlay == ActiveOverlay::Help
-    }
-
-    pub fn show_station_details(&self) -> bool {
-        self.active_overlay == ActiveOverlay::StationDetails
-    }
-
-    pub fn show_recent_tracks(&self) -> bool {
-        self.active_overlay == ActiveOverlay::RecentTracks
-    }
-
-    pub fn show_sleep_timer(&self) -> bool {
-        self.active_overlay == ActiveOverlay::SleepTimer
+    match self.try_flush_persistence_once() {
+        Ok(()) => self.persist.clear_retry_state(),
+        Err(error) => self.handle_persistence_error(error, now),
     }
 }
 ```
 
-### Replacement logic
+### Update callers
 
-Change:
-
-```rust
-match (&app.player.state, app.now_playing())
-```
-
-to:
+Keep `tick()` as scheduled:
 
 ```rust
-match (&model.player.state, model.now_playing)
-```
-
-Change:
-
-```rust
-layout_label(app.layout_mode)
-visualizer_label(app.visualizer_mode)
-```
-
-to:
-
-```rust
-layout_label(model.layout_mode)
-visualizer_label(model.visualizer_mode)
-```
-
-Change:
-
-```rust
-if let Some(remaining) = app.sleep_timer.remaining(std::time::Instant::now())
-```
-
-to:
-
-```rust
-if let Some(remaining) = model.sleep_timer.remaining(std::time::Instant::now())
-```
-
-Change:
-
-```rust
-if let Some(ref notice) = app.notice.current
-```
-
-to:
-
-```rust
-if let Some(notice) = model.notice
-```
-
-Change:
-
-```rust
-if app.visible_count() == 0
-```
-
-to:
-
-```rust
-if model.visible_count == 0
-```
-
-### Tests
-
-Existing controls tests should continue passing:
-
-```text
-ui::controls::tests::layout_labels_use_user_facing_focus_terms
-ui::controls::tests::visualizer_labels_drop_scope_jargon
-```
-
-Add a model helper test:
-
-```rust
-#[test]
-fn ui_model_overlay_helpers_match_active_overlay() {
-    let mut app = App::new(Library::in_memory(vec![]));
-    app.overlays.active = ActiveOverlay::RecentTracks;
-
-    let model = UiModel::from(&app);
-
-    assert!(model.show_recent_tracks());
-    assert!(!model.show_help());
+// src/app/update.rs
+pub(super) fn tick(&mut self) {
+    let now = std::time::Instant::now();
+    self.tick_count += 1;
+    self.tick_notice();
+    self.poll_audio_status();
+    self.update_visualizer();
+    self.drive_reconnect(now);
+    self.check_sleep_timer(now);
+    self.flush_persistence();
 }
 ```
 
-### Pitfalls
-
-`notice` is an `Option<&AppNotice>`. Pattern matching changes slightly:
+Change quit path to forced:
 
 ```rust
-match notice {
-    AppNotice::Info(message) => ...
-    AppNotice::Error(message) => ...
+// src/app/playback.rs
+pub(super) fn stop_audio_before_quit(&mut self) {
+    self.player.intentional_stop = true;
+    self.force_flush_persistence();
+    self.audio.send(AudioCommand::Stop);
 }
-```
-
-not:
-
-```rust
-match &notice { ... }
-```
-
----
-
-# Fix D: Convert station list and detail overlays after the first cluster
-
-## Goal
-
-Once top-level, header, search, and controls compile through `UiModel`, migrate the modules that read station collections and selected stations.
-
-Recommended second cluster:
-
-```text
-src/ui/stations.rs
-src/ui/station_details.rs
-src/ui/recent_tracks.rs
-```
-
----
-
-## D1: Convert `src/ui/stations.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::{App, InputMode};
-```
-
-It uses:
-
-```text
-app.visible_stations()
-app.input_mode
-app.library.available_genres
-app.nav.selected_genre_idx
-app.nav.selected
-app.player.playing_url
-app.library.contains_station(station)
-app.search.query
-app.search.searching_api
-```
-
-### Desired signature
-
-```rust
-use crate::app::InputMode;
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-```
-
-### Replacement logic
-
-Change:
-
-```rust
-let visible = app.visible_stations();
-```
-
-to:
-
-```rust
-let visible = &model.visible_stations;
-```
-
-Be careful: existing code may expect `Vec<&Station>` and iterate by value. With `&Vec<&Station>`, iteration yields `&&Station`. Prefer:
-
-```rust
-for (idx, station) in model.visible_stations.iter().copied().enumerate() {
-    // station: &Station
-}
-```
-
-Change:
-
-```rust
-let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
-```
-
-to:
-
-```rust
-let is_playing = model.player.playing_url.as_ref() == Some(&station.url);
-```
-
-Change:
-
-```rust
-let is_selected = app.nav.selected == idx;
-```
-
-to:
-
-```rust
-let is_selected = model.nav_selected == idx;
-```
-
-Change:
-
-```rust
-app.library.contains_station(station)
-```
-
-to:
-
-```rust
-model.library.contains_station(station)
-```
-
-Change title helper:
-
-```rust
-fn station_list_title(app: &App, visible_count: usize) -> String
-```
-
-to:
-
-```rust
-fn station_list_title(model: &UiModel<'_>, visible_count: usize) -> String
-```
-
-### Required tests
-
-Existing station tests are critical. Keep them green:
-
-```text
-ui::stations::tests::empty_library_onboarding_only_renders_for_empty_normal_mode
-ui::stations::tests::search_title_explains_preview_and_save_actions
-ui::stations::tests::search_truncation_*
-ui::stations::tests::station_meta_*
-ui::stations::tests::station_health_badge_compares_numeric_timestamps
-ui::stations::tests::truncation_*
-```
-
-### Pitfalls
-
-#### `visible` type mismatch
-
-A common bug after this conversion:
-
-```rust
-let visible = &model.visible_stations;
-let station = visible[idx]; // station: &Station, fine
-for station in visible { ... } // station: &&Station, maybe not fine
-```
-
-Use `.iter().copied()` in loops.
-
-#### Search-mode saved marker
-
-Do not change this condition:
-
-```rust
-model.input_mode == InputMode::Search && model.library.contains_station(station)
-```
-
-Saved markers in normal library mode are different from saved markers in search mode.
-
-#### Empty onboarding
-
-Do not change:
-
-```rust
-model.input_mode == InputMode::Normal && visible_count == 0
-```
-
-Search mode with no results should not show first-run library onboarding.
-
----
-
-## D2: Convert `src/ui/station_details.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::App;
-```
-
-It uses:
-
-```text
-app.selected_station()
-app.library.contains_station(station)
-app.player.playing_url
-app.player.current_track
-app.player.state
-```
-
-### Desired signature
-
-```rust
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-fn station_detail_lines(model: &UiModel<'_>) -> Vec<Line<'static>> { ... }
-fn station_detail_sections(model: &UiModel<'_>) -> Vec<DetailSection> { ... }
-```
-
-### Replacement logic
-
-Change:
-
-```rust
-let Some(station) = app.selected_station() else { ... };
-```
-
-to:
-
-```rust
-let Some(station) = model.selected_station else { ... };
-```
-
-Change:
-
-```rust
-let saved = if app.library.contains_station(station) { ... }
-```
-
-to:
-
-```rust
-let saved = if model.library.contains_station(station) { ... }
-```
-
-Change:
-
-```rust
-.filter(|_| app.player.playing_url.as_ref() == Some(&station.url))
-```
-
-to:
-
-```rust
-.filter(|_| model.player.playing_url.as_ref() == Some(&station.url))
-```
-
-### Required tests
-
-Existing details tests should stay green:
-
-```text
-ui::station_details::tests::detail_sections_group_expected_fields
-ui::station_details::tests::detail_sections_use_missing_metadata_fallbacks
-ui::station_details::tests::local_health_prefers_newer_numeric_failure_over_older_success
-ui::station_details::tests::metadata_list_uses_fallback_or_joined_values
-ui::station_details::tests::compact_detail_value_truncates_long_metadata
-```
-
-### Pitfalls
-
-Some tests inside `station_details.rs` may construct an `App` directly and call private helper functions. After migration, tests should create a `UiModel` from the app before calling helper functions:
-
-```rust
-let model = UiModel::from(&app);
-let sections = station_detail_sections(&model);
-```
-
-Keep the `app` alive for at least as long as `model`.
-
----
-
-## D3: Convert `src/ui/recent_tracks.rs`
-
-### Current dependencies
-
-```rust
-use crate::app::App;
-```
-
-It uses:
-
-```text
-app.library.settings.save_history
-app.history
-app.song_history
-app.player.state
-```
-
-### Desired signature
-
-```rust
-use crate::ui::model::UiModel;
-
-pub fn render(frame: &mut Frame, area: Rect, model: &UiModel<'_>) { ... }
-fn recent_track_lines(model: &UiModel<'_>) -> Vec<Line<'static>> { ... }
-```
-
-### Replacement logic
-
-Change:
-
-```rust
-if app.library.settings.save_history { ... }
-```
-
-to:
-
-```rust
-if model.library.settings.save_history { ... }
-```
-
-Change:
-
-```rust
-for (idx, entry) in app.history.recent(MAX_VISIBLE_TRACKS).enumerate()
-```
-
-to:
-
-```rust
-for (idx, entry) in model.history.recent(MAX_VISIBLE_TRACKS).enumerate()
-```
-
-Change:
-
-```rust
-if app.song_history.is_empty()
-```
-
-to:
-
-```rust
-if model.song_history.is_empty()
-```
-
-### Required tests
-
-Existing tests should pass:
-
-```text
-ui::recent_tracks::tests::recent_title_reflects_history_persistence
-ui::recent_tracks::tests::recent_overlay_accepts_minimum_area
-ui::recent_tracks::tests::recent_overlay_rejects_tiny_area
-```
-
----
-
-# Fix E: Convert settings, help, sleep timer, Playback Doctor, command palette
-
-## Goal
-
-Migrate overlays and command palette once the lower-risk modules are stable.
-
-Recommended third cluster:
-
-```text
-src/ui/help.rs
-src/ui/settings.rs
-src/ui/sleep_timer.rs
-src/ui/playback_doctor.rs
-src/ui/command_palette.rs
-```
-
----
-
-## E1: Convert `src/ui/help.rs`
-
-### Current dependencies
-
-```text
-app.player.state
-```
-
-Only needed for critical engine fault banner.
-
-### Desired change
-
-```rust
-critical::split_overlay_alert_area(inner_area, &model.player.state);
-critical::render_engine_fault_banner(frame, alert_area, &model.player.state);
 ```
 
 ### Pitfall
 
-No behavior change. This is mostly mechanical.
+Do not make `flush_persistence()` always force. The whole point is that normal frame ticks respect cooldown.
 
----
+Do not make `force_flush_persistence()` clear dirty flags on failure. It only bypasses the cooldown gate.
 
-## E2: Convert `src/ui/settings.rs`
+## Implementation phase 2: extract one-shot save attempt
 
-### Current dependencies
-
-```text
-app.overlays.selected_setting_idx
-app.library.settings.notifications_enabled
-app.library.settings.autoplay_last
-app.library.settings.output_device_name
-app.library.settings.theme
-app.library.settings.stream_metadata_enabled
-app.library.settings.save_history
-app.player.state
-```
-
-### Desired changes
-
-```rust
-let is_selected = model.selected_setting_idx == row.index();
-let row = SettingRow::from_index(model.selected_setting_idx)
-```
-
-Settings rows:
-
-```rust
-model.library.settings.notifications_enabled
-model.library.settings.autoplay_last
-model.library.settings.output_device_name.as_deref()
-model.library.settings.theme
-model.library.settings.stream_metadata_enabled
-model.library.settings.save_history
-```
-
-### Pitfall
-
-Do not move settings mutation into `UiModel`. This is render-only.
-
----
-
-## E3: Convert `src/ui/sleep_timer.rs`
-
-### Current dependencies
+### File
 
 ```text
-app.sleep_timer.remaining(now)
-app.sleep_timer.is_waiting_for_playback()
-app.sleep_timer.minutes()
-app.player.state
+src/app/persist.rs
 ```
 
-### Desired changes
+Add a small error type:
 
 ```rust
-model.sleep_timer.remaining(now)
-model.sleep_timer.is_waiting_for_playback()
-model.sleep_timer.minutes()
-model.player.state
-```
-
-### Pitfall
-
-Calls to `Instant::now()` remain inside UI for now. Do not introduce a clock abstraction in this release.
-
----
-
-## E4: Convert `src/ui/playback_doctor.rs`
-
-### Current dependencies
-
-```text
-app.now_playing()
-app.player.playing_url
-app.player.current_track
-app.player.state
-app.diagnostics
-```
-
-### Desired changes
-
-```rust
-let station = model.now_playing.map(|s| s.name.as_str()).unwrap_or("N/A");
-let url = model.player.playing_url.as_deref().unwrap_or("N/A");
-let track = model.player.current_track.as_deref().unwrap_or("N/A");
-let last_error = model.diagnostics.last_error.as_deref().unwrap_or("N/A");
-```
-
-### Pitfall
-
-Playback Doctor is a troubleshooting surface. Copy and ordering should not change.
-
----
-
-## E5: Convert `src/ui/command_palette.rs`
-
-### Current dependencies
-
-```text
-app.command_palette.query
-app.command_palette_commands()
-app.command_palette.selected
-command_label(command)
-```
-
-This is the trickiest non-visualizer overlay because `command_palette_commands()` is currently an `App` method.
-
-### Recommended 0.4.4 option
-
-Add commands to `UiModel` as an owned vector computed once per frame:
-
-```rust
-use crate::app::CommandPaletteCommand;
-
-pub struct UiModel<'a> {
-    // ...
-    pub command_palette_commands: Vec<CommandPaletteCommand>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PersistenceError {
+    target: PersistTarget,
+    message: String,
 }
 
-impl<'a> UiModel<'a> {
-    pub fn from_app(app: &'a App) -> Self {
+impl PersistenceError {
+    fn new(target: PersistTarget, err: impl std::fmt::Display) -> Self {
         Self {
-            // ...
-            command_palette_commands: app.command_palette_commands(),
+            target,
+            message: err.to_string(),
+        }
+    }
+
+    fn notice_message(&self) -> String {
+        match self.target {
+            PersistTarget::UiState => format!("Could not save UI state: {}", self.message),
+            PersistTarget::History => format!("Could not save history: {}", self.message),
+            PersistTarget::Library => format!("Could not save library: {}", self.message),
+        }
+    }
+
+    fn key(&self) -> PersistenceErrorKey {
+        PersistenceErrorKey {
+            target: self.target,
+            message: self.message.clone(),
         }
     }
 }
 ```
 
-Then command palette rendering becomes:
+Extract `try_flush_persistence_once`:
 
 ```rust
-let commands = &model.command_palette_commands;
-let selected = model
-    .command_palette
-    .selected
-    .min(commands.len().saturating_sub(1));
+fn try_flush_persistence_once(&mut self) -> Result<(), PersistenceError> {
+    if self.persist.ui_state_dirty {
+        let state = super::ui_state::UiState::from_app_values(
+            self.volume,
+            self.muted,
+            self.layout_mode,
+            self.visualizer_mode,
+        );
+
+        state
+            .save()
+            .map_err(|err| PersistenceError::new(PersistTarget::UiState, err))?;
+
+        self.persist.ui_state_dirty = false;
+    }
+
+    if self.persist.history_dirty {
+        self.history
+            .save()
+            .map_err(|err| PersistenceError::new(PersistTarget::History, err))?;
+
+        self.persist.history_dirty = false;
+    }
+
+    if self.persist.library_dirty {
+        self.library
+            .save()
+            .map_err(|err| PersistenceError::new(PersistTarget::Library, err))?;
+
+        self.persist.library_dirty = false;
+    }
+
+    Ok(())
+}
 ```
+
+### Behavior
+
+This preserves current ordering:
+
+1. UI state
+2. history
+3. library
+
+If UI state fails, history and library are not attempted in that tick. That matches a conservative fail-fast model. It is also easier to test.
+
+### Edge case
+
+A failure in UI state can temporarily block history/library saves until UI state succeeds. This is already effectively true if the current code repeatedly errors loudly, but the current implementation actually attempts later targets even after earlier failures.
+
+There are two acceptable designs:
+
+#### Option A: fail fast
+
+Simpler, fewer moving parts. Use the snippet above.
+
+#### Option B: attempt all dirty targets and collect first error
+
+More complete but more code. Recommended if we want history/library to save even when UI state fails.
+
+```rust
+fn try_flush_persistence_once(&mut self) -> Result<(), PersistenceError> {
+    let mut first_error = None;
+
+    if self.persist.ui_state_dirty {
+        let state = super::ui_state::UiState::from_app_values(
+            self.volume,
+            self.muted,
+            self.layout_mode,
+            self.visualizer_mode,
+        );
+
+        match state.save() {
+            Ok(()) => self.persist.ui_state_dirty = false,
+            Err(err) => first_error.get_or_insert_with(|| {
+                PersistenceError::new(PersistTarget::UiState, err)
+            }),
+        };
+    }
+
+    if self.persist.history_dirty {
+        match self.history.save() {
+            Ok(()) => self.persist.history_dirty = false,
+            Err(err) => first_error.get_or_insert_with(|| {
+                PersistenceError::new(PersistTarget::History, err)
+            }),
+        };
+    }
+
+    if self.persist.library_dirty {
+        match self.library.save() {
+            Ok(()) => self.persist.library_dirty = false,
+            Err(err) => first_error.get_or_insert_with(|| {
+                PersistenceError::new(PersistTarget::Library, err)
+            }),
+        };
+    }
+
+    first_error.map_or(Ok(()), Err)
+}
+```
+
+Recommended for 0.4.5: **Option B**. It best preserves the current behavior where one broken target does not stop later dirty targets from saving.
+
+## Implementation phase 3: retry and notice bookkeeping
+
+### File
+
+```text
+src/app/persist.rs
+```
+
+Add helper methods:
+
+```rust
+impl PersistFlags {
+    fn has_dirty_work(&self) -> bool {
+        self.ui_state_dirty || self.history_dirty || self.library_dirty
+    }
+
+    fn retry_due(&self, now: std::time::Instant) -> bool {
+        if !self.has_dirty_work() {
+            return false;
+        }
+
+        self.retry
+            .next_retry_at
+            .map_or(true, |deadline| now >= deadline)
+    }
+
+    fn schedule_retry(&mut self, now: std::time::Instant) {
+        self.retry.next_retry_at = Some(now + PERSIST_RETRY_COOLDOWN);
+    }
+
+    fn clear_retry_state(&mut self) {
+        self.retry = PersistenceRetry::default();
+    }
+}
+```
+
+Add notice throttling:
+
+```rust
+impl App {
+    fn handle_persistence_error(&mut self, error: PersistenceError, now: std::time::Instant) {
+        self.persist.schedule_retry(now);
+
+        let key = error.key();
+        let should_notice = self.persist.retry.last_error_key.as_ref() != Some(&key)
+            || self
+                .persist
+                .retry
+                .last_error_notice_at
+                .map_or(true, |last| now.duration_since(last) >= PERSIST_NOTICE_COOLDOWN);
+
+        self.persist.retry.last_error_key = Some(key);
+
+        if should_notice {
+            self.persist.retry.last_error_notice_at = Some(now);
+            self.set_error_notice(error.notice_message());
+        }
+    }
+}
+```
+
+### Pitfall: borrowing `self.persist` and `self.set_error_notice`
+
+Avoid this bad shape:
+
+```rust
+let retry = &mut self.persist.retry;
+self.set_error_notice(...); // borrow checker may complain because retry is still borrowed
+```
+
+Prefer computing booleans and assigning before calling `set_error_notice`, or limit mutable borrows with blocks:
+
+```rust
+let should_notice = {
+    let retry = &self.persist.retry;
+    // compute only
+};
+
+self.persist.retry.last_error_key = Some(key);
+
+if should_notice {
+    self.persist.retry.last_error_notice_at = Some(now);
+    self.set_error_notice(message);
+}
+```
+
+## Implementation phase 4: new dirty changes should remain prompt
+
+### Decision
+
+When a dirty flag is newly marked while a retry cooldown exists, should it reset `next_retry_at`?
+
+Example:
+
+1. History save fails at 12:00:00.
+2. Next retry scheduled for 12:00:05.
+3. User changes volume at 12:00:01.
+4. Should UI state wait until 12:00:05, or try immediately?
+
+Recommended 0.4.5 behavior: **do not bypass cooldown automatically**.
+
+Reason: if the underlying problem is a bad config path, trying immediately just recreates the storm. A 5-second wait is acceptable, and quit still forces one final flush.
+
+But add a helper that makes this policy explicit:
+
+```rust
+impl PersistFlags {
+    fn mark_ui_state_dirty(&mut self) {
+        self.ui_state_dirty = true;
+    }
+
+    fn mark_history_dirty(&mut self) {
+        self.history_dirty = true;
+    }
+
+    fn mark_library_dirty(&mut self) {
+        self.library_dirty = true;
+    }
+}
+```
+
+Then app methods become:
+
+```rust
+impl App {
+    pub(super) fn mark_ui_state_dirty(&mut self) {
+        self.persist.mark_ui_state_dirty();
+    }
+
+    pub(super) fn mark_history_dirty(&mut self) {
+        self.persist.mark_history_dirty();
+    }
+
+    pub(super) fn mark_library_dirty(&mut self) {
+        self.persist.mark_library_dirty();
+    }
+}
+```
+
+This makes the policy easy to change later if desired.
+
+## Implementation phase 5: test seam for time
+
+### Problem
+
+`flush_persistence()` uses `Instant::now()`. Tests need deterministic time.
+
+### Add internal method
+
+```rust
+// src/app/persist.rs
+fn flush_persistence_at(&mut self, now: std::time::Instant, mode: PersistenceFlushMode) {
+    if mode == PersistenceFlushMode::Scheduled && !self.persist.retry_due(now) {
+        return;
+    }
+
+    match self.try_flush_persistence_once() {
+        Ok(()) => self.persist.clear_retry_state(),
+        Err(error) => self.handle_persistence_error(error, now),
+    }
+}
+
+pub(super) fn flush_persistence(&mut self) {
+    self.flush_persistence_at(std::time::Instant::now(), PersistenceFlushMode::Scheduled);
+}
+
+pub(super) fn force_flush_persistence(&mut self) {
+    self.flush_persistence_at(std::time::Instant::now(), PersistenceFlushMode::Force);
+}
+```
+
+Tests inside `src/app/persist.rs` can call `flush_persistence_at` directly.
+
+## Implementation phase 6: tests
+
+### Files
+
+```text
+src/app/persist.rs
+```
+
+Add tests in the same file under `#[cfg(test)] mod tests` so private fields and helpers are accessible.
+
+### Test helper app
+
+Use the existing lifecycle test construction style from `src/app/lifecycle.rs`. If a reusable app builder already exists in tests, use it. Otherwise add a local helper:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::lifecycle::AppParts;
+    use crate::favorites::Library;
+    use crate::history::History;
+    use crate::radio::Station;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    fn test_app() -> App {
+        let library = Library::in_memory(vec![Station::new("Test", "http://example.com/stream")]);
+        App::from_parts(AppParts {
+            library,
+            ui_state: super::super::ui_state::UiState::default(),
+            ui_state_warning: None,
+            history: History::default(),
+            history_warning: None,
+            audio: crate::audio::AudioEngine::disconnected_for_test(),
+            sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
+        })
+    }
+}
+```
+
+If `AppParts` is `pub(super)` or lives in `lifecycle.rs`, tests in `persist.rs` are sibling modules and may need a visibility adjustment:
+
+```rust
+// src/app/lifecycle.rs
+pub(crate) struct AppParts { ... }
+```
+
+or add a test-only constructor in `src/app.rs`:
+
+```rust
+#[cfg(test)]
+impl App {
+    pub(crate) fn test_app_with_library(library: Library) -> Self {
+        // build via AppParts
+    }
+}
+```
+
+Prefer the smallest visibility change that keeps production internals private.
+
+### Test 1: no dirty work does nothing
+
+```rust
+#[test]
+fn flush_persistence_with_no_dirty_work_does_not_schedule_retry() {
+    let mut app = test_app();
+    let now = std::time::Instant::now();
+
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+
+    assert!(app.persist.retry.next_retry_at.is_none());
+}
+```
+
+### Test 2: failure keeps dirty flag and schedules retry
+
+This requires a save failure. Use a library path that cannot be written, or construct a temporary file path whose parent is a file. Avoid relying on `/root` or OS-specific permission behavior.
+
+Recommended helper:
+
+```rust
+fn unwritable_child_path() -> std::path::PathBuf {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_file = dir.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker file");
+    parent_file.join("library.json")
+}
+```
+
+Pitfall: returning a path inside a `TempDir` drops the tempdir. Keep the `TempDir` alive in the test.
+
+```rust
+#[test]
+fn failed_library_save_keeps_dirty_flag_and_schedules_retry() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parent_file = temp.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker");
+
+    let mut library = Library::in_memory(vec![Station::new("Test", "http://example.com")]);
+    library.set_path_for_test(Some(parent_file.join("library.json")));
+
+    let mut app = test_app_with_library(library);
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+
+    assert!(app.persist.library_dirty);
+    assert_eq!(app.persist.retry.next_retry_at, Some(now + PERSIST_RETRY_COOLDOWN));
+}
+```
+
+If `Library` does not have `set_path_for_test`, add one behind `#[cfg(test)]`:
+
+```rust
+// src/favorites.rs
+#[cfg(test)]
+impl Library {
+    pub(crate) fn set_path_for_test(&mut self, path: Option<std::path::PathBuf>) {
+        self.path = path;
+    }
+}
+```
+
+### Test 3: scheduled flush before retry deadline does nothing
+
+```rust
+#[test]
+fn scheduled_flush_before_retry_deadline_skips_disk_work() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parent_file = temp.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker");
+
+    let mut app = test_app_with_unwritable_library(parent_file.join("library.json"));
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+
+    let first_notice = app.notice.current.clone();
+    app.flush_persistence_at(now + std::time::Duration::from_secs(1), PersistenceFlushMode::Scheduled);
+
+    assert!(app.persist.library_dirty);
+    assert_eq!(app.notice.current, first_notice);
+}
+```
+
+### Test 4: scheduled flush at retry deadline retries
+
+```rust
+#[test]
+fn scheduled_flush_at_retry_deadline_retries() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parent_file = temp.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker");
+
+    let mut app = test_app_with_unwritable_library(parent_file.join("library.json"));
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+
+    let retry_at = now + PERSIST_RETRY_COOLDOWN;
+    app.flush_persistence_at(retry_at, PersistenceFlushMode::Scheduled);
+
+    assert!(app.persist.library_dirty);
+    assert_eq!(app.persist.retry.next_retry_at, Some(retry_at + PERSIST_RETRY_COOLDOWN));
+}
+```
+
+### Test 5: force flush ignores retry deadline
+
+```rust
+#[test]
+fn force_flush_ignores_retry_deadline() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parent_file = temp.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker");
+
+    let mut app = test_app_with_unwritable_library(parent_file.join("library.json"));
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+    app.flush_persistence_at(now + std::time::Duration::from_secs(1), PersistenceFlushMode::Force);
+
+    assert_eq!(
+        app.persist.retry.next_retry_at,
+        Some(now + std::time::Duration::from_secs(1) + PERSIST_RETRY_COOLDOWN)
+    );
+}
+```
+
+### Test 6: successful save clears retry state
+
+```rust
+#[test]
+fn successful_save_clears_retry_state_and_dirty_flag() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let library_path = temp.path().join("library.json");
+
+    let mut app = test_app_with_library_path(library_path);
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+
+    assert!(!app.persist.library_dirty);
+    assert!(app.persist.retry.next_retry_at.is_none());
+    assert!(app.persist.retry.last_error_key.is_none());
+}
+```
+
+### Test 7: notice throttles repeated identical errors
+
+```rust
+#[test]
+fn repeated_same_persistence_error_does_not_refresh_notice_before_notice_cooldown() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parent_file = temp.path().join("not_a_directory");
+    std::fs::write(&parent_file, "blocker").expect("write blocker");
+
+    let mut app = test_app_with_unwritable_library(parent_file.join("library.json"));
+    app.mark_library_dirty();
+
+    let now = std::time::Instant::now();
+    app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
+    let first_notice = app.notice.current.clone();
+
+    app.flush_persistence_at(now + PERSIST_RETRY_COOLDOWN, PersistenceFlushMode::Scheduled);
+
+    assert_eq!(app.notice.current, first_notice);
+}
+```
+
+## Implementation phase 7: optional test helper for save destinations
+
+### File
+
+```text
+src/favorites.rs
+```
+
+If needed, add this test-only helper:
+
+```rust
+#[cfg(test)]
+impl Library {
+    pub(crate) fn with_path_for_test(mut self, path: Option<std::path::PathBuf>) -> Self {
+        self.path = path;
+        self
+    }
+}
+```
+
+This avoids making `Library::path` public.
 
 ### Pitfall
 
-If `CommandPaletteCommand` is not exported, either export it from `app` or leave `command_palette.rs` as the last module still taking `&App`. Prefer exporting only if the enum is already UI-facing through labels.
+Do not add production setters just for tests. Keep test seams under `#[cfg(test)]`.
 
-Avoid recomputing `command_palette_commands()` inside multiple render helpers.
+## Implementation phase 8: changelog and README
 
----
+### CHANGELOG.md
 
-# Fix F: Convert deck and visualizer last
-
-## Goal
-
-Migrate signal-deck rendering to `UiModel` after every other module is stable.
-
-Recommended final cluster:
-
-```text
-src/ui/deck/mod.rs
-src/ui/deck/meta.rs
-src/ui/deck/cassette.rs
-src/ui/deck/visualizer/mod.rs
-src/ui/deck/visualizer/spectrum.rs
-src/ui/deck/visualizer/oscilloscope.rs
-```
-
----
-
-## F1: Convert `src/ui/deck/mod.rs`
-
-### Current dependencies
-
-```text
-app.layout_mode
-```
-
-### Desired changes
-
-```rust
-let full_deck = model.layout_mode == LayoutMode::RightOnly;
-```
-
----
-
-## F2: Convert `src/ui/deck/meta.rs`
-
-### Current dependencies
-
-```text
-app.player.state
-app.now_playing()
-app.player.buffer_percent
-app.player.buffer_seconds
-```
-
-### Desired changes
-
-```rust
-match model.player.state { ... }
-let station = model.now_playing;
-let filled = (model.player.buffer_percent / 10) as usize;
-```
-
----
-
-## F3: Convert `src/ui/deck/cassette.rs`
-
-### Current dependencies
-
-```text
-app.tick_count
-app.player.state
-```
-
-### Desired changes
-
-```rust
-let lines = build_deck_lines(DECK_INNER_WIDTH, model.tick_count, &model.player.state);
-```
-
----
-
-## F4: Convert visualizer modules
-
-### Current dependencies
-
-```text
-app.visualizer_mode
-app.player.state
-app.volume
-app.sample_buffer
-app.tick_count
-app.visualizer_peaks
-```
-
-### Desired changes
-
-```rust
-model.visualizer_mode
-model.player.state
-model.volume
-model.sample_buffer
-model.tick_count
-model.visualizer_peaks
-```
-
-### Pitfalls
-
-#### Sample buffer lock behavior must not change
-
-Current visualizer behavior:
-
-```rust
-if let Ok(buf) = app.sample_buffer.lock() {
-    // read samples
-}
-```
-
-Keep the same non-blocking failure behavior. Do not unwrap the lock.
-
-#### Do not clone sample buffers
-
-`UiModel` should borrow the `Arc<Mutex<VecDeque<f32>>>`. Do not clone the `VecDeque` for rendering.
-
-#### Connecting/fading visualizer behavior must stay
-
-Tests already cover:
-
-```text
-ui::deck::visualizer::tests::spectrum_renderer_stays_active_while_connecting
-ui::deck::visualizer::tests::spectrum_renderer_stays_active_while_fading_out
-ui::deck::visualizer::tests::fading_out_visualizer_gain_uses_audio_ramp_volume
-```
-
-Keep those green.
-
----
-
-# Fix G: Remove `crate::ui::text` compatibility facade if safe
-
-## Goal
-
-Finish the text helper migration started earlier. This is optional for 0.4.4 but pairs well with UI boundary cleanup.
-
-Current situation:
-
-```text
-src/text.rs contains the real helpers.
-src/ui/text.rs re-exports them.
-UI modules still call crate::ui::text::*.
-```
-
-Current callers include:
-
-```text
-src/ui/stations.rs
-src/ui/deck/cassette.rs
-```
-
-## Desired change
-
-Replace:
-
-```rust
-crate::ui::text::visible_len(value)
-crate::ui::text::truncate_to_chars(value, max)
-crate::ui::text::truncate_with_ellipsis(value, max)
-```
-
-with:
-
-```rust
-crate::text::visible_len(value)
-crate::text::truncate_to_chars(value, max)
-crate::text::truncate_with_ellipsis(value, max)
-```
-
-Then delete module declaration:
-
-```rust
-// src/ui/mod.rs
-pub mod text;
-```
-
-And delete file:
-
-```text
-src/ui/text.rs
-```
-
-## Shell command if deletion is needed locally
-
-If the connected workspace cannot delete the file directly, run locally:
-
-```bash
-git rm src/ui/text.rs
-```
-
-## Required tests
-
-```text
-cargo test text
-cargo test ui::stations
-cargo test ui::deck
-```
-
-## Pitfalls
-
-This is pure path cleanup. Do not change the implementation of char counting or truncation.
-
----
-
-# Implementation order
-
-## Step 1: Add `UiModel`
-
-Files:
-
-```text
-src/ui/model.rs
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Add `pub mod model;`.
-2. Add `UiModel<'a>` with shallow borrowed fields.
-3. Add `UiModel::from_app` and `impl From<&App>`.
-4. Add helper methods: `is_searching`, `show_command_palette`, overlay helpers.
-5. Add model tests.
-```
-
-Validation:
-
-```text
-cargo test ui::model
-cargo check
-```
-
-## Step 2: Convert top-level `ui::draw`
-
-Files:
-
-```text
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Keep public `draw(frame, app)` signature.
-2. Keep compact terminal guard before creating `UiModel`.
-3. Create `UiModel` after compact guard.
-4. Move current body into `draw_model(frame, size, app, model)` as a transitional helper.
-5. Convert top-level layout/overlay/command-palette decisions to `model`.
-6. Leave child renderers on `app` for this step if needed.
-```
-
-Validation:
-
-```text
-cargo test ui::tests
-cargo check
-```
-
-## Step 3: Convert first renderer cluster
-
-Files:
-
-```text
-src/ui/header.rs
-src/ui/search.rs
-src/ui/controls.rs
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Change render signatures from `&App` to `&UiModel`.
-2. Update top-level calls.
-3. Replace direct app field access with model fields.
-4. Keep tests green.
-```
-
-Validation:
-
-```text
-cargo test ui::controls
-cargo test ui::search
-cargo check
-```
-
-## Step 4: Convert station/detail/history cluster
-
-Files:
-
-```text
-src/ui/stations.rs
-src/ui/station_details.rs
-src/ui/recent_tracks.rs
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Change render/helper signatures to `&UiModel`.
-2. Use `model.visible_stations`, `model.selected_station`, `model.now_playing`.
-3. Fix iterator `&&Station` issues with `.iter().copied()`.
-4. Update tests to create `UiModel` where helper functions require it.
-```
-
-Validation:
-
-```text
-cargo test ui::stations
-cargo test ui::station_details
-cargo test ui::recent_tracks
-cargo check
-```
-
-## Step 5: Convert overlay/control cluster
-
-Files:
-
-```text
-src/ui/help.rs
-src/ui/settings.rs
-src/ui/sleep_timer.rs
-src/ui/playback_doctor.rs
-src/ui/command_palette.rs
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Convert simple overlays first: help, sleep_timer, playback_doctor.
-2. Convert settings using `selected_setting_idx` and borrowed settings.
-3. Convert command palette last, adding `command_palette_commands` to `UiModel` if needed.
-```
-
-Validation:
-
-```text
-cargo test ui::settings
-cargo test ui::sleep_timer
-cargo test ui::playback_doctor
-cargo test ui::command_palette
-cargo check
-```
-
-## Step 6: Convert deck/visualizer cluster
-
-Files:
-
-```text
-src/ui/deck/mod.rs
-src/ui/deck/meta.rs
-src/ui/deck/cassette.rs
-src/ui/deck/visualizer/mod.rs
-src/ui/deck/visualizer/spectrum.rs
-src/ui/deck/visualizer/oscilloscope.rs
-src/ui/mod.rs
-```
-
-Work:
-
-```text
-1. Convert deck root to `&UiModel`.
-2. Convert meta and cassette.
-3. Convert visualizer modules carefully.
-4. Preserve sample-buffer lock behavior.
-```
-
-Validation:
-
-```text
-cargo test ui::deck
-cargo check
-```
-
-## Step 7: Remove transitional `&App` use from UI render modules
-
-Goal search:
-
-```text
-rg "use crate::app::App|&App" src/ui
-```
-
-Allowed remaining matches after this release:
-
-```text
-src/ui/model.rs uses App to build UiModel
-src/ui/mod.rs public draw adapter accepts &App
-unit tests may construct App
-```
-
-Not allowed:
-
-```text
-render(frame, area, app: &App)
-helper(app: &App)
-```
-
-Validation:
-
-```text
-cargo check
-```
-
-## Step 8: Optional text facade cleanup
-
-Files:
-
-```text
-src/ui/stations.rs
-src/ui/deck/cassette.rs
-src/ui/mod.rs
-src/ui/text.rs
-```
-
-Work:
-
-```text
-1. Replace `crate::ui::text::*` with `crate::text::*`.
-2. Remove `pub mod text;`.
-3. Delete `src/ui/text.rs`.
-```
-
-Validation:
-
-```text
-cargo test text
-cargo test ui::stations
-cargo test ui::deck
-cargo check
-```
-
-## Step 9: Docs and release notes
-
-Files:
-
-```text
-CHANGELOG.md
-README.md, only if code-quality section should mention UiModel
-```
-
-Expected changelog entry:
+Add a new section above 0.4.4:
 
 ```markdown
-## [0.4.4] - Unreleased
+## [0.4.5] - Unreleased
+
+### Fixed
+- Throttled failed persistence retries so UI state, history, and library save failures no longer retry every frame.
+- Preserved dirty flags after failed saves while scheduling a later retry.
+- Prevented repeated identical persistence errors from refreshing the visible notice every tick.
 
 ### Changed
-* **UI rendering boundary**: Introduced `src/ui/model.rs::UiModel` so render modules consume a read-only view model instead of direct access to the full `App` object.
-* **Render module migration**: Migrated header, controls, search, station list, overlays, command palette, and deck rendering to `UiModel`.
+- Added explicit scheduled vs forced persistence flush modes so normal ticks respect retry cooldowns while quit still attempts a final save.
+- Extracted one-shot persistence save attempts into a testable helper.
 
-### Removed
-* **UI text facade**: Removed the `src/ui/text.rs` compatibility facade after updating UI modules to use root-level `crate::text` helpers directly.
-
-### Internal
-* Added regression coverage for `UiModel` selector wiring, overlay helpers, command palette visibility, and borrowed station data.
+### Tests
+- Added coverage for retry scheduling, forced flush behavior, dirty flag preservation, retry reset after success, and notice throttling.
 ```
 
-If `src/ui/text.rs` is not removed in this release, omit the `Removed` entry.
+### README.md
 
-Validation:
+Update the Code Quality section with a concise note:
 
-```text
+```markdown
+- Persistence writes use a retry backoff, so transient save failures keep dirty state intact without hammering the filesystem every UI tick.
+```
+
+Do not mention internal constants in README unless the existing style is very implementation-heavy.
+
+## Validation commands
+
+Run focused tests first:
+
+```bash
+cargo test app::persist
+```
+
+Then full validation:
+
+```bash
 cargo check
 cargo test
 cargo clippy --all-targets --all-features
 ```
 
----
-
-# Full validation gate
-
-Before tagging 0.4.4:
-
-```text
-cargo fmt
-cargo check
-cargo test
-cargo clippy --all-targets --all-features
-```
-
-If `cargo fmt` is blocked in the connected workspace, run locally before commit:
+Run formatting locally if the connected workspace still blocks it:
 
 ```bash
 cargo fmt
 ```
 
-Expected high-signal targeted tests:
+## Manual smoke checklist
+
+Because this release touches persistence timing, manually check these behaviors:
+
+1. Start PulseDeck normally.
+2. Change volume.
+3. Quit and restart.
+4. Confirm volume persisted.
+5. Toggle mute.
+6. Quit and restart.
+7. Confirm mute persisted.
+8. Add a station from search.
+9. Quit and restart.
+10. Confirm station persisted.
+11. Remove a station.
+12. Quit and restart.
+13. Confirm removal persisted.
+14. Export library remains unaffected.
+15. Playback start/stop remains unaffected.
+
+Optional failure test:
+
+1. Make the config directory temporarily unwritable.
+2. Change volume or library.
+3. Confirm one visible error appears.
+4. Confirm UI remains responsive.
+5. Restore permissions.
+6. Wait for retry or quit.
+7. Confirm changes eventually save.
+
+## Edge cases
+
+### Disk becomes writable after failure
+
+Dirty flags must remain true after the failed save. When retry cooldown expires, the save should succeed and clear the dirty flag.
+
+### App quits during cooldown
+
+`stop_audio_before_quit()` must call `force_flush_persistence()`, not scheduled flush. Otherwise a recently failed save could block the final quit-time save attempt.
+
+### Multiple dirty targets
+
+If UI state, history, and library are all dirty, the flush should attempt all three. Successful targets should clear even if another target fails.
+
+Recommended behavior:
 
 ```text
-cargo test ui::model
-cargo test ui::tests
-cargo test ui::controls
-cargo test ui::search
-cargo test ui::stations
-cargo test ui::station_details
-cargo test ui::recent_tracks
-cargo test ui::settings
-cargo test ui::sleep_timer
-cargo test ui::playback_doctor
-cargo test ui::command_palette
-cargo test ui::deck
+UI state save succeeds -> ui_state_dirty = false
+History save fails -> history_dirty = true
+Library save succeeds -> library_dirty = false
+Retry scheduled because at least one target failed
 ```
 
-Search checks:
+### Repeated identical failure
 
-```text
-rg "render\(frame: &mut Frame, area: Rect, app: &App\)" src/ui
-rg "use crate::app::App" src/ui
-rg "crate::ui::text" src/ui
-```
+The retry should still occur after each retry cooldown, but the notice should not refresh every retry unless `PERSIST_NOTICE_COOLDOWN` has elapsed.
 
-Expected after full migration:
+### Different failure after previous failure
 
-```text
-- `use crate::app::App` remains only in src/ui/model.rs and src/ui/mod.rs adapter/tests.
-- No production renderer accepts `app: &App`.
-- No production UI code calls `crate::ui::text::*` if optional text cleanup is completed.
-```
+If the error target or message changes, show a new notice immediately. Example: first UI state fails, then library fails. Those are different problems.
 
----
+### No dirty flags
 
-# Manual smoke checklist
+No dirty flags means no retry work. `retry_due` should return false, and `flush_persistence_at` should not schedule anything.
 
-Because 0.4.4 changes render data plumbing, run a UI smoke pass even though behavior should be unchanged.
+### Time arithmetic
 
-## Layout
+Use `now + Duration`, not `duration_since` unless you handle earlier timestamps. Tests can pass synthetic `Instant`s safely as long as they derive from one base `Instant`.
 
-```text
-[ ] Start app in normal mode.
-[ ] Split View renders header, library, deck, and controls.
-[ ] `b` cycles Library Focus and Signal Focus.
-[ ] Compact terminal warning still appears below 80x24.
-```
+## Rollback strategy
 
-## Search
+If this release causes trouble, rollback should be easy:
 
-```text
-[ ] `/` opens search.
-[ ] Typing `tag:ambient` shows debounce indicator and results.
-[ ] Search result saved markers still appear.
-[ ] Search empty/error/stale states still render correctly.
-[ ] `Space` audition and `Enter` save-play still show correct footer hints.
-```
+1. Revert `src/app/persist.rs` to the old direct flush implementation.
+2. Revert `src/app/playback.rs::stop_audio_before_quit` from `force_flush_persistence()` back to `flush_persistence()`.
+3. Keep docs/changelog rollback in the same commit.
 
-## Station list and details
+No file format migrations are involved, so rollback has no data compatibility risk.
 
-```text
-[ ] Genre tabs still show and selection remains correct.
-[ ] Current playing station marker still appears.
-[ ] Selected row still highlights correctly.
-[ ] Empty library onboarding still appears only in normal mode.
-[ ] `i` opens Station Details with grouped sections.
-```
+## Done criteria
 
-## Overlays
+0.4.5 is complete when:
 
-```text
-[ ] `h` help overlay renders.
-[ ] `,` settings overlay renders selected row and description.
-[ ] `d` Playback Doctor renders state/output/decoder/reconnect info.
-[ ] `g` Recent Tracks or Listening History renders depending on setting.
-[ ] `t` Sleep Timer renders remaining/waiting/off state.
-[ ] Critical playback error banner still appears inside overlays.
-```
+- `src/app/persist.rs::PersistFlags` tracks retry state.
+- `src/app/persist.rs::flush_persistence` respects retry cooldown.
+- `src/app/persist.rs::force_flush_persistence` bypasses retry cooldown.
+- Failed saves keep relevant dirty flags set.
+- Successful saves clear relevant dirty flags.
+- Repeated identical save errors do not refresh notices every tick.
+- Quit still attempts one final save.
+- `cargo check` passes.
+- `cargo test` passes.
+- `cargo clippy --all-targets --all-features` passes.
+- `CHANGELOG.md` has a 0.4.5 entry.
+- `README.md` mentions persistence backoff in the code-quality/maintainability section.
 
-## Deck
+## Next release candidate after 0.4.5
 
-```text
-[ ] Cassette/deck renders in Split View and Signal Focus.
-[ ] Spectrum mode still animates while connecting.
-[ ] Visualizer still reacts during playback.
-[ ] Fade-out keeps deck visually active.
-```
+After persistence backoff, the next worthwhile release is likely **0.4.6 App State Split**:
 
-## Command palette
+- Extract `PlaybackController` from `App`.
+- Extract `UiRuntimeState` from `App`.
+- Keep `UiModel` as the read-only renderer boundary.
 
-```text
-[ ] `:` or `Ctrl+p` opens command palette above other UI.
-[ ] Filtering still works.
-[ ] Selected command highlight still works.
-[ ] Commands still execute after selection.
-```
-
----
-
-# Edge cases to guard
-
-## Edge case: `UiModel` lifetime with temporary visible list
-
-This is valid:
-
-```rust
-let visible_stations = app.visible_stations();
-let selected_station = visible_stations.get(app.nav.selected).copied();
-```
-
-because `visible_stations` stores references into `app`, and `selected_station` also references `app`. Both live inside `UiModel`.
-
-Do not build selected station from a temporary that is dropped before the model:
-
-```rust
-// Bad pattern if not stored in model
-let selected_station = app.visible_stations().get(app.nav.selected).copied();
-```
-
-The compiler may catch this, but avoid it.
-
-## Edge case: command palette command vector ownership
-
-If `UiModel` owns:
-
-```rust
-pub command_palette_commands: Vec<CommandPaletteCommand>
-```
-
-then helpers must borrow it:
-
-```rust
-let commands = &model.command_palette_commands;
-```
-
-Do not clone it repeatedly inside nested render functions.
-
-## Edge case: settings selected row out of bounds
-
-Keep current defensive behavior:
-
-```rust
-SettingRow::from_index(model.selected_setting_idx).unwrap_or(SettingRow::Notifications)
-```
-
-or whatever fallback the current code uses. Do not unwrap.
-
-## Edge case: visible station list empty but nav selected nonzero
-
-Keep `ListState` selection behavior safe:
-
-```rust
-if !model.visible_stations.is_empty() {
-    state.select(Some(model.nav_selected));
-}
-```
-
-Do not select row 0 when the list is empty.
-
-## Edge case: visualizer lock poisoning
-
-Keep:
-
-```rust
-if let Ok(buf) = model.sample_buffer.lock() {
-    // render from samples
-}
-```
-
-Do not use:
-
-```rust
-model.sample_buffer.lock().unwrap()
-```
-
-## Edge case: compact terminal path
-
-Do not build full `UiModel` before returning compact warning unless you intentionally accept that extra work. Preferred path:
-
-```rust
-let size = frame.area();
-render_background(frame, size);
-if is_compact_terminal(size) {
-    render_compact_terminal_warning(frame, size);
-    return;
-}
-let model = UiModel::from(app);
-```
-
----
-
-# Rollback strategy
-
-## If `UiModel` causes broad compile churn
-
-Rollback to the first safe checkpoint:
-
-```text
-Keep src/ui/model.rs and its tests.
-Keep ui::draw adapter if it compiles.
-Revert individual renderer migrations.
-```
-
-The release can still ship with top-level `draw` using `UiModel` and child renderers using `&App` as a transitional step if needed.
-
-## If station list behavior changes
-
-Check first:
-
-```text
-src/ui/model.rs::visible_stations
-src/ui/stations.rs iteration over model.visible_stations
-src/ui/stations.rs station_list_title
-src/ui/stations.rs ListState selection
-```
-
-Most bugs here will be `&&Station` iterator mistakes or using `visible_count` from the wrong source.
-
-## If command palette behavior changes
-
-Check:
-
-```text
-src/ui/model.rs command_palette_commands field
-src/ui/command_palette.rs selected index clamp
-src/app/command_palette.rs command_palette_commands implementation
-```
-
-Rollback command palette migration if needed. It can remain on `&App` longer than other modules.
-
-## If visualizer behavior changes
-
-Rollback only the deck/visualizer cluster. Keep `UiModel` and other migrated modules. The visualizer is the most timing-sensitive render area because it reads sample buffers and tick counters.
-
----
-
-# Known non-goals for 0.4.4
-
-Do not include:
-
-```text
-- No audio decoder changes.
-- No stream compatibility changes.
-- No persistence retry throttling.
-- No keybinding changes.
-- No UI redesign.
-- No new layout mode.
-- No station ranking or search API changes.
-- No settings model redesign.
-- No broad app-state split.
-- No generic trait-based UI framework.
-```
-
----
-
-# Future work after 0.4.4
-
-Good next releases:
-
-```text
-0.4.5: Persistence retry throttling so failed saves do not retry every tick.
-0.4.6: Split `UiModel` into focused submodels once renderers depend on it consistently.
-0.5.0: Dedicated audio compatibility release with explicit codec/stream QA matrix.
-```
-
-Potential post-0.4.4 submodel shape:
-
-```rust
-pub struct UiModel<'a> {
-    pub layout: UiLayoutModel,
-    pub playback: UiPlaybackModel<'a>,
-    pub library: UiLibraryModel<'a>,
-    pub search: UiSearchModel<'a>,
-    pub overlays: UiOverlayModel<'a>,
-    pub diagnostics: UiDiagnosticsModel<'a>,
-}
-```
-
-Only do this after the first migration proves stable.
-
----
-
-# Final release smell test
-
-0.4.4 is successful if:
-
-```text
-- main.rs still calls ui::draw(frame, &app).
-- ui::draw immediately adapts App into UiModel after the compact-terminal guard.
-- production UI render modules no longer accept &App directly, except the transitional adapter if intentionally left.
-- UI behavior looks unchanged.
-- full tests and clippy pass.
-- no audio files changed.
-```
-
-In human terms: the cockpit still looks identical, but the dashboard now gets a clean instrument feed instead of reaching through the firewall with a handful of wires.
+That should wait until persistence is calm. One knot at a time, lest the codebase become a bowl of headphones.

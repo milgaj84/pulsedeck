@@ -8,6 +8,21 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.5] - Unreleased
+
+### Fixed
+*   **Persistence retry storms**: Failed UI state, history, or library saves now keep their dirty flags but retry after a cooldown instead of hammering the filesystem every UI tick.
+*   **Repeated save-error notices**: Identical persistence failures no longer refresh the visible error notice on every retry window unless the notice cooldown has elapsed.
+
+### Changed
+*   **Scheduled vs forced saves**: Normal frame ticks use scheduled persistence flushes with backoff, while quit now uses a forced flush so PulseDeck still attempts one final save before stopping audio.
+*   **Persistence save flow**: Extracted one-shot save attempts and retry bookkeeping inside `src/app/persist.rs`, preserving the existing UI state, history, and library file formats.
+
+### Internal
+*   Added regression coverage for dirty-flag preservation, retry scheduling, scheduled-skip behavior, forced flush behavior, retry reset after success, and duplicate notice throttling.
+
+---
+
 ## [0.4.4] - Unreleased
 
 ### Changed

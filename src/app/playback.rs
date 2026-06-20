@@ -117,7 +117,7 @@ impl App {
 
     pub(super) fn stop_audio_before_quit(&mut self) {
         self.player.intentional_stop = true;
-        self.flush_persistence();
+        self.force_flush_persistence();
         self.audio.send(AudioCommand::Stop);
     }
 
