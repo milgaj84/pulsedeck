@@ -171,34 +171,37 @@ impl App {
     }
 
     pub(super) fn export_library(&mut self) {
-        let unixtime = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let export_dir = self
-            .library
-            .path
-            .as_ref()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")));
-
-        if let Some(dir) = export_dir {
-            if let Err(e) = std::fs::create_dir_all(&dir) {
-                self.set_error_notice(format!("Failed to create export directory: {e}"));
-                return;
-            }
-            let filepath = dir.join(format!("pulsedeck-export-{}.m3u", unixtime));
-            let m3u_content = crate::playlist::to_m3u(&self.library.stations);
-            match std::fs::write(&filepath, m3u_content) {
-                Ok(_) => {
-                    self.set_info_notice(format!("Library exported to {}", filepath.display()))
-                }
-                Err(e) => self.set_error_notice(format!("Export failed: {e}")),
-            }
-        } else {
+        let Some(dir) = self.export_directory() else {
             self.set_error_notice("Could not resolve config directory for export");
+            return;
+        };
+
+        match crate::playlist_export::export_library_m3u(
+            &self.library.stations,
+            &dir,
+            current_unix_time(),
+        ) {
+            Ok(filepath) => {
+                self.set_info_notice(format!("Library exported to {}", filepath.display()))
+            }
+            Err(err) => self.set_error_notice(format!("Export failed: {err}")),
         }
     }
+
+    fn export_directory(&self) -> Option<std::path::PathBuf> {
+        self.library
+            .path
+            .as_ref()
+            .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+            .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")))
+    }
+}
+
+fn current_unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn progressive_volume_step(volume: u8) -> u8 {

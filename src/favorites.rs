@@ -1,11 +1,11 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::radio::{
     clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
-    sanitize_bitrate, station_identity_matches, station_url_matches, Station, StationHealth,
+    sanitize_bitrate, station_identity_matches, station_url_matches, Station,
 };
 
 const LIBRARY_FILE: &str = "library.json";
@@ -69,7 +69,8 @@ pub struct Library {
 struct LibraryFile {
     #[serde(default = "default_library_version")]
     version: u32,
-    stations: Vec<SavedStation>,
+    #[serde(default)]
+    stations: Vec<Station>,
     #[serde(default)]
     settings: Settings,
 }
@@ -78,78 +79,16 @@ fn default_library_version() -> u32 {
     1
 }
 
-/// Serializable station (mirrors Station but with serde).
-#[derive(Serialize, Deserialize)]
-struct SavedStation {
-    name: String,
-    url: String,
-    genre: String,
-    country: String,
-    bitrate: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    station_uuid: Option<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    country_code: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    language: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    codec: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    homepage: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_check_ok: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    votes: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    click_count: Option<u32>,
-    #[serde(default, skip_serializing_if = "StationHealth::is_empty")]
-    health: StationHealth,
-}
-
-impl From<&Station> for SavedStation {
-    fn from(s: &Station) -> Self {
-        Self {
-            name: s.name.clone(),
-            url: s.url.clone(),
-            genre: s.genre.clone(),
-            country: s.country.clone(),
-            bitrate: s.bitrate,
-            station_uuid: s.station_uuid.clone(),
-            country_code: s.country_code.clone(),
-            tags: s.tags.clone(),
-            language: s.language.clone(),
-            codec: s.codec.clone(),
-            homepage: s.homepage.clone(),
-            last_check_ok: s.last_check_ok,
-            votes: s.votes,
-            click_count: s.click_count,
-            health: s.health.clone(),
-        }
-    }
-}
-
-impl From<SavedStation> for Station {
-    fn from(s: SavedStation) -> Self {
-        Self {
-            name: s.name,
-            url: s.url,
-            genre: s.genre,
-            country: s.country.trim().to_string(),
-            bitrate: sanitize_bitrate(s.bitrate),
-            station_uuid: s.station_uuid.and_then(normalize_station_uuid),
-            country_code: normalize_country_code(&s.country_code),
-            tags: clean_tag_values(s.tags),
-            language: s.language.trim().to_string(),
-            codec: normalize_codec(&s.codec),
-            homepage: s.homepage.trim().to_string(),
-            last_check_ok: s.last_check_ok,
-            votes: s.votes,
-            click_count: s.click_count,
-            health: s.health,
-        }
-    }
+fn normalize_loaded_station(mut station: Station) -> Station {
+    station.country = station.country.trim().to_string();
+    station.bitrate = sanitize_bitrate(station.bitrate);
+    station.station_uuid = station.station_uuid.and_then(normalize_station_uuid);
+    station.country_code = normalize_country_code(&station.country_code);
+    station.tags = clean_tag_values(station.tags);
+    station.language = station.language.trim().to_string();
+    station.codec = normalize_codec(&station.codec);
+    station.homepage = station.homepage.trim().to_string();
+    station
 }
 
 /// Helper to map dynamic micro-genres to static parent categories.
@@ -220,6 +159,12 @@ pub enum ImportMode {
     EnrichExistingOnly,
 }
 
+#[derive(Debug, Clone)]
+enum MissingLibraryPolicy {
+    SeedAndSave(Vec<Station>),
+    Empty,
+}
+
 impl ImportPreview {
     pub fn is_empty(&self) -> bool {
         self.new_stations.is_empty()
@@ -233,95 +178,24 @@ impl Library {
     /// Load library from disk.
     /// On first launch (no file), seeds with starter stations.
     pub fn load(seed_stations: Vec<Station>) -> Self {
-        let path = config_path();
-
-        let mut load_warnings = Vec::new();
-
-        let (stations, settings) = if let Some(ref p) = path {
-            if p.exists() {
-                match fs::read_to_string(p) {
-                    Ok(contents) => match parse_library_file(&contents) {
-                        Ok((stations, settings, warning)) => {
-                            if let Some(warning) = warning {
-                                load_warnings.push(warning);
-                            }
-                            (stations, settings)
-                        }
-                        Err(err) => {
-                            load_warnings.push(format!(
-                                "Could not parse library.json; using starter stations: {err}"
-                            ));
-                            (seed_stations, Settings::default())
-                        }
-                    },
-                    Err(err) => {
-                        load_warnings.push(format!(
-                            "Could not read library.json; using starter stations: {err}"
-                        ));
-                        (seed_stations, Settings::default())
-                    }
-                }
-            } else {
-                // First launch — seed and save
-                let mut lib = Self {
-                    stations: seed_stations,
-                    available_genres: Vec::new(),
-                    settings: Settings::default(),
-                    path: path.clone(),
-                    load_warnings: Vec::new(),
-                };
-                lib.rebuild_genres();
-                if let Err(err) = lib.save() {
-                    lib.load_warnings
-                        .push(format!("Could not save starter library: {err}"));
-                }
-                return lib;
-            }
-        } else {
-            (seed_stations, Settings::default())
-        };
-
-        let mut lib = Self {
-            stations,
-            available_genres: Vec::new(),
-            settings,
-            path,
-            load_warnings,
-        };
-        lib.rebuild_genres();
-        lib
+        Self::load_with_policy(MissingLibraryPolicy::SeedAndSave(seed_stations))
     }
 
     /// Load the library for read-only/CLI use without seeding starters or writing a file.
     /// Keeps the resolved path so a later import can still persist.
     pub fn load_existing() -> Self {
-        let path = config_path();
+        Self::load_with_policy(MissingLibraryPolicy::Empty)
+    }
 
+    fn load_with_policy(policy: MissingLibraryPolicy) -> Self {
+        let path = config_path();
         let mut load_warnings = Vec::new();
-        let (stations, settings) = match path.as_ref() {
-            Some(p) if p.exists() => match fs::read_to_string(p) {
-                Ok(contents) => match parse_library_file(&contents) {
-                    Ok((stations, settings, warning)) => {
-                        if let Some(warning) = warning {
-                            load_warnings.push(warning);
-                        }
-                        (stations, settings)
-                    }
-                    Err(err) => {
-                        load_warnings.push(format!(
-                            "Could not parse library.json; using empty library: {err}"
-                        ));
-                        (Vec::new(), Settings::default())
-                    }
-                },
-                Err(err) => {
-                    load_warnings.push(format!(
-                        "Could not read library.json; using empty library: {err}"
-                    ));
-                    (Vec::new(), Settings::default())
-                }
-            },
-            _ => (Vec::new(), Settings::default()),
+
+        let (stations, settings, should_save_seed) = match path.as_ref() {
+            Some(path) if path.exists() => {
+                read_library_file_or_fallback(path, &policy, &mut load_warnings)
+            }
+            _ => fallback_for_missing_library(&policy),
         };
 
         let mut lib = Self {
@@ -332,6 +206,14 @@ impl Library {
             load_warnings,
         };
         lib.rebuild_genres();
+
+        if should_save_seed {
+            if let Err(err) = lib.save() {
+                lib.load_warnings
+                    .push(format!("Could not save starter library: {err}"));
+            }
+        }
+
         lib
     }
 
@@ -571,7 +453,7 @@ impl Library {
 
         let file = LibraryFile {
             version: 1,
-            stations: self.stations.iter().map(SavedStation::from).collect(),
+            stations: self.stations.clone(),
             settings: self.settings.clone(),
         };
 
@@ -590,8 +472,55 @@ fn config_path() -> Option<PathBuf> {
     crate::config::config_path(LIBRARY_FILE)
 }
 
+fn read_library_file_or_fallback(
+    path: &Path,
+    policy: &MissingLibraryPolicy,
+    load_warnings: &mut Vec<String>,
+) -> (Vec<Station>, Settings, bool) {
+    match fs::read_to_string(path) {
+        Ok(contents) => match parse_library_file(&contents) {
+            Ok((stations, settings, warning)) => {
+                if let Some(warning) = warning {
+                    load_warnings.push(warning);
+                }
+                (stations, settings, false)
+            }
+            Err(err) => {
+                load_warnings.push(format!(
+                    "Could not parse library.json; using {}: {err}",
+                    fallback_label(policy)
+                ));
+                fallback_for_missing_library(policy)
+            }
+        },
+        Err(err) => {
+            load_warnings.push(format!(
+                "Could not read library.json; using {}: {err}",
+                fallback_label(policy)
+            ));
+            fallback_for_missing_library(policy)
+        }
+    }
+}
+
+fn fallback_for_missing_library(policy: &MissingLibraryPolicy) -> (Vec<Station>, Settings, bool) {
+    match policy {
+        MissingLibraryPolicy::SeedAndSave(stations) => {
+            (stations.clone(), Settings::default(), true)
+        }
+        MissingLibraryPolicy::Empty => (Vec::new(), Settings::default(), false),
+    }
+}
+
+fn fallback_label(policy: &MissingLibraryPolicy) -> &'static str {
+    match policy {
+        MissingLibraryPolicy::SeedAndSave(_) => "starter stations",
+        MissingLibraryPolicy::Empty => "empty library",
+    }
+}
+
 fn compact_error_summary(error: &str) -> String {
-    crate::ui::text::truncate_with_ellipsis(error.trim(), 96)
+    crate::text::truncate_with_ellipsis(error.trim(), 96)
 }
 
 fn import_skip_reason(station: &Station) -> Option<String> {
@@ -626,7 +555,10 @@ fn parse_library_file(
         ))
     };
     Ok((
-        file.stations.into_iter().map(Station::from).collect(),
+        file.stations
+            .into_iter()
+            .map(normalize_loaded_station)
+            .collect(),
         file.settings,
         warning,
     ))
@@ -729,6 +661,74 @@ mod tests {
         assert!(warning
             .as_deref()
             .is_some_and(|message| message.contains("version 2")));
+    }
+
+    #[test]
+    fn library_file_load_normalizes_station_metadata_without_saved_station_mirror() {
+        let json = r#"{
+            "version": 1,
+            "stations": [{
+                "name": "Saved FM",
+                "url": " HTTP://Saved/ ",
+                "genre": "Radio",
+                "country": " US ",
+                "bitrate": 5000,
+                "station_uuid": " uuid-1 ",
+                "country_code": "ba",
+                "tags": [" ambient ", "Ambient", "drone"],
+                "language": " english ",
+                "codec": " audio/mpeg ",
+                "homepage": " https://example.com "
+            }],
+            "settings": {}
+        }"#;
+
+        let (stations, _, _) = parse_library_file(json).unwrap();
+        let station = &stations[0];
+
+        assert_eq!(station.name, "Saved FM");
+        assert_eq!(station.url, " HTTP://Saved/ ");
+        assert_eq!(station.genre, "Radio");
+        assert_eq!(station.country, "US");
+        assert_eq!(station.bitrate, 0);
+        assert_eq!(station.station_uuid.as_deref(), Some("uuid-1"));
+        assert_eq!(station.country_code, "BA");
+        assert_eq!(station.tags, vec!["ambient".to_string(), "drone".to_string()]);
+        assert_eq!(station.language, "english");
+        assert_eq!(station.codec, "MP3");
+        assert_eq!(station.homepage, "https://example.com");
+    }
+
+    #[test]
+    fn library_file_serializes_station_directly_and_omits_empty_optional_fields() {
+        let file = LibraryFile {
+            version: 1,
+            stations: vec![station("Saved FM", "http://saved", "Radio", "US", 128)],
+            settings: Settings::default(),
+        };
+
+        let json = serde_json::to_string(&file).unwrap();
+
+        assert!(json.contains("\"stations\""));
+        assert!(json.contains("\"Saved FM\""));
+        assert!(!json.contains("station_uuid"));
+        assert!(!json.contains("country_code"));
+        assert!(!json.contains("health"));
+    }
+
+    #[test]
+    fn fallback_for_missing_library_preserves_seed_and_empty_policies() {
+        let seed = vec![station("Seed", "http://seed", "Radio", "US", 128)];
+
+        let (seed_stations, _, should_save_seed) =
+            fallback_for_missing_library(&MissingLibraryPolicy::SeedAndSave(seed));
+        let (empty_stations, _, should_save_empty) =
+            fallback_for_missing_library(&MissingLibraryPolicy::Empty);
+
+        assert_eq!(seed_stations.len(), 1);
+        assert!(should_save_seed);
+        assert!(empty_stations.is_empty());
+        assert!(!should_save_empty);
     }
 
     #[test]

@@ -8,6 +8,23 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.4.2] - Unreleased
+
+### Changed
+*   **Station persistence model**: Removed the duplicate `SavedStation` mirror type and now serialize `Station` directly while preserving load-time normalization for bitrate, UUID, country code, tags, language, codec, and homepage.
+*   **Library loading flow**: Unified `Library::load` and `Library::load_existing` behind one internal missing-library policy so starter seeding and read-only empty-library behavior share the same parse/read path without changing their public behavior.
+*   **Search prefix handling**: Search prefix help, aliases, API parameters, and display labels now come from one metadata table instead of repeated match chains.
+*   **Playlist export boundary**: Moved M3U export filesystem work into `src/playlist_export.rs`, leaving `src/app/playback.rs::export_library` as UI-facing notice glue.
+*   **Text helper boundary**: Moved unicode-aware text truncation helpers into root-level `src/text.rs`; `src/ui/text.rs` is now only a UI compatibility facade.
+
+### Removed
+*   **Unused dependency noise**: Removed the unused `crossterm` `event-stream` feature and stale commented tracing dependency placeholders from `Cargo.toml`.
+
+### Internal
+*   Added regression coverage for direct station persistence normalization, compact station serialization, missing-library fallback policies, playlist export paths/content, generated prefix examples, and alias-driven prefix lookup.
+
+---
+
 ## [0.4.1] - Unreleased
 
 ### Fixed

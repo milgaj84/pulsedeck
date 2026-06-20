@@ -7,7 +7,9 @@ mod event;
 mod favorites;
 mod history;
 mod playlist;
+mod playlist_export;
 mod radio;
+mod text;
 mod ui;
 
 use anyhow::Result;

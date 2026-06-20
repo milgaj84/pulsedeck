@@ -14,6 +14,9 @@ pub enum SearchField {
 pub struct SearchPrefixHelp {
     pub prefix: &'static str,
     pub aliases: &'static [&'static str],
+    pub field: SearchField,
+    pub api_param: &'static str,
+    pub label_prefix: &'static str,
     pub label: &'static str,
     pub example: &'static str,
 }
@@ -22,46 +25,71 @@ pub const SEARCH_PREFIX_HELP: &[SearchPrefixHelp] = &[
     SearchPrefixHelp {
         prefix: "name",
         aliases: &["station"],
+        field: SearchField::Name,
+        api_param: "name",
+        label_prefix: "name",
         label: "station name",
         example: "name:lofi",
     },
     SearchPrefixHelp {
         prefix: "tag",
         aliases: &["genre"],
+        field: SearchField::Tag,
+        api_param: "tag",
+        label_prefix: "tag",
         label: "genre or tag",
         example: "tag:ambient",
     },
     SearchPrefixHelp {
         prefix: "country",
         aliases: &["cc"],
+        field: SearchField::Country,
+        api_param: "country",
+        label_prefix: "country",
         label: "country name or two-letter code",
         example: "country:BA",
     },
     SearchPrefixHelp {
         prefix: "lang",
         aliases: &["language"],
+        field: SearchField::Language,
+        api_param: "language",
+        label_prefix: "lang",
         label: "station language",
         example: "lang:english",
     },
     SearchPrefixHelp {
         prefix: "codec",
         aliases: &["format"],
+        field: SearchField::Codec,
+        api_param: "codec",
+        label_prefix: "codec",
         label: "stream codec",
         example: "codec:mp3",
     },
 ];
 
-pub fn prefix_examples_inline() -> &'static str {
-    "try tag:ambient, country:BA, lang:english, codec:mp3, or name:lofi"
+pub fn prefix_examples_inline() -> String {
+    let examples = SEARCH_PREFIX_HELP
+        .iter()
+        .map(|help| help.example)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("try {examples}")
 }
 
 pub fn known_search_prefix(prefix: &str) -> bool {
-    SEARCH_PREFIX_HELP.iter().any(|help| {
-        help.prefix.eq_ignore_ascii_case(prefix.trim())
+    search_prefix(prefix).is_some()
+}
+
+fn search_prefix(prefix: &str) -> Option<&'static SearchPrefixHelp> {
+    let prefix = prefix.trim();
+    SEARCH_PREFIX_HELP.iter().find(|help| {
+        help.prefix.eq_ignore_ascii_case(prefix)
             || help
                 .aliases
                 .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(prefix.trim()))
+                .any(|alias| alias.eq_ignore_ascii_case(prefix))
     })
 }
 
@@ -91,24 +119,12 @@ impl StationSearchQuery {
         };
 
         let value = value.trim().to_string();
-        match prefix.trim().to_ascii_lowercase().as_str() {
-            "name" | "station" => Self::with_field(raw_trimmed, SearchField::Name, value),
-            "tag" | "genre" => Self::with_field(raw_trimmed, SearchField::Tag, value),
-            "country" | "cc" => {
-                if is_country_code(&value) {
-                    Self::with_field(
-                        raw_trimmed,
-                        SearchField::CountryCode,
-                        value.to_ascii_uppercase(),
-                    )
-                } else {
-                    Self::with_field(raw_trimmed, SearchField::Country, value)
-                }
-            }
-            "lang" | "language" => Self::with_field(raw_trimmed, SearchField::Language, value),
-            "codec" | "format" => Self::with_field(raw_trimmed, SearchField::Codec, value),
-            _ => Self::plain(raw_trimmed),
-        }
+        let Some(help) = search_prefix(prefix) else {
+            return Self::plain(raw_trimmed);
+        };
+
+        let (field, value) = field_and_value_for_prefix(help, &value);
+        Self::with_field(raw_trimmed, field, value)
     }
 
     fn plain(value: String) -> Self {
@@ -135,27 +151,12 @@ impl StationSearchQuery {
             ("limit", "40".to_string()),
         ];
 
-        match self.field {
-            SearchField::Name => params.push(("name", self.value.clone())),
-            SearchField::Tag => params.push(("tag", self.value.clone())),
-            SearchField::Country => params.push(("country", self.value.clone())),
-            SearchField::CountryCode => params.push(("countrycode", self.value.clone())),
-            SearchField::Language => params.push(("language", self.value.clone())),
-            SearchField::Codec => params.push(("codec", self.value.clone())),
-        }
-
+        params.push((api_param_for_field(self.field), self.value.clone()));
         params
     }
 
     pub fn display_label(&self) -> String {
-        match self.field {
-            SearchField::Name => format!("name:{}", self.value),
-            SearchField::Tag => format!("tag:{}", self.value),
-            SearchField::Country => format!("country:{}", self.value),
-            SearchField::CountryCode => format!("country:{}", self.value),
-            SearchField::Language => format!("lang:{}", self.value),
-            SearchField::Codec => format!("codec:{}", self.value),
-        }
+        format!("{}:{}", label_prefix_for_field(self.field), self.value)
     }
 
     pub fn field(&self) -> SearchField {
@@ -165,6 +166,35 @@ impl StationSearchQuery {
     pub fn value(&self) -> &str {
         &self.value
     }
+}
+
+fn field_and_value_for_prefix(help: &SearchPrefixHelp, value: &str) -> (SearchField, String) {
+    if help.field == SearchField::Country && is_country_code(value) {
+        (SearchField::CountryCode, value.to_ascii_uppercase())
+    } else {
+        (help.field, value.to_string())
+    }
+}
+
+fn api_param_for_field(field: SearchField) -> &'static str {
+    match field {
+        SearchField::CountryCode => "countrycode",
+        _ => prefix_help_for_field(field).api_param,
+    }
+}
+
+fn label_prefix_for_field(field: SearchField) -> &'static str {
+    match field {
+        SearchField::CountryCode => "country",
+        _ => prefix_help_for_field(field).label_prefix,
+    }
+}
+
+fn prefix_help_for_field(field: SearchField) -> &'static SearchPrefixHelp {
+    SEARCH_PREFIX_HELP
+        .iter()
+        .find(|help| help.field == field)
+        .expect("every search field except CountryCode has prefix metadata")
 }
 
 fn is_country_code(value: &str) -> bool {
@@ -212,6 +242,7 @@ mod tests {
         assert_eq!(query.field(), SearchField::CountryCode);
         assert_eq!(query.value(), "BA");
         assert_eq!(param_value(&query, "countrycode").as_deref(), Some("BA"));
+        assert_eq!(query.display_label(), "country:BA");
     }
 
     #[test]
@@ -238,6 +269,27 @@ mod tests {
         let query = StationSearchQuery::parse("codec:mp3");
         assert_eq!(query.field(), SearchField::Codec);
         assert_eq!(param_value(&query, "codec").as_deref(), Some("mp3"));
+    }
+
+    #[test]
+    fn known_search_prefix_uses_metadata_and_aliases() {
+        for help in SEARCH_PREFIX_HELP {
+            assert!(known_search_prefix(help.prefix));
+            for alias in help.aliases {
+                assert!(known_search_prefix(alias));
+            }
+        }
+        assert!(!known_search_prefix("mood"));
+    }
+
+    #[test]
+    fn prefix_examples_inline_is_generated_from_metadata() {
+        let examples = prefix_examples_inline();
+
+        for help in SEARCH_PREFIX_HELP {
+            assert!(examples.contains(help.example));
+        }
+        assert!(examples.starts_with("try "));
     }
 
     #[test]
