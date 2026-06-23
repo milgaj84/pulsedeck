@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -7,7 +7,19 @@ use super::{critical, theme};
 const MIN_DETAILS_WIDTH: u16 = 56;
 const MIN_DETAILS_HEIGHT: u16 = 12;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetailSection {
+    title: &'static str,
+    rows: Vec<DetailRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetailRow {
+    label: &'static str,
+    value: String,
+}
+
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(62, 48, area);
 
     if details_area_is_compact(popup_area) {
@@ -55,8 +67,8 @@ fn details_area_is_compact(area: Rect) -> bool {
     area.width < MIN_DETAILS_WIDTH || area.height < MIN_DETAILS_HEIGHT
 }
 
-fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
-    let Some(station) = app.selected_station() else {
+fn station_detail_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
+    if app.selected_station().is_none() {
         return vec![
             Line::from(Span::styled("No station selected", theme::title())),
             Line::from(""),
@@ -67,9 +79,17 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
             Line::from(""),
             close_hint(),
         ];
+    }
+
+    section_lines(station_detail_sections(app))
+}
+
+fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
+    let Some(station) = app.selected_station() else {
+        return Vec::new();
     };
 
-    let saved = if app.library.contains(&station.url) {
+    let saved = if app.library.contains_station(station) {
         "Yes"
     } else {
         "No"
@@ -80,26 +100,162 @@ fn station_detail_lines(app: &App) -> Vec<Line<'static>> {
         .as_deref()
         .filter(|_| app.player.playing_url.as_ref() == Some(&station.url))
         .unwrap_or("N/A");
-    let bitrate = bitrate_label(station.bitrate);
+    let last_check = match station.last_check_ok {
+        Some(true) => "OK",
+        Some(false) => "Failing",
+        None => "Unknown",
+    };
+    let station_uuid = station.station_uuid.as_deref().unwrap_or("N/A");
 
     vec![
-        detail_row("Name", station.name.as_str()),
-        detail_row("Genre", fallback(station.genre.as_str(), "Other")),
-        detail_row("Country", fallback(station.country.as_str(), "??")),
-        detail_row("Bitrate", bitrate.as_str()),
-        detail_row("Saved", saved),
-        detail_row("Now playing", now_playing),
-        detail_row("Stream", station.url.as_str()),
-        Line::from(""),
-        close_hint(),
+        DetailSection {
+            title: "Identity",
+            rows: vec![
+                detail_data("Name", station.name.as_str()),
+                detail_data("UUID", station_uuid),
+                detail_data("Saved", saved),
+            ],
+        },
+        DetailSection {
+            title: "Playback",
+            rows: {
+                let codec_label = codec_detail(station);
+                vec![
+                    detail_data("Stream", station.url.as_str()),
+                    detail_data("Codec", codec_label.as_str()),
+                    detail_data("Bitrate", bitrate_label(station.bitrate).as_str()),
+                    detail_data("Now playing", now_playing),
+                ]
+            },
+        },
+        DetailSection {
+            title: "Catalog",
+            rows: vec![
+                detail_data("Genre", fallback(station.genre.as_str(), "Other")),
+                detail_data("Tags", metadata_list(&station.tags, "N/A").as_str()),
+                detail_data("Country", fallback(station.country.as_str(), "??")),
+                detail_data("Country ID", fallback(station.country_code.as_str(), "N/A")),
+                detail_data("Language", fallback(station.language.as_str(), "N/A")),
+                detail_data("Homepage", fallback(station.homepage.as_str(), "N/A")),
+            ],
+        },
+        DetailSection {
+            title: "Health",
+            rows: vec![
+                detail_data("Last check", last_check),
+                detail_data("Local health", local_health_label(station).as_str()),
+                detail_data("Votes", option_count_label(station.votes).as_str()),
+                detail_data("Clicks", option_count_label(station.click_count).as_str()),
+            ],
+        },
     ]
+}
+
+fn section_lines(sections: Vec<DetailSection>) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (idx, section) in sections.into_iter().enumerate() {
+        if idx > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(section.title, theme::title())));
+        lines.extend(
+            section
+                .rows
+                .into_iter()
+                .map(|row| detail_row(row.label, row.value.as_str())),
+        );
+    }
+    lines.push(Line::from(""));
+    lines.push(close_hint());
+    lines
+}
+
+fn codec_detail(station: &crate::radio::Station) -> String {
+    use crate::audio::PlaybackCapability;
+
+    let codec = fallback(station.codec.as_str(), "N/A");
+    let capability = crate::audio::codec_capability(&station.codec);
+
+    match capability.capability {
+        PlaybackCapability::Supported => format!("{codec} · playable"),
+        PlaybackCapability::Unknown => format!("{codec} · playback will try"),
+        PlaybackCapability::Unsupported => format!("{codec} · not playable yet"),
+    }
+}
+
+fn detail_data(label: &'static str, value: &str) -> DetailRow {
+    DetailRow {
+        label,
+        value: value.trim().to_string(),
+    }
 }
 
 fn detail_row(label: &'static str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:>11}: "), theme::dim()),
-        Span::styled(value.to_string(), theme::text()),
+        Span::styled(compact_detail_value(value), theme::text()),
     ])
+}
+
+fn compact_detail_value(value: &str) -> String {
+    const MAX_CHARS: usize = 96;
+    let value = value.trim();
+    let mut chars = value.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
+}
+
+fn metadata_list(values: &[String], fallback: &str) -> String {
+    if values.is_empty() {
+        fallback.to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn option_count_label(value: Option<u32>) -> String {
+    value
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "N/A".to_string())
+}
+
+fn local_health_label(station: &crate::radio::Station) -> String {
+    let health = &station.health;
+    let failure_count = health.failure_count.unwrap_or(0);
+    match (
+        health.last_success_at.as_deref(),
+        health.last_failure_at.as_deref(),
+        failure_count,
+    ) {
+        (None, None, 0) => "N/A".to_string(),
+        (Some(success), Some(failure), count)
+            if failure_is_after_success(success, failure) && count > 0 =>
+        {
+            format!(
+                "Last failed {failure} ({count}x): {}",
+                fallback(&health.last_error_summary, "N/A")
+            )
+        }
+        (Some(success), _, _) => format!("Last played {success}"),
+        (None, Some(failure), count) if count > 0 => {
+            format!(
+                "Last failed {failure} ({count}x): {}",
+                fallback(&health.last_error_summary, "N/A")
+            )
+        }
+        _ => "N/A".to_string(),
+    }
+}
+
+fn failure_is_after_success(success: &str, failure: &str) -> bool {
+    match (success.parse::<u64>(), failure.parse::<u64>()) {
+        (Ok(success), Ok(failure)) => failure > success,
+        _ => failure > success,
+    }
 }
 
 fn close_hint() -> Line<'static> {
@@ -128,6 +284,17 @@ fn fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{App, PlaybackState};
+    use crate::favorites::Library;
+    use crate::radio::Station;
+
+    fn station(name: &str, url: &str) -> Station {
+        Station::basic(name, url, "Synthwave", "US", 128)
+    }
+
+    fn test_app_with(station: Station) -> App {
+        App::new(Library::in_memory(vec![station]))
+    }
 
     #[test]
     fn details_overlay_rejects_tiny_area() {
@@ -150,5 +317,101 @@ mod tests {
     fn fallback_trims_blank_values() {
         assert_eq!(fallback("", "Other"), "Other");
         assert_eq!(fallback(" Synthwave ", "Other"), "Synthwave");
+    }
+
+    #[test]
+    fn metadata_list_uses_fallback_or_joined_values() {
+        assert_eq!(metadata_list(&[], "N/A"), "N/A");
+        assert_eq!(
+            metadata_list(&["jazz".to_string(), "live".to_string()], "N/A"),
+            "jazz, live"
+        );
+    }
+
+    #[test]
+    fn option_count_label_formats_known_and_unknown_counts() {
+        assert_eq!(option_count_label(None), "N/A");
+        assert_eq!(option_count_label(Some(42)), "42");
+    }
+
+    #[test]
+    fn compact_detail_value_truncates_long_metadata() {
+        assert_eq!(compact_detail_value("  short  "), "short");
+        assert!(compact_detail_value(&"x".repeat(120)).ends_with('…'));
+    }
+
+    #[test]
+    fn detail_sections_group_expected_fields() {
+        let mut station = station("A", "http://a");
+        station.station_uuid = Some("uuid-123".to_string());
+        station.codec = "MP3".to_string();
+        station.tags = vec!["synthwave".to_string(), "night".to_string()];
+        station.last_check_ok = Some(true);
+        let mut app = test_app_with(station);
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.view.current_track = Some("Artist - Track".to_string());
+
+        let model = UiModel::from(&app);
+        let sections = station_detail_sections(&model);
+
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.title)
+                .collect::<Vec<_>>(),
+            vec!["Identity", "Playback", "Catalog", "Health"]
+        );
+        assert!(sections[0].rows.iter().any(|row| row.label == "UUID"));
+        assert!(sections[1]
+            .rows
+            .iter()
+            .any(|row| row.label == "Now playing" && row.value == "Artist - Track"));
+        assert!(sections[2].rows.iter().any(|row| row.label == "Tags"));
+        assert!(sections[3]
+            .rows
+            .iter()
+            .any(|row| row.label == "Local health"));
+    }
+
+    #[test]
+    fn detail_sections_use_missing_metadata_fallbacks() {
+        let mut station = station("A", "http://a");
+        station.bitrate = 0;
+        station.country.clear();
+        let app = test_app_with(station);
+        let model = UiModel::from(&app);
+
+        let sections = station_detail_sections(&model);
+
+        assert!(sections[1]
+            .rows
+            .iter()
+            .any(|row| row.label == "Bitrate" && row.value == "Unknown"));
+        assert!(sections[2]
+            .rows
+            .iter()
+            .any(|row| row.label == "Country" && row.value == "??"));
+        assert!(sections[3]
+            .rows
+            .iter()
+            .any(|row| row.label == "Local health" && row.value == "N/A"));
+    }
+
+    #[test]
+    fn local_health_prefers_newer_numeric_failure_over_older_success() {
+        let mut station = station("A", "http://a");
+        station.health.last_success_at = Some("99".to_string());
+        station.health.last_failure_at = Some("100".to_string());
+        station.health.failure_count = Some(2);
+        station.health.last_error_summary = "timeout".to_string();
+
+        assert_eq!(
+            local_health_label(&station),
+            "Last failed 100 (2x): timeout"
+        );
+
+        station.health.last_success_at = Some("101".to_string());
+        assert_eq!(local_health_label(&station), "Last played 101");
     }
 }

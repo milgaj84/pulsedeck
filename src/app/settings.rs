@@ -1,29 +1,30 @@
 use super::*;
 use crate::action::Action;
-use crate::ui::theme::ThemeName;
+use crate::theme_name::ThemeName;
 
 impl App {
     pub(super) fn handle_settings_action(&mut self, action: Action) {
         match action {
             Action::NextStation => {
-                self.overlays.selected_setting_idx =
-                    (self.overlays.selected_setting_idx + 1) % SettingRow::COUNT;
+                self.ui.overlays.selected_setting_idx =
+                    (self.ui.overlays.selected_setting_idx + 1) % SettingRow::COUNT;
             }
             Action::PrevStation => {
-                self.overlays.selected_setting_idx = if self.overlays.selected_setting_idx == 0 {
-                    SettingRow::COUNT - 1
-                } else {
-                    self.overlays.selected_setting_idx - 1
-                };
+                self.ui.overlays.selected_setting_idx =
+                    if self.ui.overlays.selected_setting_idx == 0 {
+                        SettingRow::COUNT - 1
+                    } else {
+                        self.ui.overlays.selected_setting_idx - 1
+                    };
             }
             Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
                 self.mark_library_dirty();
             }
-            Action::StepSettingForward if self.apply_directional_setting(true) => {
+            Action::StepSettingForward if self.apply_selected_setting(true) => {
                 self.mark_library_dirty();
             }
             Action::StepSettingBackward | Action::ToggleHelp
-                if self.apply_directional_setting(false) =>
+                if self.apply_selected_setting(false) =>
             {
                 self.mark_library_dirty();
             }
@@ -33,10 +34,10 @@ impl App {
             | Action::StepSettingBackward
             | Action::ToggleHelp => {}
             Action::ToggleSettings => {
-                self.overlays.active = ActiveOverlay::None;
+                self.ui.overlays.active = ActiveOverlay::None;
             }
             Action::Quit => {
-                self.overlays.active = ActiveOverlay::None;
+                self.ui.overlays.active = ActiveOverlay::None;
             }
             Action::Tick => self.tick(),
             _ => {
@@ -46,7 +47,7 @@ impl App {
     }
 
     pub(super) fn selected_setting_row(&self) -> Option<SettingRow> {
-        SettingRow::from_index(self.overlays.selected_setting_idx)
+        SettingRow::from_index(self.ui.overlays.selected_setting_idx)
     }
 
     pub(super) fn apply_selected_setting(&mut self, forward: bool) -> bool {
@@ -66,6 +67,8 @@ impl App {
                     &available_output_device_choices(),
                     forward,
                 );
+                self.playback.diagnostics.output_device =
+                    output_device_display_name(self.library.settings.output_device_name.as_deref());
                 self.sync_output_device();
                 self.set_info_notice(format!(
                     "Audio output: {}",
@@ -80,6 +83,22 @@ impl App {
                 crate::ui::theme::set_active(next);
                 true
             }
+            Some(SettingRow::StreamMetadata) => {
+                self.library.settings.stream_metadata_enabled =
+                    !self.library.settings.stream_metadata_enabled;
+                self.playback.diagnostics.metadata_enabled =
+                    self.library.settings.stream_metadata_enabled;
+                self.sync_stream_metadata();
+                self.set_info_notice(format!(
+                    "Song info metadata: {}",
+                    if self.library.settings.stream_metadata_enabled {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                ));
+                true
+            }
             Some(SettingRow::SaveHistory) => {
                 self.library.settings.save_history = !self.library.settings.save_history;
                 true
@@ -88,14 +107,35 @@ impl App {
         }
     }
 
-    pub(super) fn sync_output_device(&self) {
-        self.audio.send(crate::audio::AudioCommand::SetOutputDevice(
-            self.library.settings.output_device_name.clone(),
-        ));
+    pub(super) fn cycle_theme_setting(&mut self) {
+        self.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
+        if self.apply_selected_setting(true) {
+            self.mark_library_dirty();
+            self.set_info_notice(format!("Theme: {}", self.library.settings.theme));
+        }
     }
 
-    fn apply_directional_setting(&mut self, forward: bool) -> bool {
-        self.apply_selected_setting(forward)
+    pub(super) fn toggle_stream_metadata_setting(&mut self) {
+        self.ui.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
+        if self.apply_selected_setting(true) {
+            self.mark_library_dirty();
+        }
+    }
+
+    pub(super) fn sync_output_device(&self) -> bool {
+        self.playback
+            .audio
+            .send(crate::audio::AudioCommand::SetOutputDevice(
+                self.library.settings.output_device_name.clone(),
+            ))
+    }
+
+    pub(super) fn sync_stream_metadata(&self) -> bool {
+        self.playback
+            .audio
+            .send(crate::audio::AudioCommand::SetStreamMetadata(
+                self.library.settings.stream_metadata_enabled,
+            ))
     }
 }
 
@@ -139,7 +179,7 @@ fn step_output_device_preference(
     }
 }
 
-fn step_choice<T: Copy + PartialEq>(choices: &[T], current: T, forward: bool) -> T {
+fn step_choice(choices: &[ThemeName], current: ThemeName, forward: bool) -> ThemeName {
     if choices.is_empty() {
         return current;
     }
@@ -168,13 +208,7 @@ mod tests {
     use crate::radio::Station;
 
     fn station(name: &str, url: &str) -> Station {
-        Station {
-            name: name.to_string(),
-            url: url.to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }
+        Station::basic(name, url, "Synthwave", "US", 128)
     }
 
     fn test_app() -> App {
@@ -184,27 +218,27 @@ mod tests {
     #[test]
     fn settings_blocks_play_selected() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::Notifications.index();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
         let before = app.library.settings.notifications_enabled;
 
         app.update(Action::PlaySelected);
 
-        assert_eq!(app.player.playing_url, None);
+        assert_eq!(app.playback.view.playing_url, None);
         assert_eq!(app.library.settings.notifications_enabled, !before);
     }
 
     #[test]
     fn settings_navigation_wraps_using_row_count() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::COUNT - 1;
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::COUNT - 1;
 
         app.update(Action::NextStation);
-        assert_eq!(app.overlays.selected_setting_idx, 0);
+        assert_eq!(app.ui.overlays.selected_setting_idx, 0);
 
         app.update(Action::PrevStation);
-        assert_eq!(app.overlays.selected_setting_idx, SettingRow::COUNT - 1);
+        assert_eq!(app.ui.overlays.selected_setting_idx, SettingRow::COUNT - 1);
     }
 
     #[test]
@@ -218,8 +252,8 @@ mod tests {
     #[test]
     fn settings_forward_and_backward_cycle_theme() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingForward);
@@ -232,8 +266,8 @@ mod tests {
     #[test]
     fn settings_backward_wraps_theme() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingBackward);
@@ -285,6 +319,18 @@ mod tests {
     }
 
     #[test]
+    fn settings_toggle_stream_metadata_updates_setting() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
+        app.library.settings.stream_metadata_enabled = true;
+
+        app.update(Action::TogglePause);
+
+        assert!(!app.library.settings.stream_metadata_enabled);
+    }
+
+    #[test]
     fn output_device_display_name_uses_default_label_for_none() {
         assert_eq!(
             output_device_display_name(None),
@@ -299,8 +345,8 @@ mod tests {
     #[test]
     fn settings_h_action_steps_backward_without_closing_popup() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.library.settings.theme = "CatppuccinMocha".to_string();
 
         app.update(Action::ToggleHelp);
@@ -312,42 +358,42 @@ mod tests {
     #[test]
     fn settings_blocks_search_entry() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.active = ActiveOverlay::Settings;
 
         app.update(Action::EnterSearch);
 
-        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
         assert!(app.show_settings());
     }
 
     #[test]
     fn settings_quit_closes_settings_without_quitting_app() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.active = ActiveOverlay::Settings;
 
         app.update(Action::Quit);
 
         assert!(!app.show_settings());
-        assert!(!app.should_quit);
+        assert!(!app.ui.should_quit);
     }
 
     #[test]
     fn settings_tick_still_polls_and_updates() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.active = ActiveOverlay::Settings;
         app.set_info_notice("hello");
 
         app.update(Action::Tick);
 
-        assert_eq!(app.tick_count, 1);
-        assert!(app.notice.current.is_some());
+        assert_eq!(app.ui.tick_count, 1);
+        assert!(app.ui.notice.current.is_some());
     }
 
     #[test]
     fn settings_toggle_save_history() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
-        app.overlays.selected_setting_idx = SettingRow::SaveHistory.index();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::SaveHistory.index();
         assert!(!app.library.settings.save_history);
 
         app.update(Action::PlaySelected);

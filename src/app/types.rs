@@ -5,9 +5,15 @@ pub(super) const SEARCH_MIN_CHARS: usize = 2;
 pub enum InputMode {
     Normal,
     Search,
+    /// Searchable action launcher; keys route through an isolated table so
+    /// normal shortcuts never leak through while typing a command.
+    CommandPalette,
     /// Modal sleep-timer overlay; keys route through an isolated table so they
     /// can never collide with Normal or Search bindings.
     SleepTimer,
+    /// In-library substring filter mode; the user types to filter their library
+    /// stations by name, genre, or tag.
+    LibraryFilter,
 }
 
 /// Explicit search state for UI messages and stale-response handling.
@@ -47,6 +53,44 @@ pub enum PlaybackState {
     Error(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaybackDiagnostics {
+    pub output_device: String,
+    pub metadata_enabled: bool,
+    pub reconnect_attempts: u8,
+    pub reconnect_limit: u8,
+    pub buffer_percent: u8,
+    pub buffer_seconds: u32,
+    pub last_event: Option<String>,
+    pub last_error: Option<String>,
+    pub last_recovery: Option<String>,
+    pub decoder_state: DecoderState,
+}
+
+impl PlaybackDiagnostics {
+    /// Create diagnostics with the initial output device and metadata config.
+    pub fn new(output_device: String, metadata_enabled: bool, reconnect_limit: u8) -> Self {
+        Self {
+            output_device,
+            metadata_enabled,
+            reconnect_limit,
+            ..Self::default()
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DecoderState {
+    #[default]
+    Idle,
+    Connecting,
+    Probing,
+    Playing,
+    Ended,
+    Failed,
+}
+
 /// TUI Dashboard layout configurations.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LayoutMode {
@@ -62,15 +106,17 @@ pub enum SettingRow {
     AutoplayLast,
     OutputDevice,
     Theme,
+    StreamMetadata,
     SaveHistory,
 }
 
 impl SettingRow {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Notifications,
         Self::AutoplayLast,
         Self::OutputDevice,
         Self::Theme,
+        Self::StreamMetadata,
         Self::SaveHistory,
     ];
 
@@ -86,7 +132,8 @@ impl SettingRow {
             Self::AutoplayLast => 1,
             Self::OutputDevice => 2,
             Self::Theme => 3,
-            Self::SaveHistory => 4,
+            Self::StreamMetadata => 4,
+            Self::SaveHistory => 5,
         }
     }
 }

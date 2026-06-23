@@ -23,51 +23,118 @@ impl Default for PlaybackView {
     }
 }
 
+impl PlaybackView {
+    /// Reset transient buffer/track status without changing playback state or URL.
+    pub fn reset_transient_status(&mut self) {
+        self.current_track = None;
+        self.buffer_percent = 0;
+        self.buffer_seconds = 0;
+    }
+}
+
 impl App {
-    pub(super) fn play_selected(&mut self) {
-        let station = self
-            .visible_stations()
-            .get(self.nav.selected)
-            .copied()
-            .cloned();
-        if let Some(station) = station {
-            self.reconnect.disarm();
-            let next_playback = self.playback_after_play_command();
-            self.player.playing_url = Some(station.url.clone());
-            self.player.state = next_playback;
-
-            // Persist last played station URL.
-            self.library.settings.last_played_url = Some(station.url.clone());
-            self.mark_library_dirty();
-
-            self.audio.send(AudioCommand::Play(station.url));
-            self.sync_volume();
+    pub(super) fn send_audio_command(&mut self, command: AudioCommand) -> bool {
+        if self.playback.audio.send(command) {
+            true
+        } else {
+            self.playback.view.reset_transient_status();
+            self.playback.view.state = PlaybackState::Error("Audio engine stopped".to_string());
+            self.playback.diagnostics.decoder_state = DecoderState::Failed;
+            self.playback.diagnostics.last_error =
+                Some("Audio engine command channel closed".to_string());
+            self.set_error_notice("Audio engine is not available");
+            false
         }
     }
 
+    pub(super) fn play_selected(&mut self) {
+        let station = self
+            .visible_stations()
+            .get(self.ui.nav.selected)
+            .copied()
+            .cloned();
+        if let Some(station) = station {
+            if !self.validate_station_playback_capability(&station) {
+                return;
+            }
+
+            self.playback.reconnect.disarm();
+            let next_playback = self.playback_after_play_command();
+            self.playback.view.playing_url = Some(station.url.clone());
+            self.playback.view.state = next_playback;
+
+            // Persist last played station URL only after capability is confirmed.
+            self.library.settings.last_played_url = Some(station.url.clone());
+            self.mark_library_dirty();
+
+            if self.send_audio_command(AudioCommand::Play(station.url)) {
+                self.sync_volume();
+            }
+        }
+    }
+
+    /// Returns `true` when the station codec is safe to attempt playback.
+    /// For `Unsupported` codecs, sets an error state and notice before returning `false`.
+    pub(super) fn validate_station_playback_capability(
+        &mut self,
+        station: &crate::radio::Station,
+    ) -> bool {
+        use crate::audio::PlaybackCapability;
+
+        let capability = crate::audio::codec_capability(&station.codec);
+
+        match capability.capability {
+            PlaybackCapability::Supported | PlaybackCapability::Unknown => true,
+            PlaybackCapability::Unsupported => {
+                self.playback.view.reset_transient_status();
+                self.playback.view.state = PlaybackState::Error(format!(
+                    "Unsupported codec: {}",
+                    capability.normalized_codec
+                ));
+                self.playback.view.playing_url = None;
+                self.playback.reconnect.disarm();
+                self.playback.diagnostics.decoder_state = DecoderState::Failed;
+                self.playback.diagnostics.last_error = Some(format!(
+                    "{}: {}",
+                    capability.normalized_codec, capability.reason
+                ));
+                self.set_error_notice(format!(
+                    "{} is not playable yet ({})",
+                    display_station_codec(&station.codec),
+                    capability.reason
+                ));
+                false
+            }
+        }
+    }
+
+    /// Thin wrapper used by lifecycle autoplay so the codec gate is in one place.
+    pub(super) fn can_attempt_station_playback(&mut self, station: &crate::radio::Station) -> bool {
+        self.validate_station_playback_capability(station)
+    }
+
     pub(super) fn retry_stream(&mut self) {
-        let Some(url) = self.player.playing_url.clone() else {
+        let Some(url) = self.playback.view.playing_url.clone() else {
             self.set_error_notice("No stream to retry");
             return;
         };
 
-        self.reconnect.disarm();
-        self.player.current_track = None;
-        self.player.buffer_percent = 0;
-        self.player.buffer_seconds = 0;
-        self.player.state = PlaybackState::Connecting;
-        self.audio.send(AudioCommand::Play(url));
-        self.sync_volume();
-        self.set_info_notice("Retrying stream");
+        self.playback.reconnect.disarm();
+        self.playback.view.reset_transient_status();
+        self.playback.view.state = PlaybackState::Connecting;
+        if self.send_audio_command(AudioCommand::Play(url)) {
+            self.sync_volume();
+            self.set_info_notice("Retrying stream");
+        }
     }
 
     pub(super) fn toggle_pause(&mut self) {
-        match self.player.state.clone() {
+        match self.playback.view.state.clone() {
             PlaybackState::Playing => {
-                self.audio.send(AudioCommand::Pause);
+                self.send_audio_command(AudioCommand::Pause);
             }
             PlaybackState::Paused => {
-                self.audio.send(AudioCommand::Resume);
+                self.send_audio_command(AudioCommand::Resume);
             }
             PlaybackState::Stopped | PlaybackState::Error(_) => {
                 self.play_selected();
@@ -79,52 +146,55 @@ impl App {
     }
 
     pub(super) fn stop_playback(&mut self) {
-        self.player.intentional_stop = true;
-        self.audio.send(AudioCommand::Stop);
+        self.playback.view.intentional_stop = true;
+        if !self.send_audio_command(AudioCommand::Stop) {
+            self.playback.view.playing_url = None;
+            return;
+        }
 
         if matches!(
-            &self.player.state,
+            &self.playback.view.state,
             PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
         ) {
-            self.player.state = PlaybackState::FadingOut {
+            self.playback.view.state = PlaybackState::FadingOut {
                 current_volume: self.current_output_volume_fraction(),
             };
         } else {
-            self.player.playing_url = None;
-            self.player.state = PlaybackState::Stopped;
+            self.playback.view.playing_url = None;
+            self.playback.view.state = PlaybackState::Stopped;
         }
     }
 
     pub(super) fn stop_audio_before_quit(&mut self) {
-        self.player.intentional_stop = true;
-        self.flush_persistence();
-        self.audio.send(AudioCommand::Stop);
+        self.playback.view.intentional_stop = true;
+        self.force_flush_persistence();
+        self.playback.audio.send(AudioCommand::Stop);
     }
 
     pub(super) fn volume_up(&mut self) {
-        let step = progressive_volume_step(self.volume);
-        self.volume = self.volume.saturating_add(step).min(100);
-        self.muted = false;
+        let step = progressive_volume_step(self.playback.volume);
+        self.playback.volume = self.playback.volume.saturating_add(step).min(100);
+        self.playback.muted = false;
         self.sync_volume();
         self.mark_ui_state_dirty();
     }
 
     pub(super) fn volume_down(&mut self) {
-        let step = progressive_volume_step(self.volume);
-        self.volume = self.volume.saturating_sub(step);
+        let step = progressive_volume_step(self.playback.volume);
+        self.playback.volume = self.playback.volume.saturating_sub(step);
         self.sync_volume();
         self.mark_ui_state_dirty();
     }
 
     pub(super) fn toggle_mute(&mut self) {
-        self.muted = !self.muted;
+        self.playback.muted = !self.playback.muted;
         self.sync_volume();
         self.mark_ui_state_dirty();
     }
 
     fn playback_after_play_command(&self) -> PlaybackState {
         if matches!(
-            &self.player.state,
+            &self.playback.view.state,
             PlaybackState::Playing | PlaybackState::Paused | PlaybackState::FadingOut { .. }
         ) {
             PlaybackState::FadingOut {
@@ -136,49 +206,57 @@ impl App {
     }
 
     fn current_output_volume_fraction(&self) -> f32 {
-        if self.muted {
-            0.0
-        } else {
-            self.volume as f32 / 100.0
-        }
+        self.playback.output_volume_fraction()
     }
 
     /// Sync volume to audio engine, respecting mute state.
-    pub(super) fn sync_volume(&self) {
-        self.audio.send(AudioCommand::SetVolume(
+    pub(super) fn sync_volume(&self) -> bool {
+        self.playback.audio.send(AudioCommand::SetVolume(
             self.current_output_volume_fraction(),
-        ));
+        ))
     }
 
     pub(super) fn export_library(&mut self) {
-        let unixtime = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let export_dir = self
-            .library
-            .path
-            .as_ref()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")));
-
-        if let Some(dir) = export_dir {
-            if let Err(e) = std::fs::create_dir_all(&dir) {
-                self.set_error_notice(format!("Failed to create export directory: {e}"));
-                return;
-            }
-            let filepath = dir.join(format!("pulsedeck-export-{}.m3u", unixtime));
-            let m3u_content = crate::playlist::to_m3u(&self.library.stations);
-            match std::fs::write(&filepath, m3u_content) {
-                Ok(_) => {
-                    self.set_info_notice(format!("Library exported to {}", filepath.display()))
-                }
-                Err(e) => self.set_error_notice(format!("Export failed: {e}")),
-            }
-        } else {
+        let Some(dir) = self.export_directory() else {
             self.set_error_notice("Could not resolve config directory for export");
+            return;
+        };
+
+        match crate::playlist_export::export_library_m3u(
+            &self.library.stations,
+            &dir,
+            current_unix_time(),
+        ) {
+            Ok(filepath) => {
+                self.set_info_notice(format!("Library exported to {}", filepath.display()))
+            }
+            Err(err) => self.set_error_notice(format!("Export failed: {err}")),
         }
     }
+
+    fn export_directory(&self) -> Option<std::path::PathBuf> {
+        self.library
+            .path
+            .as_ref()
+            .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+            .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")))
+    }
+}
+
+fn display_station_codec(codec: &str) -> String {
+    let codec = codec.trim();
+    if codec.is_empty() {
+        "Unknown codec".to_string()
+    } else {
+        codec.to_ascii_uppercase()
+    }
+}
+
+fn current_unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn progressive_volume_step(volume: u8) -> u8 {
@@ -196,13 +274,7 @@ mod tests {
     use crate::radio::Station;
 
     fn station(name: &str, url: &str) -> Station {
-        Station {
-            name: name.to_string(),
-            url: url.to_string(),
-            genre: "Synthwave".to_string(),
-            country: "US".to_string(),
-            bitrate: 128,
-        }
+        Station::basic(name, url, "Synthwave", "US", 128)
     }
 
     fn test_app() -> App {
@@ -215,30 +287,30 @@ mod tests {
 
         app.play_selected();
 
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://a"));
         assert_eq!(
             app.library.settings.last_played_url.as_deref(),
             Some("http://a")
         );
-        assert_eq!(app.player.state, PlaybackState::Connecting);
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }
 
     #[test]
     fn retry_stream_reuses_current_url_and_resets_transient_status() {
         let mut app = test_app();
-        app.player.playing_url = Some("http://a".to_string());
-        app.player.state = PlaybackState::Error("device vanished".to_string());
-        app.player.current_track = Some("Old Track".to_string());
-        app.player.buffer_percent = 80;
-        app.player.buffer_seconds = 12;
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Error("device vanished".to_string());
+        app.playback.view.current_track = Some("Old Track".to_string());
+        app.playback.view.buffer_percent = 80;
+        app.playback.view.buffer_seconds = 12;
 
         app.retry_stream();
 
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
-        assert_eq!(app.player.state, PlaybackState::Connecting);
-        assert_eq!(app.player.current_track, None);
-        assert_eq!(app.player.buffer_percent, 0);
-        assert_eq!(app.player.buffer_seconds, 0);
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://a"));
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+        assert_eq!(app.playback.view.current_track, None);
+        assert_eq!(app.playback.view.buffer_percent, 0);
+        assert_eq!(app.playback.view.buffer_seconds, 0);
     }
 
     #[test]
@@ -247,10 +319,10 @@ mod tests {
 
         app.retry_stream();
 
-        assert_eq!(app.player.playing_url, None);
-        assert_eq!(app.player.state, PlaybackState::Stopped);
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.playback.view.state, PlaybackState::Stopped);
         assert!(matches!(
-            app.notice.current.as_ref(),
+            app.ui.notice.current.as_ref(),
             Some(AppNotice::Error(_))
         ));
     }
@@ -258,13 +330,13 @@ mod tests {
     #[test]
     fn play_selected_while_playing_enters_fading_out_state() {
         let mut app = test_app();
-        app.player.state = PlaybackState::Playing;
-        app.volume = 80;
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.volume = 80;
 
         app.play_selected();
 
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
-        match app.player.state {
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://a"));
+        match app.playback.view.state {
             PlaybackState::FadingOut { current_volume } => {
                 assert!((current_volume - 0.8).abs() < 0.001);
             }
@@ -275,14 +347,14 @@ mod tests {
     #[test]
     fn stop_while_playing_enters_fading_out_and_keeps_station_context() {
         let mut app = test_app();
-        app.player.playing_url = Some("http://a".to_string());
-        app.player.state = PlaybackState::Playing;
-        app.volume = 80;
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.volume = 80;
 
         app.stop_playback();
 
-        assert_eq!(app.player.playing_url.as_deref(), Some("http://a"));
-        match app.player.state {
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://a"));
+        match app.playback.view.state {
             PlaybackState::FadingOut { current_volume } => {
                 assert!((current_volume - 0.8).abs() < 0.001);
             }
@@ -297,8 +369,33 @@ mod tests {
 
         app.toggle_pause();
 
-        assert_eq!(app.player.playing_url, None);
-        assert_eq!(app.player.state, PlaybackState::Stopped);
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.playback.view.state, PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn play_selected_surfaces_dead_audio_engine() {
+        let mut app = test_app();
+        app.playback.audio = crate::audio::AudioEngine::disconnected_for_test();
+
+        app.play_selected();
+
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+        assert!(matches!(app.ui.notice.current, Some(AppNotice::Error(_))));
+        assert_eq!(
+            app.playback.diagnostics.last_error.as_deref(),
+            Some("Audio engine command channel closed")
+        );
+    }
+
+    #[test]
+    fn sync_volume_reports_dead_audio_engine_without_changing_playback_state() {
+        let mut app = test_app();
+        app.playback.audio = crate::audio::AudioEngine::disconnected_for_test();
+        app.playback.view.state = PlaybackState::Playing;
+
+        assert!(!app.sync_volume());
+        assert_eq!(app.playback.view.state, PlaybackState::Playing);
     }
 
     #[test]
@@ -315,61 +412,154 @@ mod tests {
     fn volume_up_uses_progressive_steps_and_clamps() {
         let mut app = test_app();
 
-        app.volume = 12;
+        app.playback.volume = 12;
         app.volume_up();
-        assert_eq!(app.volume, 14);
+        assert_eq!(app.playback.volume, 14);
 
-        app.volume = 45;
+        app.playback.volume = 45;
         app.volume_up();
-        assert_eq!(app.volume, 50);
+        assert_eq!(app.playback.volume, 50);
 
-        app.volume = 95;
+        app.playback.volume = 95;
         app.volume_up();
-        assert_eq!(app.volume, 100);
+        assert_eq!(app.playback.volume, 100);
     }
 
     #[test]
     fn volume_down_uses_progressive_steps_and_saturates() {
         let mut app = test_app();
 
-        app.volume = 12;
+        app.playback.volume = 12;
         app.volume_down();
-        assert_eq!(app.volume, 10);
+        assert_eq!(app.playback.volume, 10);
 
-        app.volume = 45;
+        app.playback.volume = 45;
         app.volume_down();
-        assert_eq!(app.volume, 40);
+        assert_eq!(app.playback.volume, 40);
 
-        app.volume = 80;
+        app.playback.volume = 80;
         app.volume_down();
-        assert_eq!(app.volume, 70);
+        assert_eq!(app.playback.volume, 70);
 
-        app.volume = 1;
+        app.playback.volume = 1;
         app.volume_down();
-        assert_eq!(app.volume, 0);
+        assert_eq!(app.playback.volume, 0);
     }
 
     #[test]
     fn volume_up_unmutes() {
         let mut app = test_app();
-        app.volume = 80;
-        app.muted = true;
+        app.playback.volume = 80;
+        app.playback.muted = true;
 
         app.volume_up();
 
-        assert_eq!(app.volume, 90);
-        assert!(!app.muted);
+        assert_eq!(app.playback.volume, 90);
+        assert!(!app.playback.muted);
     }
 
     #[test]
     fn toggle_mute_preserves_volume_number() {
         let mut app = test_app();
-        app.volume = 65;
+        app.playback.volume = 65;
 
         app.toggle_mute();
 
-        assert!(app.muted);
-        assert_eq!(app.volume, 65);
+        assert!(app.playback.muted);
+        assert_eq!(app.playback.volume, 65);
+    }
+
+    #[test]
+    fn mp3_codec_starts_playback() {
+        let mut st = station("MP3 Radio", "http://mp3");
+        st.codec = "MP3".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://mp3"));
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn empty_codec_is_allowed_to_try_playback() {
+        let mut st = station("Mystery Radio", "http://mystery");
+        st.codec = String::new();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://mystery")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn aac_codec_now_starts_playback() {
+        // AAC is now supported via Symphonia; the codec gate should allow it through.
+        let mut st = station("AAC Radio", "http://aac");
+        st.codec = "AAC".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        // playing_url and last_played_url should be set (gate was not tripped).
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://aac"));
+        assert_eq!(
+            app.library.settings.last_played_url.as_deref(),
+            Some("http://aac")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn hls_codec_is_blocked_before_audio_command() {
+        // HLS remains unsupported; it should be blocked.
+        let mut st = station("HLS Radio", "http://hls");
+        st.codec = "HLS".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.library.settings.last_played_url, None);
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+        assert!(app
+            .playback
+            .diagnostics
+            .last_error
+            .as_deref()
+            .is_some_and(|msg| msg.contains("HLS")));
+    }
+
+    #[test]
+    fn hls_codec_does_not_set_playing_url_or_last_played_url() {
+        // HLS remains unsupported; playing_url should never be set.
+        let mut st = station("HLS Radio", "http://hls");
+        st.codec = "HLS".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.library.settings.last_played_url, None);
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn ogg_codec_now_starts_playback() {
+        // OGG is now supported via Symphonia; it should not be blocked.
+        let mut st = station("OGG Radio", "http://ogg");
+        st.codec = "OGG".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        // playing_url is set since the codec gate does not block OGG.
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://ogg"));
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }
 
     #[test]
@@ -403,7 +593,7 @@ mod tests {
         }
         assert!(found_m3u, "Expected .m3u export file to be created");
         assert!(matches!(
-            app.notice.current.as_ref(),
+            app.ui.notice.current.as_ref(),
             Some(crate::app::types::AppNotice::Info(_))
         ));
 

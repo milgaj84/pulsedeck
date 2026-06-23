@@ -1,9 +1,9 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 
-pub(crate) fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &App) {
+pub(crate) fn render_oscilloscope(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     if area.width < 3 || area.height < 3 {
         return;
     }

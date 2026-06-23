@@ -2,11 +2,12 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs};
 
 use super::theme;
-use crate::app::{App, InputMode};
+use crate::app::InputMode;
+use crate::ui::model::UiModel;
 
 /// Render the station list.
 /// Normal mode: your library. Search mode: API search results.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let visible = app.visible_stations();
 
     // ── Layout Split for normal mode genre folders ────────────────
@@ -50,14 +51,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // ── Render Station List ───────────────────────────────────────
     let row_width = list_area.width.saturating_sub(4) as usize;
+    let is_library_mode =
+        app.input_mode == InputMode::Normal || app.input_mode == InputMode::LibraryFilter;
+    let row_number_width = if is_library_mode {
+        digit_count(visible.len())
+    } else {
+        0
+    };
     let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
         .map(|(idx, station)| {
             let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
             let is_selected = app.nav.selected == idx;
-            let is_saved_search_result =
-                app.input_mode == InputMode::Search && app.library.contains(&station.url);
 
             let cursor = station_cursor(is_playing, is_selected);
             let cursor_style = if is_playing {
@@ -68,12 +74,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 theme::dim()
             };
 
-            let save_marker = if is_saved_search_result { "★ " } else { "  " };
-            let save_style = if is_saved_search_result {
-                Style::default().fg(theme::warm())
+            // In Search mode: ★ marks stations already saved in library.
+            // In Normal/LibraryFilter mode: ★ marks favorited stations.
+            let (save_marker, save_style) = if app.input_mode == InputMode::Search {
+                let is_saved = app.library.contains_station(station);
+                if is_saved {
+                    ("★ ", Style::default().fg(theme::warm()))
+                } else {
+                    ("  ", theme::dim())
+                }
+            } else if is_library_mode && app.favorites.contains(&station.url) {
+                ("★ ", Style::default().fg(theme::warm()))
             } else {
-                theme::dim()
+                ("  ", theme::dim())
             };
+
+            // Row number prefix (only in Normal/LibraryFilter mode)
+            let row_number_str = if is_library_mode {
+                format!("{:>width$} ", idx + 1, width = row_number_width)
+            } else {
+                String::new()
+            };
+            let row_number_style = theme::dim();
 
             let name_style = station_name_style(is_playing, is_selected, idx);
             let meta_style = if is_selected {
@@ -84,16 +106,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 theme::dim()
             };
 
-            let meta = station_meta_label(
-                &app.input_mode,
-                station.genre.as_str(),
-                station.country.as_str(),
-                station.bitrate,
-            );
+            let meta = station_meta_label(&app.input_mode, station);
             let meta_chip = format!(" {} ", meta);
-            let fixed_width = crate::ui::text::visible_len(cursor)
-                + crate::ui::text::visible_len(save_marker)
-                + crate::ui::text::visible_len(&meta_chip)
+            let fixed_width = crate::text::visible_len(cursor)
+                + crate::text::visible_len(save_marker)
+                + crate::text::visible_len(&row_number_str)
+                + crate::text::visible_len(&meta_chip)
                 + 2;
             let name_width = row_width.saturating_sub(fixed_width).max(8);
             let search_query = if app.input_mode == InputMode::Search {
@@ -103,15 +121,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             };
             let name = truncate_station_name(station.name.as_str(), search_query, name_width);
             let padding = row_width.saturating_sub(
-                crate::ui::text::visible_len(cursor)
-                    + crate::ui::text::visible_len(save_marker)
-                    + crate::ui::text::visible_len(&name)
-                    + crate::ui::text::visible_len(&meta_chip),
+                crate::text::visible_len(cursor)
+                    + crate::text::visible_len(save_marker)
+                    + crate::text::visible_len(&row_number_str)
+                    + crate::text::visible_len(&name)
+                    + crate::text::visible_len(&meta_chip),
             );
 
             ListItem::new(Line::from(vec![
                 Span::styled(cursor, cursor_style),
                 Span::styled(save_marker, save_style),
+                Span::styled(row_number_str, row_number_style),
                 Span::styled(name, name_style),
                 Span::raw(" ".repeat(padding)),
                 Span::styled(meta_chip, meta_style),
@@ -145,7 +165,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn should_render_empty_library_onboarding(app: &App, visible_count: usize) -> bool {
+fn should_render_empty_library_onboarding(app: &UiModel<'_>, visible_count: usize) -> bool {
     app.input_mode == InputMode::Normal && visible_count == 0
 }
 
@@ -184,6 +204,21 @@ fn onboarding_hint(key: &'static str, label: &'static str) -> Line<'static> {
     ])
 }
 
+/// Return the number of decimal digits needed to display `n`.
+/// Returns 1 for n == 0.
+fn digit_count(n: usize) -> usize {
+    if n == 0 {
+        return 1;
+    }
+    let mut count = 0;
+    let mut value = n;
+    while value > 0 {
+        count += 1;
+        value /= 10;
+    }
+    count
+}
+
 fn station_cursor(is_playing: bool, is_selected: bool) -> &'static str {
     match (is_playing, is_selected) {
         (true, true) => "▶ ",
@@ -205,31 +240,127 @@ fn station_name_style(is_playing: bool, is_selected: bool, idx: usize) -> Style 
     }
 }
 
-fn station_meta_label(input_mode: &InputMode, genre: &str, country: &str, bitrate: u32) -> String {
-    let genre = empty_fallback(genre, "Other");
-    let country = empty_fallback(country, "??");
-
+fn station_meta_label(input_mode: &InputMode, station: &crate::radio::Station) -> String {
     if *input_mode == InputMode::Search {
-        format!("{} · {} · {}k", genre, country, bitrate)
+        search_station_meta_label(station)
     } else {
-        format!("{} · {}k", country, bitrate)
+        library_station_meta_label(station)
     }
 }
 
-fn station_list_title(app: &App, visible_count: usize) -> String {
+fn search_station_meta_label(station: &crate::radio::Station) -> String {
+    join_non_empty([
+        empty_fallback(&station.genre, "Other").to_string(),
+        station_country_chip(station),
+        bitrate_chip(station.bitrate),
+        codec_chip(station),
+        check_chip(station),
+    ])
+}
+
+fn library_station_meta_label(station: &crate::radio::Station) -> String {
+    join_non_empty([
+        station_health_chip(station),
+        station_country_chip(station),
+        bitrate_chip(station.bitrate),
+    ])
+}
+
+fn station_health_chip(station: &crate::radio::Station) -> String {
+    let failure_count = station.health.failure_count.unwrap_or(0);
+    if failure_count > 0
+        && station_health_failure_is_current(
+            station.health.last_success_at.as_deref(),
+            station.health.last_failure_at.as_deref(),
+        )
+    {
+        return format!("⚠{failure_count}x");
+    }
+    if station.health.last_success_at.is_some() {
+        return "✓".to_string();
+    }
+    String::new()
+}
+
+fn station_health_failure_is_current(success: Option<&str>, failure: Option<&str>) -> bool {
+    match (success, failure) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(success), Some(failure)) => match (success.parse::<u64>(), failure.parse::<u64>()) {
+            (Ok(success), Ok(failure)) => failure > success,
+            _ => failure > success,
+        },
+    }
+}
+
+fn station_country_chip(station: &crate::radio::Station) -> String {
+    if !station.country_code.trim().is_empty() {
+        station.country_code.trim().to_ascii_uppercase()
+    } else {
+        empty_fallback(&station.country, "??").to_string()
+    }
+}
+
+fn bitrate_chip(bitrate: u32) -> String {
+    if bitrate == 0 {
+        "?k".to_string()
+    } else {
+        format!("{bitrate}k")
+    }
+}
+
+fn codec_chip(station: &crate::radio::Station) -> String {
+    use crate::audio::PlaybackCapability;
+
+    let codec = station.codec.trim();
+    if codec.is_empty() {
+        return "codec ?".to_string();
+    }
+
+    let capability = crate::audio::codec_capability(codec);
+    match capability.capability {
+        PlaybackCapability::Supported => codec.to_ascii_uppercase(),
+        PlaybackCapability::Unknown => format!("{} ?", codec.to_ascii_uppercase()),
+        PlaybackCapability::Unsupported => format!("{} !", codec.to_ascii_uppercase()),
+    }
+}
+
+fn check_chip(station: &crate::radio::Station) -> String {
+    match station.last_check_ok {
+        Some(true) => "OK".to_string(),
+        Some(false) => "down?".to_string(),
+        None => String::new(),
+    }
+}
+
+fn join_non_empty<const N: usize>(parts: [String; N]) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> String {
     if app.input_mode == InputMode::Search {
         if app.search.query.is_empty() {
             " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
         } else if app.search.searching_api {
-            format!(" 🔍 Tuning query \"{}\"... ", app.search.query)
+            format!(" 🔍 Tuning {}... ", search_title_label(&app.search.query))
         } else if visible_count == 0 {
-            format!(" 🔍 No signal for \"{}\" ", app.search.query)
+            format!(
+                " 🔍 No signal for {} ",
+                search_title_label(&app.search.query)
+            )
         } else {
             format!(
-                " 🔍 Search Results ({}) · Space preview · Enter save ",
-                visible_count
+                " 🔍 Search Results ({}) · {} · Space preview · Enter save ",
+                visible_count,
+                search_title_label(&app.search.query)
             )
         }
+    } else if app.library_filter_active {
+        library_filter_title(app.library_filter_query, visible_count)
     } else if visible_count == 0 {
         " ◇ Empty Library — press / to search ".to_string()
     } else {
@@ -239,8 +370,34 @@ fn station_list_title(app: &App, visible_count: usize) -> String {
             .get(app.nav.selected_genre_idx)
             .map(|s| s.as_str())
             .unwrap_or("All");
-        format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
+        let base = format!(" ◇ Library / {} ({}) ", genre_name, visible_count);
+        append_number_jump_indicator(&base, app)
     }
+}
+
+fn append_number_jump_indicator(base: &str, app: &UiModel<'_>) -> String {
+    if app.number_jump_active {
+        format!("{}│ → {} ", base, app.number_jump_display)
+    } else {
+        base.to_string()
+    }
+}
+
+fn library_filter_title(query: &str, visible_count: usize) -> String {
+    if query.is_empty() {
+        " ◇ Library Filter: ▎ ".to_string()
+    } else if visible_count == 0 {
+        format!(" ◇ Library Filter: {} — no matches ", query)
+    } else {
+        format!(" ◇ Library Filter: {}▎ ", query)
+    }
+}
+
+fn search_title_label(raw_query: &str) -> String {
+    crate::text::truncate_with_ellipsis(
+        &crate::radio::StationSearchQuery::parse(raw_query).display_label(),
+        32,
+    )
 }
 
 fn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
@@ -254,12 +411,12 @@ fn empty_fallback<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 fn truncate_station_name(value: &str, query: Option<&str>, max_chars: usize) -> String {
     match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => adaptive_search_truncate(value, query, max_chars),
-        None => crate::ui::text::truncate_with_ellipsis(value, max_chars),
+        None => crate::text::truncate_with_ellipsis(value, max_chars),
     }
 }
 
 fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> String {
-    let value_len = crate::ui::text::visible_len(value);
+    let value_len = crate::text::visible_len(value);
     if value_len <= max_chars {
         return value.to_string();
     }
@@ -269,11 +426,11 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     }
 
     let Some(match_start) = find_case_insensitive_char_index(value, query) else {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     };
 
     if match_start < max_chars.saturating_sub(1) {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     }
 
     let available = max_chars.saturating_sub(2);
@@ -281,7 +438,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
         return "…".to_string();
     }
 
-    let query_len = crate::ui::text::visible_len(query).max(1);
+    let query_len = crate::text::visible_len(query).max(1);
     let context_before = available.saturating_sub(query_len) / 2;
     let start = match_start
         .saturating_sub(context_before)
@@ -289,7 +446,7 @@ fn adaptive_search_truncate(value: &str, query: &str, max_chars: usize) -> Strin
     let end = start + available;
 
     if start == 0 {
-        return crate::ui::text::truncate_with_ellipsis(value, max_chars);
+        return crate::text::truncate_with_ellipsis(value, max_chars);
     }
 
     if end >= value_len {
@@ -317,12 +474,13 @@ fn find_case_insensitive_char_index(value: &str, query: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
     use crate::favorites::Library;
 
     #[test]
     fn truncation_keeps_short_names_unchanged() {
         assert_eq!(
-            crate::ui::text::truncate_with_ellipsis("Nightride FM", 20),
+            crate::text::truncate_with_ellipsis("Nightride FM", 20),
             "Nightride FM"
         );
     }
@@ -330,41 +488,108 @@ mod tests {
     #[test]
     fn truncation_adds_ellipsis_for_long_names() {
         assert_eq!(
-            crate::ui::text::truncate_with_ellipsis("SomaFM Deep Space One", 10),
+            crate::text::truncate_with_ellipsis("SomaFM Deep Space One", 10),
             "SomaFM De…"
         );
     }
 
     #[test]
+    fn codec_chip_marks_unsupported_codec() {
+        // HLS is the only known-unsupported codec; it should be displayed with `!`
+        let mut station = crate::radio::Station::basic("HLS", "http://hls", "Pop", "US", 128);
+        station.codec = "HLS".to_string();
+        assert_eq!(codec_chip(&station), "HLS !");
+    }
+
+    #[test]
+    fn codec_chip_marks_aac_as_supported() {
+        // AAC is now supported via Symphonia; no `!` warning
+        let mut station = crate::radio::Station::basic("AAC", "http://aac", "Pop", "US", 128);
+        station.codec = "AAC".to_string();
+        assert_eq!(codec_chip(&station), "AAC");
+    }
+
+    #[test]
+    fn codec_chip_marks_supported_mp3() {
+        let mut station = crate::radio::Station::basic("MP3", "http://mp3", "Pop", "US", 128);
+        station.codec = "MP3".to_string();
+        assert_eq!(codec_chip(&station), "MP3");
+    }
+
+    #[test]
+    fn codec_chip_marks_empty_as_unknown() {
+        let mut station = crate::radio::Station::basic("X", "http://x", "Pop", "US", 128);
+        station.codec = String::new();
+        assert_eq!(codec_chip(&station), "codec ?");
+    }
+
+    #[test]
+    fn codec_chip_marks_unrecognized_as_unknown() {
+        let mut station = crate::radio::Station::basic("X", "http://x", "Pop", "US", 128);
+        station.codec = "WEIRD".to_string();
+        assert_eq!(codec_chip(&station), "WEIRD ?");
+    }
+
+    #[test]
     fn station_meta_search_includes_genre_country_and_bitrate() {
+        let station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        // Station::basic sets an empty codec, which renders as "codec ?" now.
         assert_eq!(
-            station_meta_label(&InputMode::Search, "Synthwave", "US", 128),
-            "Synthwave · US · 128k"
+            station_meta_label(&InputMode::Search, &station),
+            "Synthwave · US · 128k · codec ?"
         );
     }
 
     #[test]
     fn station_meta_normal_keeps_library_rows_compact() {
+        let station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
         assert_eq!(
-            station_meta_label(&InputMode::Normal, "Synthwave", "US", 128),
+            station_meta_label(&InputMode::Normal, &station),
             "US · 128k"
         );
     }
 
     #[test]
+    fn station_meta_normal_includes_health_badge() {
+        let mut station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        station.health.last_failure_at = Some("20".to_string());
+        station.health.failure_count = Some(2);
+
+        assert_eq!(
+            station_meta_label(&InputMode::Normal, &station),
+            "⚠2x · US · 128k"
+        );
+
+        station.health.last_success_at = Some("21".to_string());
+        assert_eq!(station_health_chip(&station), "✓");
+    }
+
+    #[test]
+    fn station_health_badge_compares_numeric_timestamps() {
+        let mut station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        station.health.last_success_at = Some("99".to_string());
+        station.health.last_failure_at = Some("100".to_string());
+        station.health.failure_count = Some(1);
+
+        assert_eq!(station_health_chip(&station), "⚠1x");
+    }
+
+    #[test]
     fn empty_library_onboarding_only_renders_for_empty_normal_mode() {
         let app = App::new(Library::in_memory(vec![]));
+        let model = UiModel::from(&app);
 
-        assert!(should_render_empty_library_onboarding(&app, 0));
-        assert!(!should_render_empty_library_onboarding(&app, 1));
+        assert!(should_render_empty_library_onboarding(&model, 0));
+        assert!(!should_render_empty_library_onboarding(&model, 1));
     }
 
     #[test]
     fn search_title_explains_preview_and_save_actions() {
         let mut app = App::new(Library::in_memory(vec![]));
-        app.input_mode = InputMode::Search;
+        app.ui.input_mode = InputMode::Search;
+        let model = UiModel::from(&app);
 
-        let title = station_list_title(&app, 3);
+        let title = station_list_title(&model, 3);
 
         assert!(title.contains("Space preview"));
         assert!(title.contains("Enter save"));
@@ -416,5 +641,169 @@ mod tests {
         let truncated = truncate_station_name("São Paulo Rádio Underground", Some("rádio"), 10);
 
         assert!(truncated.contains("Rádio"));
+    }
+
+    #[test]
+    fn library_filter_title_shows_cursor_when_query_empty() {
+        let title = library_filter_title("", 5);
+        assert_eq!(title, " ◇ Library Filter: ▎ ");
+    }
+
+    #[test]
+    fn library_filter_title_shows_query_with_cursor() {
+        let title = library_filter_title("soma", 3);
+        assert_eq!(title, " ◇ Library Filter: soma▎ ");
+    }
+
+    #[test]
+    fn library_filter_title_shows_no_matches_indicator() {
+        let title = library_filter_title("zzz", 0);
+        assert_eq!(title, " ◇ Library Filter: zzz — no matches ");
+    }
+
+    #[test]
+    fn station_list_title_uses_filter_title_when_filter_active() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::LibraryFilter;
+        app.library_filter_query = "synth".to_string();
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("Library Filter"));
+        assert!(title.contains("synth"));
+        assert!(title.contains("▎"));
+    }
+
+    #[test]
+    fn station_list_title_shows_normal_when_filter_inactive() {
+        let app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("Library"));
+        assert!(!title.contains("Filter:"));
+    }
+
+    #[test]
+    fn station_list_title_shows_number_jump_indicator_when_active() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.number_jump.push_digit('4');
+        app.number_jump.push_digit('2');
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("│ → 42"));
+    }
+
+    #[test]
+    fn station_list_title_hides_number_jump_indicator_when_inactive() {
+        let app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(!title.contains("│ →"));
+    }
+
+    #[test]
+    fn digit_count_returns_correct_width() {
+        assert_eq!(digit_count(0), 1);
+        assert_eq!(digit_count(1), 1);
+        assert_eq!(digit_count(9), 1);
+        assert_eq!(digit_count(10), 2);
+        assert_eq!(digit_count(99), 2);
+        assert_eq!(digit_count(100), 3);
+        assert_eq!(digit_count(999), 3);
+        assert_eq!(digit_count(1000), 4);
+    }
+
+    #[test]
+    fn favorite_indicator_shown_for_favorited_station() {
+        let mut app = App::new(Library::in_memory(vec![
+            crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128),
+            crate::radio::Station::basic("B", "http://b", "Synthwave", "US", 128),
+        ]));
+        app.library.settings.favorites.toggle("http://a");
+        let model = UiModel::from(&app);
+
+        assert!(model.favorites.contains("http://a"));
+        assert!(!model.favorites.contains("http://b"));
+    }
+
+    #[test]
+    fn row_number_format_single_digit_list() {
+        let width = digit_count(5);
+        assert_eq!(width, 1);
+        let row_str = format!("{:>width$} ", 1, width = width);
+        assert_eq!(row_str, "1 ");
+        let row_str = format!("{:>width$} ", 5, width = width);
+        assert_eq!(row_str, "5 ");
+    }
+
+    #[test]
+    fn row_number_format_double_digit_list() {
+        let width = digit_count(12);
+        assert_eq!(width, 2);
+        let row_str = format!("{:>width$} ", 1, width = width);
+        assert_eq!(row_str, " 1 ");
+        let row_str = format!("{:>width$} ", 12, width = width);
+        assert_eq!(row_str, "12 ");
+    }
+
+    #[test]
+    fn row_number_not_shown_in_search_mode() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::Search;
+        let model = UiModel::from(&app);
+
+        let is_library_mode =
+            model.input_mode == InputMode::Normal || model.input_mode == InputMode::LibraryFilter;
+        assert!(!is_library_mode);
+    }
+
+    #[test]
+    fn row_number_shown_in_library_filter_mode() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::LibraryFilter;
+        let model = UiModel::from(&app);
+
+        let is_library_mode =
+            model.input_mode == InputMode::Normal || model.input_mode == InputMode::LibraryFilter;
+        assert!(is_library_mode);
     }
 }

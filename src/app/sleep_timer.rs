@@ -149,12 +149,14 @@ impl super::App {
         let now = Instant::now();
         match action {
             Action::SleepTimerIncrease => {
-                self.sleep_timer
+                self.playback
+                    .sleep_timer
                     .increase(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
             Action::SleepTimerDecrease => {
-                self.sleep_timer
+                self.playback
+                    .sleep_timer
                     .decrease(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
@@ -163,13 +165,13 @@ impl super::App {
                 self.announce_sleep_timer();
             }
             Action::SleepTimerClear => {
-                self.sleep_timer.clear();
+                self.playback.sleep_timer.clear();
                 self.set_info_notice("Sleep timer off");
             }
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),
             Action::Quit => {
                 self.stop_audio_before_quit();
-                self.should_quit = true;
+                self.ui.should_quit = true;
             }
             Action::Tick => self.tick(),
             _ => {
@@ -179,11 +181,11 @@ impl super::App {
     }
 
     fn announce_sleep_timer(&mut self) {
-        if self.sleep_timer.is_waiting_for_playback() {
-            let label = self.sleep_timer.label();
+        if self.playback.sleep_timer.is_waiting_for_playback() {
+            let label = self.playback.sleep_timer.label();
             self.set_info_notice(format!("Sleep timer: {label} when playback starts"));
-        } else if self.sleep_timer.is_armed() {
-            let label = self.sleep_timer.label();
+        } else if self.playback.sleep_timer.is_armed() {
+            let label = self.playback.sleep_timer.label();
             self.set_info_notice(format!("Sleep timer: {label}"));
         } else {
             self.set_info_notice("Sleep timer off");
@@ -192,13 +194,13 @@ impl super::App {
 
     pub(super) fn check_sleep_timer(&mut self, now: Instant) {
         if self.sleep_timer_should_run() {
-            self.sleep_timer.start(now);
+            self.playback.sleep_timer.start(now);
         } else {
-            self.sleep_timer.pause(now);
+            self.playback.sleep_timer.pause(now);
         }
 
-        if self.sleep_timer.expired(now) {
-            self.player.intentional_stop = true;
+        if self.playback.sleep_timer.expired(now) {
+            self.playback.view.intentional_stop = true;
             self.stop_playback();
             self.set_info_notice("Sleep timer ended playback");
         }
@@ -206,15 +208,15 @@ impl super::App {
 
     fn set_sleep_timer_minutes(&mut self, minutes: u32, now: Instant) {
         if self.sleep_timer_should_run() {
-            self.sleep_timer.set_minutes(minutes, now);
+            self.playback.sleep_timer.set_minutes(minutes, now);
         } else {
-            self.sleep_timer.set_minutes_waiting(minutes);
+            self.playback.sleep_timer.set_minutes_waiting(minutes);
         }
     }
 
     fn sleep_timer_should_run(&self) -> bool {
         matches!(
-            self.player.state,
+            self.playback.view.state,
             PlaybackState::Playing | PlaybackState::Connecting | PlaybackState::FadingOut { .. }
         )
     }
@@ -342,5 +344,44 @@ mod tests {
     fn presets_within_bounds_and_sorted() {
         assert!(SLEEP_PRESETS.iter().all(|m| *m <= SLEEP_MAX_MINUTES));
         assert!(SLEEP_PRESETS.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn pause_resume_preserves_remaining_time() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes(15, now);
+        timer.pause(now + Duration::from_secs(2 * 60));
+        timer.start(now + Duration::from_secs(10 * 60));
+
+        let remaining = timer.remaining(now + Duration::from_secs(10 * 60)).unwrap();
+        assert_eq!(remaining.as_secs(), 780); // 13 minutes = 780 seconds
+    }
+
+    #[test]
+    fn waiting_timer_returns_full_duration_regardless_of_wall_time() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes_waiting(15);
+
+        let remaining = timer.remaining(now + Duration::from_secs(99 * 60)).unwrap();
+        assert_eq!(remaining.as_secs(), 900); // 15 minutes = 900 seconds
+    }
+
+    #[test]
+    fn clear_resets_armed_timer() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes(30, now);
+        assert!(timer.is_armed());
+
+        timer.clear();
+
+        assert_eq!(timer.minutes(), 0);
+        assert!(!timer.is_armed());
+        assert!(timer.remaining(now).is_none());
     }
 }

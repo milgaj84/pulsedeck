@@ -1,4 +1,4 @@
-//! Shared unicode-aware text helpers for the UI layer.
+//! Shared unicode-aware text helpers for UI and domain code.
 
 /// Number of visible characters (chars, not bytes).
 pub fn visible_len(text: &str) -> usize {

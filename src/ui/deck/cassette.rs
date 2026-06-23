@@ -1,4 +1,5 @@
-use crate::app::{App, PlaybackState};
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -9,7 +10,7 @@ const DECK_REEL_CELL_WIDTH: usize = 10;
 const DECK_SIGNAL_WIDTH: usize = 4;
 pub(super) const DECK_ART_HEIGHT: u16 = 9;
 
-pub(super) fn render_cassette(frame: &mut Frame, area: Rect, app: &App) {
+pub(super) fn render_cassette(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let lines = build_deck_lines(DECK_INNER_WIDTH, app.tick_count, &app.player.state);
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
@@ -99,8 +100,8 @@ fn deck_label_line(inner_width: usize, shell_style: Style) -> Line<'static> {
 
     let fixed_padding = 4;
     let spacer_width = inner_width
-        .saturating_sub(crate::ui::text::visible_len(brand))
-        .saturating_sub(crate::ui::text::visible_len(status))
+        .saturating_sub(crate::text::visible_len(brand))
+        .saturating_sub(crate::text::visible_len(status))
         .saturating_sub(fixed_padding);
 
     shell_line(
@@ -203,13 +204,13 @@ fn shell_line(inner_width: usize, shell_style: Style, parts: Vec<DeckSegment>) -
             break;
         }
 
-        let part_width = crate::ui::text::visible_len(&part.text);
+        let part_width = crate::text::visible_len(&part.text);
         let text = if part_width > remaining {
-            crate::ui::text::truncate_to_chars(&part.text, remaining)
+            crate::text::truncate_to_chars(&part.text, remaining)
         } else {
             part.text
         };
-        let text_width = crate::ui::text::visible_len(&text);
+        let text_width = crate::text::visible_len(&text);
 
         remaining = remaining.saturating_sub(text_width);
         spans.push(Span::styled(text, part.style));

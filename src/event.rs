@@ -24,7 +24,9 @@ fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
     match mode {
         InputMode::Normal => map_normal(key),
         InputMode::Search => map_search(key),
+        InputMode::CommandPalette => map_command_palette(key),
         InputMode::SleepTimer => map_sleep_timer(key),
+        InputMode::LibraryFilter => map_library_filter(key),
     }
 }
 
@@ -43,12 +45,19 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
             Some(Action::EnterSearch)
         }
 
+        // Command palette
+        (_, KeyCode::Char(':')) => Some(Action::OpenCommandPalette),
+        (mods, KeyCode::Char('p')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::OpenCommandPalette)
+        }
+
         // Navigation
         (_, KeyCode::Up) | (_, KeyCode::Char('k')) => Some(Action::PrevStation),
         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => Some(Action::NextStation),
-        (_, KeyCode::Right) | (_, KeyCode::Char('l')) | (_, KeyCode::Char('d')) => {
+        (mods, KeyCode::Char('l')) if !mods.contains(KeyModifiers::CONTROL) => {
             Some(Action::StepSettingForward)
         }
+        (_, KeyCode::Right) => Some(Action::StepSettingForward),
         (_, KeyCode::Left) | (_, KeyCode::Char('a')) => Some(Action::StepSettingBackward),
 
         // Playback
@@ -70,6 +79,36 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Tab) => Some(Action::NextGenre),
         (_, KeyCode::BackTab) => Some(Action::PrevGenre),
 
+        // Library filter
+        (mods, KeyCode::Char('l')) if mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::EnterLibraryFilter)
+        }
+
+        // Station preset slots: Alt+1–5 plays, Ctrl+1–5 assigns
+        (mods, KeyCode::Char(c @ '1'..='5')) if mods.contains(KeyModifiers::ALT) => {
+            Some(Action::PlaySlot(c as u8 - b'0'))
+        }
+        (mods, KeyCode::Char(c @ '1'..='5'))
+            if mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
+        {
+            Some(Action::AssignSlot(c as u8 - b'0'))
+        }
+
+        // Favorites toggle
+        (_, KeyCode::Char('*')) => Some(Action::ToggleFavorite),
+
+        // Number jump: digit keys 0-9
+        (mods, KeyCode::Char(c @ '0'..='9'))
+            if !mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
+        {
+            Some(Action::NumberJumpDigit(c))
+        }
+
+        // Number jump confirm (uppercase G)
+        (mods, KeyCode::Char('G')) if !mods.contains(KeyModifiers::CONTROL) => {
+            Some(Action::NumberJumpConfirm)
+        }
+
         // Help and context overlays
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => Some(Action::ToggleHelp),
         (mods, KeyCode::Char('i') | KeyCode::Char('I'))
@@ -77,10 +116,13 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         {
             Some(Action::ToggleStationDetails)
         }
-        (mods, KeyCode::Char('g') | KeyCode::Char('G'))
+        (mods, KeyCode::Char('g')) if allows_normal_shortcut_modifier(mods) => {
+            Some(Action::ToggleRecentTracks)
+        }
+        (mods, KeyCode::Char('d') | KeyCode::Char('D'))
             if allows_normal_shortcut_modifier(mods) =>
         {
-            Some(Action::ToggleRecentTracks)
+            Some(Action::TogglePlaybackDoctor)
         }
 
         // Bento layout cycle
@@ -150,6 +192,51 @@ fn map_search(key: KeyEvent) -> Option<Action> {
 
 fn has_search_escape_modifier(modifiers: KeyModifiers) -> bool {
     modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
+fn map_command_palette(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Esc) => Some(Action::CommandPaletteClose),
+        (_, KeyCode::Enter) => Some(Action::CommandPaletteConfirm),
+        (_, KeyCode::Backspace) => Some(Action::CommandPaletteBackspace),
+        (_, KeyCode::Up) => Some(Action::CommandPalettePrev),
+        (_, KeyCode::Down) => Some(Action::CommandPaletteNext),
+        (_, KeyCode::Char(c)) => Some(Action::CommandPaletteInput(c)),
+        _ => None,
+    }
+}
+
+/// Key mapping for library filter mode.
+///
+/// Fully isolated table: only reached when `InputMode::LibraryFilter` is active.
+/// Supports text input for filtering, navigation within filtered results, and
+/// confirm/exit actions.
+fn map_library_filter(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        // Global quit still works from filter mode.
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+
+        // Exit filter mode, restore previous state.
+        (_, KeyCode::Esc) => Some(Action::ExitLibraryFilter),
+
+        // Confirm: play selected station and exit filter mode.
+        (_, KeyCode::Enter) => Some(Action::LibraryFilterConfirm),
+
+        // Delete last character from query.
+        (_, KeyCode::Backspace) => Some(Action::LibraryFilterBackspace),
+
+        // Navigate within filtered results (clamped, no wrap).
+        (_, KeyCode::Up) => Some(Action::PrevStation),
+        (_, KeyCode::Down) => Some(Action::NextStation),
+
+        // Printable characters: j/k also navigate, all others are filter input.
+        (_, KeyCode::Char('k')) => Some(Action::PrevStation),
+        (_, KeyCode::Char('j')) => Some(Action::NextStation),
+        (_, KeyCode::Char(c)) => Some(Action::LibraryFilterInput(c)),
+
+        _ => None,
+    }
 }
 
 /// Key mapping for the sleep-timer overlay.
@@ -400,6 +487,41 @@ mod tests {
     }
 
     #[test]
+    fn normal_mode_command_palette_shortcuts_open_palette() {
+        assert_eq!(
+            map_key(key(KeyCode::Char(':')), &InputMode::Normal),
+            Some(Action::OpenCommandPalette),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('p'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            Some(Action::OpenCommandPalette),
+        );
+    }
+
+    #[test]
+    fn command_palette_mode_maps_text_navigation_and_close() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('s')), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteInput('s')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Down), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteNext),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Up), &InputMode::CommandPalette),
+            Some(Action::CommandPalettePrev),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Esc), &InputMode::CommandPalette),
+            Some(Action::CommandPaletteClose),
+        );
+    }
+
+    #[test]
     fn normal_mode_right_steps_setting_forward() {
         assert_eq!(
             map_key(key(KeyCode::Right), &InputMode::Normal),
@@ -416,13 +538,9 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_l_and_d_step_setting_forward() {
+    fn normal_mode_l_steps_setting_forward() {
         assert_eq!(
             map_key(key(KeyCode::Char('l')), &InputMode::Normal),
-            Some(Action::StepSettingForward),
-        );
-        assert_eq!(
-            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
             Some(Action::StepSettingForward),
         );
     }
@@ -465,6 +583,10 @@ mod tests {
             map_key(key(KeyCode::Char('r')), &InputMode::Normal),
             Some(Action::RetryStream),
         );
+        assert_eq!(
+            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
+            Some(Action::TogglePlaybackDoctor),
+        );
     }
 
     #[test]
@@ -478,17 +600,17 @@ mod tests {
         );
         assert_eq!(
             map_key(
-                modified_key(KeyCode::Char('G'), KeyModifiers::SHIFT),
-                &InputMode::Normal
-            ),
-            Some(Action::ToggleRecentTracks),
-        );
-        assert_eq!(
-            map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::ALT),
                 &InputMode::Normal
             ),
             Some(Action::RetryStream),
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('D'), KeyModifiers::SHIFT),
+                &InputMode::Normal
+            ),
+            Some(Action::TogglePlaybackDoctor),
         );
     }
 
@@ -511,6 +633,13 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            None,
+        );
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('d'), KeyModifiers::CONTROL),
                 &InputMode::Normal
             ),
             None,
@@ -555,7 +684,6 @@ mod tests {
             KeyCode::Char('n'),
             KeyCode::Char('K'),
             KeyCode::Char('T'),
-            KeyCode::Char('D'),
             KeyCode::Delete,
         ];
 
@@ -581,6 +709,214 @@ mod tests {
         assert_eq!(
             map_key(key(KeyCode::Char('e')), &InputMode::Normal),
             Some(Action::ExportLibrary)
+        );
+    }
+
+    // --- LibraryFilter mode tests ---
+
+    #[test]
+    fn library_filter_mode_esc_exits() {
+        assert_eq!(
+            map_key(key(KeyCode::Esc), &InputMode::LibraryFilter),
+            Some(Action::ExitLibraryFilter),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_enter_confirms() {
+        assert_eq!(
+            map_key(key(KeyCode::Enter), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterConfirm),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_backspace_deletes() {
+        assert_eq!(
+            map_key(key(KeyCode::Backspace), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterBackspace),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_printable_chars_are_input() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('a')), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterInput('a')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('z')), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterInput('z')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('5')), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterInput('5')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char(' ')), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterInput(' ')),
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('-')), &InputMode::LibraryFilter),
+            Some(Action::LibraryFilterInput('-')),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_j_navigates_next() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('j')), &InputMode::LibraryFilter),
+            Some(Action::NextStation),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_k_navigates_prev() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('k')), &InputMode::LibraryFilter),
+            Some(Action::PrevStation),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_up_navigates_prev() {
+        assert_eq!(
+            map_key(key(KeyCode::Up), &InputMode::LibraryFilter),
+            Some(Action::PrevStation),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_down_navigates_next() {
+        assert_eq!(
+            map_key(key(KeyCode::Down), &InputMode::LibraryFilter),
+            Some(Action::NextStation),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_ctrl_c_quits() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                &InputMode::LibraryFilter,
+            ),
+            Some(Action::Quit),
+        );
+    }
+
+    #[test]
+    fn library_filter_mode_unbound_keys_are_none() {
+        assert_eq!(map_key(key(KeyCode::Tab), &InputMode::LibraryFilter), None,);
+        assert_eq!(map_key(key(KeyCode::F(1)), &InputMode::LibraryFilter), None,);
+        assert_eq!(
+            map_key(key(KeyCode::Delete), &InputMode::LibraryFilter),
+            None,
+        );
+    }
+
+    // --- New Normal mode bindings for library-ux-improvements ---
+
+    #[test]
+    fn normal_mode_ctrl_l_enters_library_filter() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('l'), KeyModifiers::CONTROL),
+                &InputMode::Normal
+            ),
+            Some(Action::EnterLibraryFilter),
+        );
+    }
+
+    #[test]
+    fn normal_mode_alt_1_through_5_plays_slot() {
+        for digit in 1u8..=5 {
+            let c = (b'0' + digit) as char;
+            assert_eq!(
+                map_key(
+                    modified_key(KeyCode::Char(c), KeyModifiers::ALT),
+                    &InputMode::Normal
+                ),
+                Some(Action::PlaySlot(digit)),
+            );
+        }
+    }
+
+    #[test]
+    fn normal_mode_star_toggles_favorite() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('*')), &InputMode::Normal),
+            Some(Action::ToggleFavorite),
+        );
+    }
+
+    #[test]
+    fn normal_mode_digit_keys_produce_number_jump_digit() {
+        for c in '0'..='9' {
+            assert_eq!(
+                map_key(key(KeyCode::Char(c)), &InputMode::Normal),
+                Some(Action::NumberJumpDigit(c)),
+            );
+        }
+    }
+
+    #[test]
+    fn normal_mode_uppercase_g_confirms_number_jump() {
+        assert_eq!(
+            map_key(
+                modified_key(KeyCode::Char('G'), KeyModifiers::SHIFT),
+                &InputMode::Normal
+            ),
+            Some(Action::NumberJumpConfirm),
+        );
+    }
+
+    #[test]
+    fn normal_mode_digit_keys_with_ctrl_are_not_number_jump() {
+        // Ctrl+1–5 are now AssignSlot, Ctrl+0 and Ctrl+6–9 are unmapped
+        for c in ['0', '6', '7', '8', '9'] {
+            assert_eq!(
+                map_key(
+                    modified_key(KeyCode::Char(c), KeyModifiers::CONTROL),
+                    &InputMode::Normal
+                ),
+                None,
+            );
+        }
+    }
+
+    #[test]
+    fn normal_mode_ctrl_1_through_5_assign_slot() {
+        for digit in 1u8..=5 {
+            let c = (b'0' + digit) as char;
+            assert_eq!(
+                map_key(
+                    modified_key(KeyCode::Char(c), KeyModifiers::CONTROL),
+                    &InputMode::Normal
+                ),
+                Some(Action::AssignSlot(digit)),
+            );
+        }
+    }
+
+    #[test]
+    fn normal_mode_digit_keys_with_alt_beyond_5_are_not_mapped() {
+        for c in ['6', '7', '8', '9'] {
+            assert_eq!(
+                map_key(
+                    modified_key(KeyCode::Char(c), KeyModifiers::ALT),
+                    &InputMode::Normal
+                ),
+                None,
+            );
+        }
+    }
+
+    #[test]
+    fn normal_mode_lowercase_g_still_toggles_recent_tracks() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
+            Some(Action::ToggleRecentTracks),
         );
     }
 }

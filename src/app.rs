@@ -1,66 +1,82 @@
+mod command_palette;
+mod favorites_actions;
 mod idle;
 mod library;
+mod library_filter;
 mod lifecycle;
 mod nav;
 mod notifier;
+mod number_jump_handler;
 mod overlays;
 mod persist;
 mod playback;
+mod playback_error;
+mod playback_runtime;
+mod recent;
 mod reconnect;
 mod search;
 mod selectors;
 mod settings;
 mod sleep_timer;
 mod types;
+mod ui_runtime;
 mod ui_state;
 mod update;
 mod visualizer;
+pub mod visualizer_mode;
 
-use crate::audio::AudioEngine;
 use crate::favorites::Library;
+use crate::number_jump::NumberJump;
 use crate::radio::Station;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+pub use command_palette::{command_label, CommandPaletteState, PaletteCommand};
 pub use lifecycle::NoticeState;
 pub use nav::Navigation;
 pub use overlays::{ActiveOverlay, Overlays};
 pub use playback::PlaybackView;
+pub use playback_error::playback_error_action_hint;
+#[cfg(test)]
+pub(crate) use playback_error::{classify_playback_error, PlaybackErrorKind};
+pub use playback_runtime::PlaybackRuntime;
 pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
-pub use types::{AppNotice, InputMode, LayoutMode, PlaybackState, SearchStatus, SettingRow};
+pub use types::{
+    AppNotice, DecoderState, InputMode, LayoutMode, PlaybackDiagnostics, PlaybackState,
+    SearchStatus, SettingRow,
+};
+pub use ui_runtime::UiRuntimeState;
+pub use visualizer_mode::VisualizerMode;
 
 /// Core application state.
 pub struct App {
     // Your station library (persisted to disk)
     pub library: Library,
 
-    pub nav: Navigation,
     pub search: SearchState,
-    pub player: PlaybackView,
-    pub volume: u8, // 0-100
-    pub muted: bool,
-    pub should_quit: bool,
-    pub notice: NoticeState,
-
-    // Input mode
-    pub input_mode: InputMode,
-
-    pub tick_count: u64,
-
-    pub layout_mode: LayoutMode,
-    pub overlays: Overlays,
+    pub history: crate::history::History,
     pub song_history: VecDeque<String>,
-
     pub undo_history: VecDeque<(Station, usize, String)>,
 
-    pub reconnect: Reconnect,
-    pub sleep_timer: SleepTimer,
-    pub history: crate::history::History,
+    pub ui: UiRuntimeState,
+    pub playback: PlaybackRuntime,
+
+    /// Library filter query text (active when InputMode::LibraryFilter).
+    pub library_filter_query: String,
+
+    /// Number jump accumulator.
+    pub number_jump: NumberJump,
+
+    metadata_refresh_pending: bool,
+    metadata_refresh_running: bool,
     persist: persist::PersistFlags,
-    audio: AudioEngine,
-    pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    pub visualizer_mode: usize, // 0 = Spectrum, 1 = Oscilloscope, 2 = Simulated
-    pub visualizer_peaks: Vec<f32>,
+
+    /// Cooldown state for notification rate-limiting.
+    pub(crate) notification_cooldown: lifecycle::NotificationCooldown,
+
+    /// Test-only counter for how many notifications were dispatched.
+    #[cfg(test)]
+    pub(crate) notification_count: u32,
 }

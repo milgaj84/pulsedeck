@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -8,7 +8,7 @@ const MIN_RECENT_WIDTH: u16 = 56;
 const MIN_RECENT_HEIGHT: u16 = 12;
 const MAX_VISIBLE_TRACKS: usize = 10;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(62, 52, area);
 
     if recent_area_is_compact(popup_area) {
@@ -90,7 +90,7 @@ fn format_relative_time(entry_at_str: &str) -> String {
     }
 }
 
-fn recent_track_lines(app: &App) -> Vec<Line<'static>> {
+fn recent_track_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
     if app.library.settings.save_history {
         if app.history.is_empty() {
             return vec![

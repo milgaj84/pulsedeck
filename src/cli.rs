@@ -1,4 +1,4 @@
-use crate::favorites::Library;
+use crate::favorites::{ImportMode, ImportPreview, Library};
 use crate::playlist::{self, PlaylistFormat};
 use anyhow::{anyhow, Context};
 use std::fs;
@@ -14,8 +14,12 @@ fn print_help() {
     println!("PulseDeck CLI - Move your station library between machines");
     println!();
     println!("Usage:");
-    println!("  pulsedeck export <path>    Export station library to M3U or JSON");
-    println!("  pulsedeck import <path>    Import and merge stations from M3U or JSON");
+    println!("  pulsedeck export <path>                  Export station library to M3U or JSON");
+    println!(
+        "  pulsedeck import <path>                  Import and merge stations from M3U or JSON"
+    );
+    println!("  pulsedeck import <path> --preview        Preview import changes without saving");
+    println!("  pulsedeck import <path> --enrich-only    Refresh matching stations without adding new ones");
     println!("  pulsedeck -h, --help       Show this help message");
     println!("  pulsedeck -V, --version    Show version information");
 }
@@ -38,6 +42,43 @@ fn print_load_warnings(library: &Library) {
     for warning in &library.load_warnings {
         eprintln!("Warning: {warning}");
     }
+}
+
+fn print_import_preview(preview: &ImportPreview) {
+    if preview.is_empty() {
+        println!("Import preview: no valid station changes found.");
+        return;
+    }
+
+    println!(
+        "Import preview: {} new, {} enrichments, {} duplicates, {} skipped.",
+        preview.new_stations.len(),
+        preview.enrichments.len(),
+        preview.duplicates.len(),
+        preview.skipped.len()
+    );
+    for skip in &preview.skipped {
+        println!("Skipped: {} ({})", skip.name, skip.reason);
+    }
+}
+
+fn parse_import_options(args: impl Iterator<Item = String>) -> anyhow::Result<(bool, ImportMode)> {
+    let mut preview_only = false;
+    let mut mode = ImportMode::All;
+
+    for arg in args {
+        match arg.as_str() {
+            "--preview" => preview_only = true,
+            "--enrich-only" => mode = ImportMode::EnrichExistingOnly,
+            other => {
+                return Err(anyhow!(
+                    "Unknown import option: {other}. Usage: pulsedeck import <path> [--preview|--enrich-only]"
+                ));
+            }
+        }
+    }
+
+    Ok((preview_only, mode))
 }
 
 pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome> {
@@ -70,6 +111,7 @@ pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome
                     "Missing input path for import. Usage: pulsedeck import <path>"
                 ));
             };
+            let (preview_only, mode) = parse_import_options(args)?;
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read import file from {}", path))?;
             let format = playlist::format_for_path(&path);
@@ -81,15 +123,26 @@ pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome
             };
             let mut library = Library::load_existing();
             print_load_warnings(&library);
-            let summary = library
-                .import_stations(stations)
-                .context("Failed to import stations into library")?;
+            let summary = if preview_only || mode == ImportMode::EnrichExistingOnly {
+                let preview = library.preview_import(stations);
+                if preview_only {
+                    print_import_preview(&preview);
+                    return Ok(CliOutcome::Handled);
+                }
+                library
+                    .apply_import_preview(preview, mode)
+                    .context("Failed to import stations into library")?
+            } else {
+                library
+                    .import_stations(stations)
+                    .context("Failed to import stations into library")?
+            };
             library
                 .save()
                 .context("Failed to save imported stations into library")?;
             println!(
-                "Import completed: added {} new stations, skipped {} duplicates.",
-                summary.added, summary.skipped
+                "Import completed: added {} new stations, enriched {}, skipped {}.",
+                summary.added, summary.enriched, summary.skipped
             );
             Ok(CliOutcome::Handled)
         }

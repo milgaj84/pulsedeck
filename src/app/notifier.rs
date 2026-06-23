@@ -3,17 +3,22 @@ use std::process::{Command, Stdio};
 const APP_NOTIFICATION_TITLE: &str = "PulseDeck - Now Playing";
 
 pub(super) fn notify_now_playing(title: &str, station_name: &str) {
+    if is_wsl() {
+        // On WSL, D-Bus often accepts notifications into a black hole (no visible
+        // daemon), causing them to appear minutes late or never. Skip native and
+        // go straight to Windows toast notifications.
+        let _ = spawn_windows_toast(APP_NOTIFICATION_TITLE, title, station_name);
+        return;
+    }
+
     let body = format!("♫ {title}\nStation: {station_name}");
-    let native_result = notify_rust::Notification::new()
+    let _ = notify_rust::Notification::new()
         .summary(APP_NOTIFICATION_TITLE)
         .body(&body)
         .icon("audio-card")
         .timeout(4000)
+        .hint(notify_rust::Hint::SuppressSound(true))
         .show();
-
-    if native_result.is_err() && is_wsl() {
-        let _ = spawn_windows_balloon(APP_NOTIFICATION_TITLE, &body);
-    }
 }
 
 fn is_wsl() -> bool {
@@ -27,14 +32,11 @@ fn is_wsl_osrelease(release: &str) -> bool {
     release.contains("microsoft") || release.contains("wsl")
 }
 
-fn spawn_windows_balloon(summary: &str, body: &str) -> std::io::Result<()> {
-    let script = windows_balloon_script(summary, body);
+fn spawn_windows_toast(summary: &str, title: &str, station: &str) -> std::io::Result<()> {
+    let script = windows_toast_script(summary, title, station);
     Command::new("powershell.exe")
         .arg("-NoProfile")
         .arg("-NonInteractive")
-        .arg("-STA")
-        .arg("-WindowStyle")
-        .arg("Hidden")
         .arg("-Command")
         .arg(script)
         .stdin(Stdio::null())
@@ -44,23 +46,40 @@ fn spawn_windows_balloon(summary: &str, body: &str) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-fn windows_balloon_script(summary: &str, body: &str) -> String {
-    let summary = powershell_single_quote(summary);
-    let body = powershell_single_quote(body);
+fn windows_toast_script(summary: &str, title: &str, station: &str) -> String {
+    let summary = xml_escape(summary);
+    let title = xml_escape(title);
+    let station = xml_escape(station);
+    // Use Tag and Group on the toast so newer notifications REPLACE older ones
+    // instead of stacking. This prevents swarm behavior on WSL where multiple
+    // toasts pile up in the Windows Action Center.
+    let app_id =
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe";
     format!(
-        "Add-Type -AssemblyName System.Windows.Forms; \
-         Add-Type -AssemblyName System.Drawing; \
-         $n = New-Object System.Windows.Forms.NotifyIcon; \
-         $n.Icon = [System.Drawing.SystemIcons]::Information; \
-         $n.Visible = $true; \
-         $n.ShowBalloonTip(4000, {summary}, {body}, [System.Windows.Forms.ToolTipIcon]::Info); \
-         Start-Sleep -Milliseconds 4500; \
-         $n.Dispose();"
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
+         [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null; \
+         $xml = New-Object Windows.Data.Xml.Dom.XmlDocument; \
+         $xml.LoadXml('<toast><visual><binding template=\"ToastGeneric\">\
+         <text>{summary}</text>\
+         <text>♫ {title}</text>\
+         <text>Station: {station}</text>\
+         </binding></visual><audio silent=\"true\"/></toast>'); \
+         $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
+         $toast.Tag = 'PulseDeckNowPlaying'; \
+         $toast.Group = 'PulseDeck'; \
+         $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}'); \
+         try {{ $notifier.Hide($toast) }} catch {{}}; \
+         $notifier.Show($toast)"
     )
 }
 
-fn powershell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 #[cfg(test)]
@@ -75,17 +94,22 @@ mod tests {
     }
 
     #[test]
-    fn powershell_single_quote_escapes_embedded_quotes() {
-        assert_eq!(powershell_single_quote("PulseDeck"), "'PulseDeck'");
-        assert_eq!(powershell_single_quote("Bob's Station"), "'Bob''s Station'");
+    fn xml_escape_handles_special_chars() {
+        assert_eq!(
+            xml_escape("Bob's <Station> & \"More\""),
+            "Bob&apos;s &lt;Station&gt; &amp; &quot;More&quot;"
+        );
     }
 
     #[test]
-    fn windows_balloon_script_contains_escaped_content() {
-        let script = windows_balloon_script("PulseDeck", "Bob's Track");
+    fn windows_toast_script_contains_escaped_content() {
+        let script = windows_toast_script("PulseDeck", "Bob's Track", "Radio <FM>");
 
-        assert!(script.contains("System.Windows.Forms.NotifyIcon"));
-        assert!(script.contains("'PulseDeck'"));
-        assert!(script.contains("'Bob''s Track'"));
+        assert!(script.contains("ToastNotificationManager"));
+        assert!(script.contains("PulseDeck"));
+        assert!(script.contains("Bob&apos;s Track"));
+        assert!(script.contains("Radio &lt;FM&gt;"));
+        assert!(script.contains("$toast.Tag = 'PulseDeckNowPlaying'"));
+        assert!(script.contains("$toast.Group = 'PulseDeck'"));
     }
 }

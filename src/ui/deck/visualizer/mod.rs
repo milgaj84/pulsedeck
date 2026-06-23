@@ -1,4 +1,5 @@
-use crate::app::{App, PlaybackState};
+use crate::app::{PlaybackState, VisualizerMode};
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -9,16 +10,19 @@ mod spectrum;
 
 pub(super) use oscilloscope::render_oscilloscope;
 
-fn visualizer_title(app: &App) -> &'static str {
+fn visualizer_title(app: &UiModel<'_>) -> &'static str {
     match app.visualizer_mode {
-        0 => " RTA SPECTRUM ",
-        1 => " REAL OSC ",
-        _ => " SIM OSC ",
+        VisualizerMode::Spectrum => " RTA SPECTRUM ",
+        VisualizerMode::RealOscilloscope => " REAL OSC ",
+        VisualizerMode::SimOscilloscope => " SIM OSC ",
     }
 }
 
-fn should_render_spectrum_analyzer(playback: &PlaybackState, visualizer_mode: usize) -> bool {
-    visualizer_mode == 0
+fn should_render_spectrum_analyzer(
+    playback: &PlaybackState,
+    visualizer_mode: VisualizerMode,
+) -> bool {
+    visualizer_mode == VisualizerMode::Spectrum
         && matches!(
             playback,
             PlaybackState::Playing | PlaybackState::Connecting | PlaybackState::FadingOut { .. }
@@ -32,7 +36,7 @@ fn visualizer_amplitude_gain(playback: &PlaybackState, volume: u8) -> f32 {
     }
 }
 
-fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
+fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let width = area.width as usize;
     let height = area.height as usize;
 
@@ -49,26 +53,23 @@ fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
     let mut canvas = braille::BrailleCanvas::new(width, height);
     match app.player.state {
         PlaybackState::Playing | PlaybackState::FadingOut { .. } => match app.visualizer_mode {
-            1 => {
+            VisualizerMode::RealOscilloscope => {
                 let pixel_width = width * 2;
                 let pixel_height = height * 4;
                 let center_y = pixel_height as f32 * 0.5;
                 let amplitude = visualizer_amplitude_gain(&app.player.state, app.volume)
                     * (pixel_height as f32 * 0.45);
 
-                let mut samples = Vec::with_capacity(pixel_width);
-                if let Ok(buf) = app.sample_buffer.lock() {
-                    let n = buf.len();
-                    if n >= pixel_width {
-                        let start_idx = n - pixel_width;
-                        samples.extend(buf.iter().skip(start_idx).take(pixel_width).copied());
-                    } else {
-                        samples.extend(vec![0.0; pixel_width - n]);
-                        samples.extend(buf.iter().copied());
-                    }
+                let pixel_width_samples = pixel_width;
+                let n = app.samples.len();
+                let samples: Vec<f32> = if n >= pixel_width_samples {
+                    let start_idx = n - pixel_width_samples;
+                    app.samples[start_idx..].to_vec()
                 } else {
-                    samples.extend(vec![0.0; pixel_width]);
-                }
+                    let mut s = vec![0.0; pixel_width_samples - n];
+                    s.extend_from_slice(&app.samples);
+                    s
+                };
 
                 for (x, sample_val) in samples.iter().enumerate().take(pixel_width) {
                     let y_float = center_y - (sample_val * amplitude);
@@ -76,7 +77,7 @@ fn render_visualizer_signal(frame: &mut Frame, area: Rect, app: &App) {
                     canvas.set_pixel(x, y);
                 }
             }
-            _ => {
+            VisualizerMode::Spectrum | VisualizerMode::SimOscilloscope => {
                 let pixel_width = width * 2;
                 let pixel_height = height * 4;
                 let center_y = pixel_height as f32 * 0.5;
@@ -144,15 +145,21 @@ mod tests {
 
     #[test]
     fn spectrum_renderer_stays_active_while_connecting() {
-        assert!(should_render_spectrum_analyzer(&PlaybackState::Playing, 0));
+        assert!(should_render_spectrum_analyzer(
+            &PlaybackState::Playing,
+            VisualizerMode::Spectrum
+        ));
         assert!(should_render_spectrum_analyzer(
             &PlaybackState::Connecting,
-            0
+            VisualizerMode::Spectrum
         ));
-        assert!(!should_render_spectrum_analyzer(&PlaybackState::Paused, 0));
+        assert!(!should_render_spectrum_analyzer(
+            &PlaybackState::Paused,
+            VisualizerMode::Spectrum
+        ));
         assert!(!should_render_spectrum_analyzer(
             &PlaybackState::Connecting,
-            1
+            VisualizerMode::RealOscilloscope
         ));
     }
 
@@ -162,7 +169,7 @@ mod tests {
             &PlaybackState::FadingOut {
                 current_volume: 0.5,
             },
-            0
+            VisualizerMode::Spectrum
         ));
     }
 

@@ -1,9 +1,15 @@
-use crate::app::{App, PlaybackState};
+use crate::app::PlaybackState;
+use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-pub(super) fn render_meta_details(frame: &mut Frame, area: Rect, app: &App, full_deck: bool) {
+pub(super) fn render_meta_details(
+    frame: &mut Frame,
+    area: Rect,
+    app: &UiModel<'_>,
+    full_deck: bool,
+) {
     let (status_text, status_style) = match app.player.state {
         PlaybackState::Playing => ("PLAYING", theme::playing()),
         PlaybackState::FadingOut { .. } => (

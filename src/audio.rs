@@ -1,11 +1,16 @@
-mod buffer;
-mod buffer_meter;
-mod engine_loop;
+mod capability;
+pub(super) mod decode;
+pub(super) mod engine_loop_v2;
 mod metadata;
 mod output;
-mod session;
-mod stream_reader;
+mod output_manager;
+pub(super) mod stream_source;
+mod supervisor;
+pub(super) mod types;
 mod visualizer;
+pub(super) mod volume;
+
+pub use capability::{codec_capability, PlaybackCapability};
 
 use std::collections::VecDeque;
 
@@ -18,10 +23,6 @@ use std::sync::{Arc, Mutex};
 pub(super) const HARDWARE_OUTPUT_ERROR_PREFIX: &str = "Hardware output error:";
 const MAX_HARDWARE_RECOVERY_RETRIES: u8 = 1;
 
-pub(super) fn hardware_output_error(message: impl Into<String>) -> String {
-    format!("{HARDWARE_OUTPUT_ERROR_PREFIX} {}", message.into())
-}
-
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -31,6 +32,7 @@ pub enum AudioCommand {
     Stop,
     SetVolume(f32),
     SetOutputDevice(Option<String>),
+    SetStreamMetadata(bool),
 }
 
 /// Status updates sent from the audio thread back to the UI.
@@ -41,9 +43,9 @@ pub enum AudioStatus {
     Stopped,
     Error(String),
     Connecting,
+    Buffering { percent: u8 },
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
-    BufferLevel { percent: u8, seconds: u32 },
 }
 
 /// Handle to communicate with the audio engine running on a background thread.
@@ -60,13 +62,36 @@ impl AudioEngine {
 
         let sample_buffer_clone = sample_buffer.clone();
         std::thread::spawn(move || {
-            engine_loop::audio_loop(cmd_rx, status_tx, sample_buffer_clone);
+            engine_loop_v2::EngineLoop::run(cmd_rx, status_tx, sample_buffer_clone);
         });
 
         Self { cmd_tx, status_rx }
     }
 
-    pub fn send(&self, cmd: AudioCommand) {
-        let _ = self.cmd_tx.send(cmd);
+    pub fn send(&self, cmd: AudioCommand) -> bool {
+        self.cmd_tx.send(cmd).is_ok()
+    }
+}
+
+#[cfg(test)]
+impl AudioEngine {
+    pub fn disconnected_for_test() -> Self {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
+        drop(cmd_rx);
+        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
+
+        Self { cmd_tx, status_rx }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_engine_send_returns_false_when_command_channel_is_closed() {
+        let engine = AudioEngine::disconnected_for_test();
+
+        assert!(!engine.send(AudioCommand::Stop));
     }
 }

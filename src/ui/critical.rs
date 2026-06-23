@@ -1,4 +1,4 @@
-use crate::app::PlaybackState;
+use crate::app::{playback_error_action_hint, PlaybackState};
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
@@ -47,6 +47,10 @@ fn engine_fault_line(message: &str) -> Line<'static> {
         Span::styled(
             compact_fault_message(message),
             Style::default().fg(Color::White),
+        ),
+        Span::styled(
+            format!(" | {}", playback_error_action_hint(message)),
+            Style::default().fg(Color::Yellow),
         ),
     ])
 }

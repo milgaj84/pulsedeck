@@ -9,6 +9,7 @@ pub enum ActiveOverlay {
     StationDetails,
     RecentTracks,
     Settings,
+    PlaybackDoctor,
     SleepTimer,
 }
 
@@ -28,17 +29,17 @@ impl Default for Overlays {
 
 impl App {
     pub(super) fn set_overlay(&mut self, which: ActiveOverlay) {
-        let next = if self.overlays.active == which {
+        let next = if self.ui.overlays.active == which {
             ActiveOverlay::None
         } else {
             which
         };
 
-        self.overlays.active = next;
+        self.ui.overlays.active = next;
         if next == ActiveOverlay::SleepTimer {
-            self.input_mode = InputMode::SleepTimer;
-        } else if self.input_mode == InputMode::SleepTimer {
-            self.input_mode = InputMode::Normal;
+            self.ui.input_mode = InputMode::SleepTimer;
+        } else if self.ui.input_mode == InputMode::SleepTimer {
+            self.ui.input_mode = InputMode::Normal;
         }
     }
 
@@ -54,13 +55,17 @@ impl App {
         self.set_overlay(ActiveOverlay::RecentTracks);
     }
 
+    pub(super) fn toggle_playback_doctor(&mut self) {
+        self.set_overlay(ActiveOverlay::PlaybackDoctor);
+    }
+
     pub(super) fn close_any_overlay(&mut self) -> bool {
-        if self.overlays.active == ActiveOverlay::None {
+        if self.ui.overlays.active == ActiveOverlay::None {
             false
         } else {
-            self.overlays.active = ActiveOverlay::None;
-            if self.input_mode == InputMode::SleepTimer {
-                self.input_mode = InputMode::Normal;
+            self.ui.overlays.active = ActiveOverlay::None;
+            if self.ui.input_mode == InputMode::SleepTimer {
+                self.ui.input_mode = InputMode::Normal;
             }
             true
         }
@@ -75,27 +80,25 @@ impl App {
     }
 
     pub fn show_help(&self) -> bool {
-        self.overlays.active == ActiveOverlay::Help
+        self.ui.overlays.active == ActiveOverlay::Help
     }
 
+    #[cfg(test)]
     pub fn show_station_details(&self) -> bool {
-        self.overlays.active == ActiveOverlay::StationDetails
+        self.ui.overlays.active == ActiveOverlay::StationDetails
     }
 
+    #[cfg(test)]
     pub fn show_recent_tracks(&self) -> bool {
-        self.overlays.active == ActiveOverlay::RecentTracks
+        self.ui.overlays.active == ActiveOverlay::RecentTracks
     }
 
     pub fn show_settings(&self) -> bool {
-        self.overlays.active == ActiveOverlay::Settings
-    }
-
-    pub fn show_sleep_timer(&self) -> bool {
-        self.overlays.active == ActiveOverlay::SleepTimer
+        self.ui.overlays.active == ActiveOverlay::Settings
     }
 
     pub(super) fn cycle_layout(&mut self) {
-        self.layout_mode = match self.layout_mode {
+        self.ui.layout_mode = match self.ui.layout_mode {
             LayoutMode::Split => LayoutMode::LeftOnly,
             LayoutMode::LeftOnly => LayoutMode::RightOnly,
             LayoutMode::RightOnly => LayoutMode::Split,
@@ -104,7 +107,7 @@ impl App {
     }
 
     pub(super) fn toggle_visualizer_mode(&mut self) {
-        self.visualizer_mode = (self.visualizer_mode + 1) % 3;
+        self.ui.visualizer_mode = self.ui.visualizer_mode.next();
         self.mark_ui_state_dirty();
     }
 }
@@ -121,7 +124,7 @@ mod tests {
     #[test]
     fn toggle_help_closes_settings_and_context_overlays() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.active = ActiveOverlay::Settings;
 
         app.toggle_help();
 
@@ -133,7 +136,7 @@ mod tests {
     #[test]
     fn toggle_settings_closes_help_and_context_overlays() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Help;
+        app.ui.overlays.active = ActiveOverlay::Help;
 
         app.toggle_settings();
 
@@ -155,9 +158,24 @@ mod tests {
     }
 
     #[test]
+    fn playback_doctor_is_mutually_exclusive() {
+        let mut app = test_app();
+
+        app.toggle_station_details();
+        assert!(app.show_station_details());
+
+        app.toggle_playback_doctor();
+        assert!(!app.show_station_details());
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::PlaybackDoctor);
+
+        app.toggle_playback_doctor();
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::None);
+    }
+
+    #[test]
     fn close_any_overlay_closes_help_and_context_overlays() {
         let mut app = test_app();
-        app.overlays.active = ActiveOverlay::Help;
+        app.ui.overlays.active = ActiveOverlay::Help;
 
         assert!(app.close_any_overlay());
         assert!(!app.show_help());
@@ -170,13 +188,13 @@ mod tests {
         let mut app = test_app();
 
         app.toggle_help();
-        assert_eq!(app.overlays.active, ActiveOverlay::Help);
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Help);
 
         app.toggle_settings();
-        assert_eq!(app.overlays.active, ActiveOverlay::Settings);
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Settings);
 
         assert!(app.close_any_overlay());
-        assert_eq!(app.overlays.active, ActiveOverlay::None);
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::None);
     }
 
     #[test]
@@ -184,11 +202,11 @@ mod tests {
         let mut app = test_app();
 
         app.cycle_layout();
-        assert_eq!(app.layout_mode, LayoutMode::LeftOnly);
+        assert_eq!(app.ui.layout_mode, LayoutMode::LeftOnly);
         app.cycle_layout();
-        assert_eq!(app.layout_mode, LayoutMode::RightOnly);
+        assert_eq!(app.ui.layout_mode, LayoutMode::RightOnly);
         app.cycle_layout();
-        assert_eq!(app.layout_mode, LayoutMode::Split);
+        assert_eq!(app.ui.layout_mode, LayoutMode::Split);
     }
 
     #[test]
@@ -196,10 +214,10 @@ mod tests {
         let mut app = test_app();
 
         app.toggle_visualizer_mode();
-        assert_eq!(app.visualizer_mode, 1);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::RealOscilloscope);
         app.toggle_visualizer_mode();
-        assert_eq!(app.visualizer_mode, 2);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::SimOscilloscope);
         app.toggle_visualizer_mode();
-        assert_eq!(app.visualizer_mode, 0);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::Spectrum);
     }
 }

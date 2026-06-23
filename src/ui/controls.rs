@@ -2,10 +2,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{App, AppNotice, InputMode, LayoutMode, PlaybackState};
+use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState, VisualizerMode};
+use crate::ui::model::UiModel;
 
 /// Render the bottom control bar: playback status + volume + keybinds.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Length(1)])
@@ -16,7 +17,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Top row of controls: playback state + station + volume.
-fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
+fn render_status_bar(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let mut spans: Vec<Span> = Vec::new();
 
     match (&app.player.state, app.now_playing()) {
@@ -107,7 +108,7 @@ fn status_chip(spans: &mut Vec<Span>, icon: &'static str, label: &'static str, s
     spans.push(Span::styled("  ", theme::dim()));
 }
 
-fn volume_label(app: &App) -> String {
+fn volume_label(app: &UiModel<'_>) -> String {
     if app.muted {
         "VOL MUTE ".to_string()
     } else {
@@ -115,7 +116,7 @@ fn volume_label(app: &App) -> String {
     }
 }
 
-fn volume_bar_fill(app: &App) -> String {
+fn volume_bar_fill(app: &UiModel<'_>) -> String {
     let filled = if app.muted {
         0
     } else {
@@ -125,7 +126,7 @@ fn volume_bar_fill(app: &App) -> String {
     "█".repeat(filled)
 }
 
-fn volume_bar_empty(app: &App) -> String {
+fn volume_bar_empty(app: &UiModel<'_>) -> String {
     let filled = if app.muted {
         0
     } else {
@@ -144,22 +145,22 @@ fn layout_label(layout_mode: LayoutMode) -> &'static str {
     }
 }
 
-fn visualizer_label(visualizer_mode: usize) -> &'static str {
+fn visualizer_label(visualizer_mode: VisualizerMode) -> &'static str {
     match visualizer_mode {
-        0 => "RTA",
-        1 => "REAL OSC",
-        _ => "SIM OSC",
+        VisualizerMode::Spectrum => "RTA",
+        VisualizerMode::RealOscilloscope => "REAL OSC",
+        VisualizerMode::SimOscilloscope => "SIM OSC",
     }
 }
 
 /// Bottom row: keyboard shortcut hints, mode-aware.
-fn render_keybinds(frame: &mut Frame, area: Rect, app: &App) {
+fn render_keybinds(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let paragraph = Paragraph::new(vec![footer_line(app)]).style(Style::default().bg(theme::bg()));
 
     frame.render_widget(paragraph, area);
 }
 
-fn footer_line(app: &App) -> Line<'static> {
+fn footer_line(app: &UiModel<'_>) -> Line<'static> {
     if app.show_help() {
         return hint_line(
             &[("h/?/Esc/q", "Close help")],
@@ -203,12 +204,17 @@ fn footer_line(app: &App) -> Line<'static> {
             ],
             Some("worldwide station search"),
         ),
+        InputMode::CommandPalette => hint_line(
+            &[("↑↓", "Select"), ("Enter", "Run"), ("Esc", "Close")],
+            Some("command palette"),
+        ),
         InputMode::Normal => normal_mode_footer(app),
         InputMode::SleepTimer => normal_mode_footer(app),
+        InputMode::LibraryFilter => normal_mode_footer(app),
     }
 }
 
-fn normal_mode_footer(app: &App) -> Line<'static> {
+fn normal_mode_footer(app: &UiModel<'_>) -> Line<'static> {
     if matches!(app.player.state, PlaybackState::Error(_)) {
         return hint_line(
             &[
@@ -316,8 +322,11 @@ mod tests {
 
     #[test]
     fn visualizer_labels_drop_scope_jargon() {
-        assert_eq!(visualizer_label(0), "RTA");
-        assert_eq!(visualizer_label(1), "REAL OSC");
-        assert_eq!(visualizer_label(2), "SIM OSC");
+        assert_eq!(visualizer_label(VisualizerMode::Spectrum), "RTA");
+        assert_eq!(
+            visualizer_label(VisualizerMode::RealOscilloscope),
+            "REAL OSC"
+        );
+        assert_eq!(visualizer_label(VisualizerMode::SimOscilloscope), "SIM OSC");
     }
 }

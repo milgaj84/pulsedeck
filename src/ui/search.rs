@@ -2,18 +2,23 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{App, SearchStatus};
+use crate::app::SearchStatus;
+use crate::radio::{
+    explain_station_match, has_unknown_prefix, prefix_examples_inline, rank_explanation_label,
+    SearchField, StationSearchQuery,
+};
+use crate::ui::model::UiModel;
 
 const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Render the search input bar.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let result_count = app.search.results.len();
     let selected_saved = app
         .search
         .results
         .get(app.nav.selected)
-        .map(|station| app.library.contains(&station.url))
+        .map(|station| app.library.contains_station(station))
         .unwrap_or(false);
 
     let api_indicator = match &app.search.status {
@@ -25,25 +30,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             format!("  ◌ searching {}...", query),
             Style::default().fg(theme::warm()),
         ),
-        SearchStatus::Ready { .. } if selected_saved => {
-            Span::styled("  ★ Saved to library", Style::default().fg(theme::warm()))
-        }
         SearchStatus::Ready { .. } => {
-            Span::styled(format!("  {} found", result_count), theme::dim())
+            let status = highlighted_result_explanation(app)
+                .unwrap_or_else(|| format!("{} found", result_count));
+            let style = if selected_saved {
+                Style::default().fg(theme::warm())
+            } else {
+                theme::dim()
+            };
+            Span::styled(format!("  {status}"), style)
         }
-        SearchStatus::Empty { query } => {
-            Span::styled(format!("  No results for {}", query), theme::dim())
-        }
-        SearchStatus::Error { message, .. } => {
-            let message = message
-                .split('|')
-                .next()
-                .unwrap_or(message)
-                .chars()
-                .take(96)
-                .collect::<String>();
-            Span::styled(format!("  Search failed: {}", message), theme::error())
-        }
+        SearchStatus::Empty { query } => Span::styled(empty_search_hint(query), theme::dim()),
+        SearchStatus::Error { message, .. } => Span::styled(
+            format!("  Search failed: {}", public_search_error_message(message)),
+            theme::error(),
+        ),
         SearchStatus::StaleResponseDiscarded {
             query,
             received_stale,
@@ -67,6 +68,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(search_bar, area);
 }
 
+fn highlighted_result_explanation(app: &UiModel<'_>) -> Option<String> {
+    let station = app.search.results.get(app.nav.selected)?;
+    let query = StationSearchQuery::parse(&app.search.query);
+    let is_saved = app.library.contains_station(station);
+    let explanation = explain_station_match(&query, station, is_saved);
+    Some(compact_explanation_label(&rank_explanation_label(
+        &explanation,
+    )))
+}
+
+fn compact_explanation_label(value: &str) -> String {
+    const MAX_CHARS: usize = 72;
+    let mut chars = value.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
+}
+
 fn debounce_indicator_text(query: &str, tick_count: u64) -> String {
     format!(
         "  {} initializing query for {}...",
@@ -85,6 +107,54 @@ fn stale_response_text(query: &str, received_stale: &str) -> String {
         compact_search_label(received_stale),
         compact_search_label(query)
     )
+}
+
+fn empty_search_hint(query: &str) -> String {
+    let parsed = StationSearchQuery::parse(query);
+    let value = compact_search_label(parsed.value());
+
+    match parsed.field() {
+        SearchField::Name if has_unknown_prefix(query) => format!(
+            "  No results for {}; unknown prefix, treated as station name",
+            compact_search_label(query)
+        ),
+        SearchField::Name => format!("  No results; {}", prefix_examples_inline()),
+        SearchField::Tag => format!("  No tag results for {value}; try a broader genre"),
+        SearchField::Country => {
+            format!("  No country results for {value}; try a country code like country:BA")
+        }
+        SearchField::CountryCode => {
+            format!("  No country results for {value}; try the full country name")
+        }
+        SearchField::Language => {
+            format!("  No language results for {value}; try english, bosnian, or serbian")
+        }
+        SearchField::Codec => {
+            format!(
+                "  No codec results for {value}; codec: filters metadata, playback is MP3-first"
+            )
+        }
+    }
+}
+
+fn public_search_error_message(message: &str) -> String {
+    const MAX_CHARS: usize = 96;
+    let trimmed = message.trim();
+    let public = trimmed
+        .split("Details:")
+        .next()
+        .unwrap_or(trimmed)
+        .split('|')
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
+    let mut chars = public.chars();
+    let compact = chars.by_ref().take(MAX_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{compact}…")
+    } else {
+        compact
+    }
 }
 
 fn compact_search_label(value: &str) -> String {
@@ -132,5 +202,13 @@ mod tests {
             compact_search_label("abcdefghijklmnopqrstuvwxyz"),
             "abcdefghijklmnopqrstuvwx…"
         );
+    }
+
+    #[test]
+    fn compact_explanation_label_truncates_safely() {
+        let long = "Signal ".repeat(20);
+
+        assert!(compact_explanation_label(&long).ends_with('…'));
+        assert!(compact_explanation_label("Exact tag").contains("Exact tag"));
     }
 }

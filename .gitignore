@@ -31,3 +31,5 @@ desktop.ini
 /plan.pdf
 /repomix-output.xml
 /step*_*.sh
+.kiro/
+/docs/

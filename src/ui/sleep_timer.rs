@@ -1,4 +1,5 @@
-use crate::app::{App, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
+use crate::app::{SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -7,7 +8,7 @@ use super::{critical, theme};
 const MIN_SLEEP_WIDTH: u16 = 56;
 const MIN_SLEEP_HEIGHT: u16 = 14;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(58, 56, area);
 
     if sleep_area_is_compact(popup_area) {
@@ -63,7 +64,7 @@ fn highlight_bold() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-fn sleep_lines(app: &App) -> Vec<Line<'static>> {
+fn sleep_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
     let now = std::time::Instant::now();
     let mut lines: Vec<Line<'static>> = Vec::new();
 

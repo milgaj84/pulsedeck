@@ -1,14 +1,15 @@
 use super::critical;
 use super::theme;
-use super::theme::ThemeName;
-use crate::app::{App, SettingRow};
+use crate::app::SettingRow;
+use crate::theme_name::ThemeName;
+use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 const MIN_SETTINGS_WIDTH: u16 = 60;
-const MIN_SETTINGS_HEIGHT: u16 = 16;
+const MIN_SETTINGS_HEIGHT: u16 = 18;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let popup_area = super::centered_rect(54, 64, area);
 
     if settings_area_is_compact(popup_area) {
@@ -69,12 +70,12 @@ fn settings_area_is_compact(area: Rect) -> bool {
     area.width < MIN_SETTINGS_WIDTH || area.height < MIN_SETTINGS_HEIGHT
 }
 
-fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow) {
+fn render_setting_row(frame: &mut Frame, area: Rect, app: &UiModel<'_>, row: SettingRow) {
     let is_selected = app.overlays.selected_setting_idx == row.index();
     let active_style = Style::default()
         .fg(theme::accent_secondary())
         .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(theme::text().fg.unwrap());
+    let normal_style = Style::default().fg(theme::text().fg.unwrap_or_default());
     let active_bg = Style::default().bg(theme::surface_color());
 
     let cursor_style = active_style;
@@ -97,7 +98,7 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &App, row: SettingRow)
     frame.render_widget(paragraph, area);
 }
 
-fn render_selected_description(frame: &mut Frame, area: Rect, app: &App) {
+fn render_selected_description(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let row = SettingRow::from_index(app.overlays.selected_setting_idx)
         .unwrap_or(SettingRow::Notifications);
     let paragraph = Paragraph::new(vec![
@@ -128,13 +129,16 @@ fn setting_description(row: SettingRow) -> &'static str {
         SettingRow::Theme => {
             "Change PulseDeck's color palette instantly; settings save automatically."
         }
+        SettingRow::StreamMetadata => {
+            "Request stream song-title metadata when stations support it."
+        }
         SettingRow::SaveHistory => {
             "Save played tracks to history.json so they persist across restarts."
         }
     }
 }
 
-fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
+fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
     match row {
         SettingRow::Notifications => checkbox_row(
             app.library.settings.notifications_enabled,
@@ -171,6 +175,11 @@ fn setting_row_spans(app: &App, row: SettingRow, label_style: Style) -> Vec<Span
                 Span::styled("(Space/Right forward, Left back)", theme::dim()),
             ]
         }
+        SettingRow::StreamMetadata => checkbox_row(
+            app.library.settings.stream_metadata_enabled,
+            "Stream Song Info Metadata",
+            label_style,
+        ),
         SettingRow::SaveHistory => checkbox_row(
             app.library.settings.save_history,
             "Save Track History (g Overlay)",
@@ -191,7 +200,7 @@ fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<S
                 .fg(if enabled {
                     theme::accent_secondary()
                 } else {
-                    theme::dim().fg.unwrap()
+                    theme::dim().fg.unwrap_or_default()
                 })
                 .add_modifier(Modifier::BOLD),
         ),
@@ -274,12 +283,12 @@ mod tests {
 
     #[test]
     fn settings_overlay_rejects_tiny_area() {
-        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 16)));
-        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 15)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 18)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 17)));
     }
 
     #[test]
     fn settings_overlay_accepts_minimum_area() {
-        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 16)));
+        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 18)));
     }
 }

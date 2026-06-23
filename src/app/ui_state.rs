@@ -1,4 +1,5 @@
 use super::LayoutMode;
+use super::VisualizerMode;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_VOLUME: u8 = 80;
@@ -57,13 +58,13 @@ impl UiState {
         volume: u8,
         muted: bool,
         layout_mode: LayoutMode,
-        visualizer_mode: usize,
+        visualizer_mode: VisualizerMode,
     ) -> Self {
         Self {
             volume,
             muted,
             layout_mode: layout_mode_key(layout_mode).to_string(),
-            visualizer_mode,
+            visualizer_mode: visualizer_mode.to_index(),
         }
         .sanitized()
     }
@@ -181,7 +182,12 @@ mod tests {
 
     #[test]
     fn from_app_values_clamps_visualizer_mode() {
-        let state = UiState::from_app_values(65, true, LayoutMode::RightOnly, 10);
+        let state = UiState::from_app_values(
+            65,
+            true,
+            LayoutMode::RightOnly,
+            VisualizerMode::SimOscilloscope,
+        );
 
         assert_eq!(state.volume(), 65);
         assert!(state.muted());
