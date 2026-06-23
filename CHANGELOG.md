@@ -41,6 +41,8 @@ All notable changes to the PulseDeck project will be documented in this file.
 - **apply_directional_setting inlined**: Removed trivial forwarding wrapper (F-32).
 
 ### Fixed
+- **WSL notifications delayed or missing**: On WSL, `notify_rust` (D-Bus) would silently accept notifications but never display them. Now skips D-Bus entirely on WSL and uses Windows toast notifications directly via PowerShell, with a registered AppUserModelID so Windows actually shows them.
+- **Notification sounds during music**: Notifications are now silent on all platforms (no chime over your music). Uses `<audio silent="true"/>` on WSL/Windows and `SuppressSound` hint on Linux/macOS.
 - **never_loop in decode.rs**: Fixed unconditional-break loop in prebuffer timeout test to properly loop until timeout fires (F-30).
 - **Theme color unwrap safety**: Replaced 3 `unwrap()` calls on theme foreground colors with `unwrap_or_default()` (F-27).
 

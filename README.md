@@ -238,7 +238,7 @@ PulseDeck features a headless CLI mode to backup or migrate your library of stat
 
 Press `,` to open the settings panel. Current options:
 
-- **Desktop notifications**: show current track changes while you listen. On WSL, PulseDeck falls back to a Windows notification balloon if the normal Linux notification path is unavailable.
+- **Desktop notifications**: show current track changes while you listen. On WSL, PulseDeck uses Windows toast notifications directly. All notifications are silent (no sound) so they don't interrupt your music.
 - **Auto-resume last station on startup**: start the previous station automatically on launch.
 - **Save song history**: when enabled, the `g` panel shows persistent Listening History saved to `history.json`; when disabled, `g` shows session-only Recent Tracks.
 - **Audio Output**: choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
@@ -269,7 +269,7 @@ The old `~/.config/driftfm` directory is left untouched as a backup. Future save
 | Windows | ✅ Full support (native WASAPI audio) |
 | Linux | ✅ Full support (ALSA/PulseAudio/PipeWire via CPAL/Rodio, with selectable outputs) |
 | macOS | ✅ Full support (CoreAudio) |
-| WSL | ✅ Supported with Windows notification fallback |
+| WSL | ✅ Supported with native Windows toast notifications |
 
 ---
 
