@@ -1,12 +1,21 @@
+#[cfg(not(test))]
 use std::process::{Command, Stdio};
 
+// In test builds, the actual notification dispatch is skipped entirely.
+// The notification_count field on App tracks calls for test assertions.
+#[cfg(not(test))]
 const APP_NOTIFICATION_TITLE: &str = "PulseDeck - Now Playing";
 
-pub(super) fn notify_now_playing(title: &str, station_name: &str) {
+pub(super) fn notify_now_playing(_title: &str, _station_name: &str) {
+    #[cfg(not(test))]
+    {
+        notify_now_playing_impl(_title, _station_name);
+    }
+}
+
+#[cfg(not(test))]
+fn notify_now_playing_impl(title: &str, station_name: &str) {
     if is_wsl() {
-        // On WSL, D-Bus often accepts notifications into a black hole (no visible
-        // daemon), causing them to appear minutes late or never. Skip native and
-        // go straight to Windows toast notifications.
         let _ = spawn_windows_toast(APP_NOTIFICATION_TITLE, title, station_name);
         return;
     }
@@ -19,7 +28,6 @@ pub(super) fn notify_now_playing(title: &str, station_name: &str) {
         .icon("audio-card")
         .timeout(4000);
 
-    // SuppressSound hint is only available on Linux (D-Bus backend).
     #[cfg(target_os = "linux")]
     {
         notification.hint(notify_rust::Hint::SuppressSound(true));
@@ -28,6 +36,7 @@ pub(super) fn notify_now_playing(title: &str, station_name: &str) {
     let _ = notification.show();
 }
 
+#[cfg(not(test))]
 fn is_wsl() -> bool {
     std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|release| is_wsl_osrelease(&release))
@@ -39,6 +48,7 @@ fn is_wsl_osrelease(release: &str) -> bool {
     release.contains("microsoft") || release.contains("wsl")
 }
 
+#[cfg(not(test))]
 fn spawn_windows_toast(summary: &str, title: &str, station: &str) -> std::io::Result<()> {
     let script = windows_toast_script(summary, title, station);
     Command::new("powershell.exe")
@@ -57,9 +67,6 @@ fn windows_toast_script(summary: &str, title: &str, station: &str) -> String {
     let summary = xml_escape(summary);
     let title = xml_escape(title);
     let station = xml_escape(station);
-    // Use Tag and Group on the toast so newer notifications REPLACE older ones
-    // instead of stacking. This prevents swarm behavior on WSL where multiple
-    // toasts pile up in the Windows Action Center.
     let app_id =
         "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe";
     format!(
