@@ -12,13 +12,20 @@ pub(super) fn notify_now_playing(title: &str, station_name: &str) {
     }
 
     let body = format!("♫ {title}\nStation: {station_name}");
-    let _ = notify_rust::Notification::new()
+    let mut notification = notify_rust::Notification::new();
+    notification
         .summary(APP_NOTIFICATION_TITLE)
         .body(&body)
         .icon("audio-card")
-        .timeout(4000)
-        .hint(notify_rust::Hint::SuppressSound(true))
-        .show();
+        .timeout(4000);
+
+    // SuppressSound hint is only available on Linux (D-Bus backend).
+    #[cfg(target_os = "linux")]
+    {
+        notification.hint(notify_rust::Hint::SuppressSound(true));
+    }
+
+    let _ = notification.show();
 }
 
 fn is_wsl() -> bool {
