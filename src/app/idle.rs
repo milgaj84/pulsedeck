@@ -3,7 +3,7 @@ pub(super) fn get_user_idle_ms() -> Option<u64> {
     // In test builds, never report real idle time — tests don't have user input.
     #[cfg(test)]
     {
-        return None;
+        None
     }
 
     #[cfg(not(test))]
