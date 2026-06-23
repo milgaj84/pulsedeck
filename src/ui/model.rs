@@ -2,9 +2,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use crate::app::{
-    ActiveOverlay, App, CommandPaletteState, InputMode, LayoutMode, Navigation,
-    NoticeState, Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackView,
-SearchState, SleepTimer,
+    ActiveOverlay, App, CommandPaletteState, InputMode, LayoutMode, Navigation, NoticeState,
+    Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackView, SearchState, SleepTimer,
 };
 use crate::favorites::{resolve_parent_genre, Library};
 use crate::history::History;
@@ -107,7 +106,11 @@ fn visible_stations_for(app: &App) -> Vec<&Station> {
         return app.search.results.iter().collect();
     }
 
-    if let Some(genre) = app.library.available_genres.get(app.ui.nav.selected_genre_idx) {
+    if let Some(genre) = app
+        .library
+        .available_genres
+        .get(app.ui.nav.selected_genre_idx)
+    {
         if genre == "All" {
             app.library.stations.iter().collect()
         } else {
@@ -155,7 +158,9 @@ mod tests {
 
         assert_eq!(model.visible_stations().len(), 2);
         assert_eq!(
-            model.selected_station().map(|station| station.name.as_str()),
+            model
+                .selected_station()
+                .map(|station| station.name.as_str()),
             Some("B")
         );
         assert_eq!(

@@ -271,7 +271,19 @@ fn bitrate_chip(bitrate: u32) -> String {
 }
 
 fn codec_chip(station: &crate::radio::Station) -> String {
-    station.codec.trim().to_ascii_uppercase()
+    use crate::audio::PlaybackCapability;
+
+    let codec = station.codec.trim();
+    if codec.is_empty() {
+        return "codec ?".to_string();
+    }
+
+    let capability = crate::audio::codec_capability(codec);
+    match capability.capability {
+        PlaybackCapability::Supported => codec.to_ascii_uppercase(),
+        PlaybackCapability::Unknown => format!("{} ?", codec.to_ascii_uppercase()),
+        PlaybackCapability::Unsupported => format!("{} !", codec.to_ascii_uppercase()),
+    }
 }
 
 fn check_chip(station: &crate::radio::Station) -> String {
@@ -422,11 +434,49 @@ mod tests {
     }
 
     #[test]
+    fn codec_chip_marks_unsupported_codec() {
+        // HLS is the only known-unsupported codec; it should be displayed with `!`
+        let mut station = crate::radio::Station::basic("HLS", "http://hls", "Pop", "US", 128);
+        station.codec = "HLS".to_string();
+        assert_eq!(codec_chip(&station), "HLS !");
+    }
+
+    #[test]
+    fn codec_chip_marks_aac_as_supported() {
+        // AAC is now supported via Symphonia; no `!` warning
+        let mut station = crate::radio::Station::basic("AAC", "http://aac", "Pop", "US", 128);
+        station.codec = "AAC".to_string();
+        assert_eq!(codec_chip(&station), "AAC");
+    }
+
+    #[test]
+    fn codec_chip_marks_supported_mp3() {
+        let mut station = crate::radio::Station::basic("MP3", "http://mp3", "Pop", "US", 128);
+        station.codec = "MP3".to_string();
+        assert_eq!(codec_chip(&station), "MP3");
+    }
+
+    #[test]
+    fn codec_chip_marks_empty_as_unknown() {
+        let mut station = crate::radio::Station::basic("X", "http://x", "Pop", "US", 128);
+        station.codec = String::new();
+        assert_eq!(codec_chip(&station), "codec ?");
+    }
+
+    #[test]
+    fn codec_chip_marks_unrecognized_as_unknown() {
+        let mut station = crate::radio::Station::basic("X", "http://x", "Pop", "US", 128);
+        station.codec = "WEIRD".to_string();
+        assert_eq!(codec_chip(&station), "WEIRD ?");
+    }
+
+    #[test]
     fn station_meta_search_includes_genre_country_and_bitrate() {
         let station = crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128);
+        // Station::basic sets an empty codec, which renders as "codec ?" now.
         assert_eq!(
             station_meta_label(&InputMode::Search, &station),
-            "Synthwave · US · 128k"
+            "Synthwave · US · 128k · codec ?"
         );
     }
 

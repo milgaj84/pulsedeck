@@ -132,7 +132,8 @@ mod tests {
 
     #[test]
     fn driver_clears_search_debounce_when_app_is_not_debouncing() {
-        let mut driver = driver_with_search_debounce("lofi", Instant::now() + Duration::from_secs(1));
+        let mut driver =
+            driver_with_search_debounce("lofi", Instant::now() + Duration::from_secs(1));
         let app = test_app();
 
         driver.update_search_debounce(&app);
@@ -153,7 +154,10 @@ mod tests {
 
         driver.update_search_debounce(&app);
 
-        assert_eq!(driver.search_debounce.as_ref().map(|(_, d)| *d), Some(deadline));
+        assert_eq!(
+            driver.search_debounce.as_ref().map(|(_, d)| *d),
+            Some(deadline)
+        );
     }
 
     #[test]
@@ -170,10 +174,16 @@ mod tests {
         driver.update_search_debounce(&app);
 
         assert_eq!(
-            driver.search_debounce.as_ref().map(|(query, _)| query.as_str()),
+            driver
+                .search_debounce
+                .as_ref()
+                .map(|(query, _)| query.as_str()),
             Some("ambient")
         );
-        assert_ne!(driver.search_debounce.as_ref().map(|(_, d)| *d), Some(old_deadline));
+        assert_ne!(
+            driver.search_debounce.as_ref().map(|(_, d)| *d),
+            Some(old_deadline)
+        );
     }
 
     #[test]

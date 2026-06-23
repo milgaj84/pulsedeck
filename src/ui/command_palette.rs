@@ -71,7 +71,10 @@ fn render_input(frame: &mut Frame, area: Rect, query: &str) {
 
 fn render_commands(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let commands = app.command_palette_commands();
-    let selected = app.command_palette.selected.min(commands.len().saturating_sub(1));
+    let selected = app
+        .command_palette
+        .selected
+        .min(commands.len().saturating_sub(1));
     let visible = commands.iter().take(MAX_VISIBLE_COMMANDS);
 
     let items = if commands.is_empty() {

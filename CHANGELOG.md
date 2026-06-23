@@ -4,7 +4,54 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.5.0] - Unreleased
+
+### Added
+- **Multi-codec playback**: AAC, OGG/Vorbis, Opus, FLAC, and WAV streams are now playable alongside MP3 via Symphonia probe-based decoding.
+- **Real-time prebuffer progress**: `AudioStatus::Buffering { percent }` provides visible buffering progress in the Playback Doctor and deck status.
+- **Property-based test suite**: Added `proptest` coverage for ICY safety, volume clamping, generation monotonicity, prebuffer bounds, visualizer passivity, error classifiability, stale-generation isolation, and stop-is-clean guarantees.
+
+### Changed
+- **Audio engine rewrite**: Replaced the fragile `AudioLoopState` (12+ ad-hoc mutable flags) with a single-owner `EngineState` state machine, a `ConnectionSupervisor` with generation IDs for instant station switching, an `OutputManager` for lazy device open and bounded hardware recovery, a `VolumeRamp` for decoupled fade control, a `StreamSource` with hardened ICY demux, and a `DecodePipeline` with Symphonia probe + MP3 fast-path.
+- **No more retry storms**: Generation IDs ensure rapid station switching discards stale workers deterministically. The engine performs zero automatic network reconnects — the app's existing 3/6/12s backoff is the sole reconnect mechanism.
+- **Bounded connecting**: A prebuffer fill timeout (8s) makes it structurally impossible for the engine to sit in `Connecting`/`Buffering` indefinitely.
+- **Total command/event handling**: Every `(state, command)` and `(state, event)` pair has a defined outcome — no panics, no corrupted flags.
+- **Codec capability policy updated**: AAC, OGG/Vorbis, Opus, FLAC, and WAV flipped from `Unsupported` to `Supported`; HLS/M3U8 remains `Unsupported` (needs a segment fetcher).
+- **Codec UI hints updated**: Previously-blocked codecs (AAC, OGG, Opus, FLAC, WAV) no longer show the `!` warning badge in search results or Station Details.
+
+### Removed
+- **Legacy audio internals**: Removed `src/audio/engine_loop.rs` (`AudioLoopState` and all ad-hoc flags), `src/audio/session.rs` (replaced by `decode.rs` + `supervisor.rs`), and `src/audio/stream_reader.rs` (replaced by `stream_source.rs`).
+
+### Fixed
+- **Stuck Connecting state**: The bounded prebuffer timeout guarantees the engine exits Connecting/Buffering within 8 seconds even for unreachable or hanging URLs.
+- **Stale worker interference**: Generation-guarded events ensure a cancelled station's worker can never change visible state or trigger error notices after a new Play command.
+- **Hardware recovery storms**: Output device recovery is capped at `MAX_HARDWARE_RECOVERY_RETRIES` per generation — no infinite reopen loops.
+- **Metadata/audio byte mixing**: ICY metadata bytes are provably never delivered to the decoder (property-tested with arbitrary metaint and payload combinations).
+
+### Internal
+- Added `proptest` and `tiny_http` as dev-dependencies for property-based and integration testing.
+- 445+ regression tests covering the state machine, ICY demux, volume clamping, generation monotonicity, error classification, and decoder pipeline.
+- Architecturally separated concerns: `types.rs`, `volume.rs`, `output_manager.rs`, `supervisor.rs`, `stream_source.rs`, `decode.rs`, `engine_loop_v2.rs`.
+
+---
+
+## [0.4.7] - Unreleased
+
+### Added
+- Added a shared audio codec capability policy in `src/audio/capability.rs`.
+- Added playback guardrails for known unsupported codecs before sending play commands to the audio engine.
+- Added UI hints for playable, unknown, and unsupported codec metadata: `MP3` (supported), `AAC !` (unsupported), `codec ?` (unknown/empty).
+- Added capability annotations in Station Details: `· playable`, `· playback will try`, `· not playable yet`.
+
+### Changed
+- Clarified that `codec:` search filters station metadata and does not guarantee playback support.
+- Startup autoplay now skips known unsupported codecs instead of repeatedly trying them.
+- Search empty-result hint for `codec:` now says "codec: filters metadata, playback is MP3-first" instead of suggesting AAC or OGG as equally playable options.
+- Help overlay now includes a `Codec` row noting MP3 is the supported playback path.
+
+### Fixed
+- Prevented known unsupported codecs such as AAC, OGG/Vorbis, Opus, FLAC, WAV, and HLS from entering reconnect/retry loops as if they were MP3 streams.
+- Blocked stations no longer persist as `last_played_url`, preventing autoplay from repeatedly trying an unsupported codec on next launch.
 
 ---
 

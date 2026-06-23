@@ -118,7 +118,13 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
-        let stations = vec![Station::basic("Station A", "http://a", "Synthwave", "US", 128)];
+        let stations = vec![Station::basic(
+            "Station A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )];
 
         let json = to_json(&stations).unwrap();
         let parsed = from_json(&json).unwrap();

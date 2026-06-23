@@ -50,7 +50,7 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line with preview and enrich-only modes
 - 🩺 **Playback Doctor**: press `d` to inspect output, metadata, reconnect, decoder, recent events, and recovery hints while troubleshooting a stream
 - 🔔 **Desktop notifications**: a quiet system notification can show the current track when a new song starts
-- 🎛️ **Resilient streaming**: PulseDeck uses a direct live-HTTP playback path, ICY-aware stream reading, MP3-specific decoding, live-stream-safe seek refusal, and a non-blocking visualizer tap; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
+- 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
 - 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
 
@@ -170,15 +170,21 @@ Search results show saved stations with a star and include compact genre/country
 - Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
 - Watch the footer chips for playback state, volume, layout, and visualizer mode.
 
+**Playback codec support:**
+
+PulseDeck's playback engine uses Symphonia probe-based decoding, supporting MP3, AAC, OGG/Vorbis, Opus, FLAC, and WAV streams. MP3 stations use a dedicated fast-path decoder for snappy startup. Stations with missing or unknown codec metadata are allowed to attempt playback because public radio directories can be incomplete. HLS/M3U8 streams are the only known unsupported format (they require a playlist/segment fetcher not yet implemented).
+
+The `codec:` search prefix filters station metadata. Station Details show `· playable`, `· playback will try`, or `· not playable yet` next to the codec field so the current capability is always visible without guessing.
+
+Audio capability checks live in `src/audio/capability.rs` so UI, search copy, and playback gating share one codec policy.
+
 **Playback stability model:**
 
-PulseDeck treats internet radio as a live stream, not a seekable file. The active playback path reads the HTTP response directly through an ICY-aware stream reader, wraps it in a small decoder buffer, and uses Rodio's MP3 decoder directly instead of the generic format-probing decoder. Real seeks return `Unsupported` instead of discarding live audio bytes.
+PulseDeck treats internet radio as a live stream, not a seekable file. The audio engine runs on a dedicated OS thread with a single-owner state machine (`EngineState`) that governs all transitions. A `ConnectionSupervisor` with generation IDs ensures rapid station switching discards stale workers instantly — no retry storms, no zombie connections. A bounded prebuffer with a fill timeout guarantees the engine can never sit in `Connecting` indefinitely.
 
-The current playback path is optimized for MP3 internet-radio streams. Other codecs can still appear in search and station metadata, but playback support for non-MP3 streams needs explicit decoder selection before it should be advertised as equally supported.
+The decode pipeline uses Symphonia probing (via rodio) for multi-codec support, with an MP3 fast-path that skips full probing when the stream is known to be MP3. ICY metadata is stripped by a dedicated `StreamSource` reader that provably never delivers metadata bytes to the decoder.
 
-The visualizer is a passive tap on the decoded audio source. It copies small batches only when the UI sample buffer is available, so visual rendering does not block the audio path and PulseDeck does not maintain a separate decoded-PCM playback queue.
-
-PulseDeck can request ICY song-title metadata when enabled in settings. Metadata is on by default, remains optional, and can be disabled without changing saved stations or playback controls, which is useful if a rare stream behaves better with clean audio bytes only.
+The visualizer is a passive tap on the decoded audio source. It copies small batches only when the UI sample buffer is available (`try_lock`), so visual rendering does not block the audio path.
 
 If the internal audio engine stops accepting commands, PulseDeck surfaces a visible playback error instead of silently ignoring play, pause, stop, or retry actions.
 
@@ -286,7 +292,7 @@ The codebase keeps UI colors routed through the semantic palette in `theme.rs`, 
 *All native Rust: no ffmpeg, no Python, no Electron. A single self-contained binary.*
 
 - [Ratatui](https://ratatui.rs/) - Terminal UI framework
-- [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) - Audio output selection and native playback, with the active stream path using Rodio's MP3 decoder directly (no ffmpeg dependency)
+- [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) - Audio output and multi-codec playback (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV) with MP3 fast-path and Symphonia probe for other formats
 - [Tokio](https://tokio.rs/) - Async runtime for API search
 - [reqwest](https://docs.rs/reqwest) - HTTP streaming with ICY metadata support
 

@@ -52,9 +52,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         row("Output", &app.diagnostics.output_device),
         row(
             "Song info",
-            if app.diagnostics.metadata_enabled { "On" } else { "Off" },
+            if app.diagnostics.metadata_enabled {
+                "On"
+            } else {
+                "Off"
+            },
         ),
-        row("Decoder", decoder_state_label(&app.diagnostics.decoder_state)),
+        row(
+            "Decoder",
+            decoder_state_label(&app.diagnostics.decoder_state),
+        ),
         row(
             "Buffer",
             &format!(
@@ -140,10 +147,15 @@ mod tests {
     #[test]
     fn playback_state_label_formats_all_states() {
         assert_eq!(playback_state_label(&PlaybackState::Stopped), "Stopped");
-        assert_eq!(playback_state_label(&PlaybackState::Connecting), "Connecting");
+        assert_eq!(
+            playback_state_label(&PlaybackState::Connecting),
+            "Connecting"
+        );
         assert_eq!(playback_state_label(&PlaybackState::Playing), "Playing");
         assert_eq!(
-            playback_state_label(&PlaybackState::FadingOut { current_volume: 0.5 }),
+            playback_state_label(&PlaybackState::FadingOut {
+                current_volume: 0.5
+            }),
             "Fading out"
         );
         assert_eq!(playback_state_label(&PlaybackState::Paused), "Paused");

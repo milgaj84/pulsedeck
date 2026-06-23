@@ -166,7 +166,8 @@ impl App {
         }
 
         if let Some(genre) = self.current_genre_key() {
-            self.ui.nav
+            self.ui
+                .nav
                 .genre_selection_memory
                 .insert(genre, self.ui.nav.selected);
         }
@@ -227,7 +228,9 @@ mod tests {
 
     fn notice_text(app: &App) -> Option<&str> {
         match app.ui.notice.current.as_ref() {
-            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message.as_str()),
+            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => {
+                Some(message.as_str())
+            }
             None => None,
         }
     }

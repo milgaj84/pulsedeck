@@ -149,12 +149,14 @@ impl super::App {
         let now = Instant::now();
         match action {
             Action::SleepTimerIncrease => {
-                self.playback.sleep_timer
+                self.playback
+                    .sleep_timer
                     .increase(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }
             Action::SleepTimerDecrease => {
-                self.playback.sleep_timer
+                self.playback
+                    .sleep_timer
                     .decrease(now, self.sleep_timer_should_run());
                 self.announce_sleep_timer();
             }

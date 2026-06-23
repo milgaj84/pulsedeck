@@ -118,12 +118,15 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
         },
         DetailSection {
             title: "Playback",
-            rows: vec![
-                detail_data("Stream", station.url.as_str()),
-                detail_data("Codec", fallback(station.codec.as_str(), "N/A")),
-                detail_data("Bitrate", bitrate_label(station.bitrate).as_str()),
-                detail_data("Now playing", now_playing),
-            ],
+            rows: {
+                let codec_label = codec_detail(station);
+                vec![
+                    detail_data("Stream", station.url.as_str()),
+                    detail_data("Codec", codec_label.as_str()),
+                    detail_data("Bitrate", bitrate_label(station.bitrate).as_str()),
+                    detail_data("Now playing", now_playing),
+                ]
+            },
         },
         DetailSection {
             title: "Catalog",
@@ -165,6 +168,19 @@ fn section_lines(sections: Vec<DetailSection>) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.push(close_hint());
     lines
+}
+
+fn codec_detail(station: &crate::radio::Station) -> String {
+    use crate::audio::PlaybackCapability;
+
+    let codec = fallback(station.codec.as_str(), "N/A");
+    let capability = crate::audio::codec_capability(&station.codec);
+
+    match capability.capability {
+        PlaybackCapability::Supported => format!("{codec} · playable"),
+        PlaybackCapability::Unknown => format!("{codec} · playback will try"),
+        PlaybackCapability::Unsupported => format!("{codec} · not playable yet"),
+    }
 }
 
 fn detail_data(label: &'static str, value: &str) -> DetailRow {
@@ -216,7 +232,9 @@ fn local_health_label(station: &crate::radio::Station) -> String {
         failure_count,
     ) {
         (None, None, 0) => "N/A".to_string(),
-        (Some(success), Some(failure), count) if failure_is_after_success(success, failure) && count > 0 => {
+        (Some(success), Some(failure), count)
+            if failure_is_after_success(success, failure) && count > 0 =>
+        {
             format!(
                 "Last failed {failure} ({count}x): {}",
                 fallback(&health.last_error_summary, "N/A")
@@ -224,7 +242,10 @@ fn local_health_label(station: &crate::radio::Station) -> String {
         }
         (Some(success), _, _) => format!("Last played {success}"),
         (None, Some(failure), count) if count > 0 => {
-            format!("Last failed {failure} ({count}x): {}", fallback(&health.last_error_summary, "N/A"))
+            format!(
+                "Last failed {failure} ({count}x): {}",
+                fallback(&health.last_error_summary, "N/A")
+            )
         }
         _ => "N/A".to_string(),
     }
@@ -335,7 +356,10 @@ mod tests {
         let sections = station_detail_sections(&model);
 
         assert_eq!(
-            sections.iter().map(|section| section.title).collect::<Vec<_>>(),
+            sections
+                .iter()
+                .map(|section| section.title)
+                .collect::<Vec<_>>(),
             vec!["Identity", "Playback", "Catalog", "Health"]
         );
         assert!(sections[0].rows.iter().any(|row| row.label == "UUID"));
@@ -344,7 +368,10 @@ mod tests {
             .iter()
             .any(|row| row.label == "Now playing" && row.value == "Artist - Track"));
         assert!(sections[2].rows.iter().any(|row| row.label == "Tags"));
-        assert!(sections[3].rows.iter().any(|row| row.label == "Local health"));
+        assert!(sections[3]
+            .rows
+            .iter()
+            .any(|row| row.label == "Local health"));
     }
 
     #[test]

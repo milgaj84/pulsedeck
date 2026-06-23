@@ -138,6 +138,21 @@ impl App {
             return;
         };
 
+        // If the URL matches a known library station, check codec capability
+        // before attempting autoplay. Unknown stations (not in library) are
+        // allowed to try in case the library state is stale.
+        if let Some(station) = self
+            .library
+            .stations
+            .iter()
+            .find(|s| crate::radio::station_url_matches(&s.url, &url))
+            .cloned()
+        {
+            if !self.can_attempt_station_playback(&station) {
+                return;
+            }
+        }
+
         if let Some(pos) = last_played_station_position(&self.library.stations, &url) {
             self.ui.nav.selected = pos;
         }
@@ -207,6 +222,11 @@ impl App {
                     self.playback.view.state = PlaybackState::Connecting;
                     self.playback.diagnostics.decoder_state = DecoderState::Connecting;
                     self.playback.diagnostics.last_event = Some("Connecting to stream".to_string());
+                }
+                AudioStatus::Buffering { percent } => {
+                    self.playback.diagnostics.decoder_state = DecoderState::Connecting;
+                    self.playback.diagnostics.last_event =
+                        Some(format!("Buffering ({percent}%)"));
                 }
             }
         }
@@ -279,7 +299,9 @@ impl App {
 
     fn handle_audio_error(&mut self, error: String) {
         if let Some(url) = self.playback.view.playing_url.clone() {
-            self.playback.reconnect.arm(url.clone(), std::time::Instant::now());
+            self.playback
+                .reconnect
+                .arm(url.clone(), std::time::Instant::now());
             if self
                 .library
                 .mark_station_failure(&url, unix_now_string(), &error)
@@ -372,7 +394,10 @@ mod tests {
         let app = App::from_parts(test_parts(library));
 
         assert_eq!(app.ui.nav.selected, 0);
-        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://stream"));
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://stream")
+        );
         assert_eq!(
             app.playback.view.state,
             PlaybackState::Error("Audio engine stopped".to_string())
@@ -383,14 +408,90 @@ mod tests {
     fn last_played_station_position_matches_normalized_urls() {
         let stations = vec![Station::basic("A", " HTTP://STREAM/ ", "Radio", "US", 128)];
 
-        assert_eq!(last_played_station_position(&stations, "http://stream"), Some(0));
+        assert_eq!(
+            last_played_station_position(&stations, "http://stream"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn startup_autoplay_allows_aac_codec() {
+        // AAC is now supported via Symphonia; autoplay should proceed (not be blocked).
+        let mut station = Station::basic("AAC Radio", "http://aac", "Pop", "US", 128);
+        station.codec = "AAC".to_string();
+
+        let mut library = Library::in_memory(vec![station]);
+        library.settings.autoplay_last = true;
+        library.settings.last_played_url = Some("http://aac".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        // Audio engine is disconnected in test_parts so we get an Error,
+        // but playing_url was set — the codec gate did NOT block it.
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://aac")
+        );
+    }
+
+    #[test]
+    fn startup_autoplay_blocks_hls_codec() {
+        // HLS remains unsupported; autoplay should be blocked.
+        let mut station = Station::basic("HLS Radio", "http://hls", "Pop", "US", 128);
+        station.codec = "HLS".to_string();
+
+        let mut library = Library::in_memory(vec![station]);
+        library.settings.autoplay_last = true;
+        library.settings.last_played_url = Some("http://hls".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        assert_eq!(app.playback.view.playing_url, None);
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn startup_autoplay_allows_unknown_codec() {
+        let mut station = Station::basic("Mystery", "http://mystery", "Pop", "US", 128);
+        station.codec = String::new();
+
+        let mut library = Library::in_memory(vec![station]);
+        library.settings.autoplay_last = true;
+        library.settings.last_played_url = Some("http://mystery".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        // Audio engine is disconnected in test_parts, so it goes to Error,
+        // but the important thing is playing_url was set (codec was not blocked).
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://mystery")
+        );
+    }
+
+    #[test]
+    fn startup_autoplay_allows_url_not_in_library() {
+        // URL not in the library: capability gate should not block it.
+        let mut library = Library::in_memory(vec![]);
+        library.settings.autoplay_last = true;
+        library.settings.last_played_url = Some("http://unknown-station".to_string());
+
+        let app = App::from_parts(test_parts(library));
+
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://unknown-station")
+        );
     }
 
     #[test]
     fn last_played_station_position_allows_missing_library_match() {
         let stations = vec![Station::basic("A", "http://a", "Radio", "US", 128)];
 
-        assert_eq!(last_played_station_position(&stations, "http://other"), None);
+        assert_eq!(
+            last_played_station_position(&stations, "http://other"),
+            None
+        );
     }
 
     #[test]
@@ -406,6 +507,9 @@ mod tests {
 
         app.handle_track_changed(" HTTP://STREAM/ ".to_string(), "Artist - Title".to_string());
 
-        assert_eq!(app.playback.view.current_track.as_deref(), Some("Artist - Title"));
+        assert_eq!(
+            app.playback.view.current_track.as_deref(),
+            Some("Artist - Title")
+        );
     }
 }

@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaybackErrorKind {
+pub(crate) enum PlaybackErrorKind {
     Network,
     Http,
     Decode,
@@ -8,7 +8,7 @@ pub enum PlaybackErrorKind {
     Unknown,
 }
 
-pub fn classify_playback_error(error: &str) -> PlaybackErrorKind {
+pub(crate) fn classify_playback_error(error: &str) -> PlaybackErrorKind {
     let lower = error.to_ascii_lowercase();
     if lower.contains("soundcard")
         || lower.contains("hardware output")

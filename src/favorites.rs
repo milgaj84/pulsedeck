@@ -421,13 +421,8 @@ impl Library {
             .find(|station| station_url_matches(&station.url, url))
         {
             station.health.last_failure_at = Some(now);
-            station.health.failure_count = Some(
-                station
-                    .health
-                    .failure_count
-                    .unwrap_or(0)
-                    .saturating_add(1),
-            );
+            station.health.failure_count =
+                Some(station.health.failure_count.unwrap_or(0).saturating_add(1));
             station.health.last_error_summary = compact_error_summary(error);
             return true;
         }
@@ -693,7 +688,10 @@ mod tests {
         assert_eq!(station.bitrate, 0);
         assert_eq!(station.station_uuid.as_deref(), Some("uuid-1"));
         assert_eq!(station.country_code, "BA");
-        assert_eq!(station.tags, vec!["ambient".to_string(), "drone".to_string()]);
+        assert_eq!(
+            station.tags,
+            vec!["ambient".to_string(), "drone".to_string()]
+        );
         assert_eq!(station.language, "english");
         assert_eq!(station.codec, "MP3");
         assert_eq!(station.homepage, "https://example.com");
@@ -827,13 +825,8 @@ mod tests {
 
     #[test]
     fn test_import_stations() {
-        let mut lib = Library::in_memory(vec![station(
-            "Test A",
-            "http://a",
-            "Synthwave",
-            "US",
-            128,
-        )]);
+        let mut lib =
+            Library::in_memory(vec![station("Test A", "http://a", "Synthwave", "US", 128)]);
 
         let to_import = vec![
             station("Test A", "http://a", "Synthwave", "US", 128),
@@ -961,7 +954,10 @@ mod tests {
     fn import_skip_name_uses_stable_fallback_for_blank_names() {
         let station = station("   ", "http://blank-name", "Ambient", "UK", 96);
 
-        assert_eq!(import_skip_reason(&station), Some("missing station name".to_string()));
+        assert_eq!(
+            import_skip_reason(&station),
+            Some("missing station name".to_string())
+        );
         assert_eq!(import_skip_name(&station), "Unnamed station");
     }
 
@@ -982,7 +978,10 @@ mod tests {
         assert_eq!(summary.enriched, 1);
         assert_eq!(summary.unchanged, 1);
         assert_eq!(summary.failed, 1);
-        assert_eq!(summary.notice(), "Metadata refresh: 3 checked, 1 enriched, 1 unchanged, 1 failed");
+        assert_eq!(
+            summary.notice(),
+            "Metadata refresh: 3 checked, 1 enriched, 1 unchanged, 1 failed"
+        );
         assert_eq!(lib.stations[0].name, "Saved");
         assert_eq!(lib.stations[0].url, "http://saved");
         assert_eq!(lib.stations[0].genre, "Synthwave");
@@ -1027,22 +1026,22 @@ mod tests {
 
     #[test]
     fn mark_station_success_and_failure_update_saved_health() {
-        let mut lib = Library::in_memory(vec![station(
-            "Test A",
-            "http://a/",
-            "Synthwave",
-            "US",
-            128,
-        )]);
+        let mut lib =
+            Library::in_memory(vec![station("Test A", "http://a/", "Synthwave", "US", 128)]);
 
         assert!(lib.mark_station_failure(" HTTP://A ", "10".to_string(), "network timeout"));
         assert_eq!(lib.stations[0].health.failure_count, Some(1));
-        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("10"));
+        assert_eq!(
+            lib.stations[0].health.last_failure_at.as_deref(),
+            Some("10")
+        );
         assert_eq!(lib.stations[0].health.last_error_summary, "network timeout");
 
         assert!(lib.mark_station_success("http://a", "11".to_string()));
-        assert_eq!(lib.stations[0].health.last_success_at.as_deref(), Some("11"));
+        assert_eq!(
+            lib.stations[0].health.last_success_at.as_deref(),
+            Some("11")
+        );
         assert!(lib.stations[0].health.last_error_summary.is_empty());
     }
 }
-

@@ -10,11 +10,12 @@ impl App {
                     (self.ui.overlays.selected_setting_idx + 1) % SettingRow::COUNT;
             }
             Action::PrevStation => {
-                self.ui.overlays.selected_setting_idx = if self.ui.overlays.selected_setting_idx == 0 {
-                    SettingRow::COUNT - 1
-                } else {
-                    self.ui.overlays.selected_setting_idx - 1
-                };
+                self.ui.overlays.selected_setting_idx =
+                    if self.ui.overlays.selected_setting_idx == 0 {
+                        SettingRow::COUNT - 1
+                    } else {
+                        self.ui.overlays.selected_setting_idx - 1
+                    };
             }
             Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
                 self.mark_library_dirty();
@@ -66,9 +67,8 @@ impl App {
                     &available_output_device_choices(),
                     forward,
                 );
-                self.playback.diagnostics.output_device = output_device_display_name(
-                    self.library.settings.output_device_name.as_deref(),
-                );
+                self.playback.diagnostics.output_device =
+                    output_device_display_name(self.library.settings.output_device_name.as_deref());
                 self.sync_output_device();
                 self.set_info_notice(format!(
                     "Audio output: {}",
@@ -86,7 +86,8 @@ impl App {
             Some(SettingRow::StreamMetadata) => {
                 self.library.settings.stream_metadata_enabled =
                     !self.library.settings.stream_metadata_enabled;
-                self.playback.diagnostics.metadata_enabled = self.library.settings.stream_metadata_enabled;
+                self.playback.diagnostics.metadata_enabled =
+                    self.library.settings.stream_metadata_enabled;
                 self.sync_stream_metadata();
                 self.set_info_notice(format!(
                     "Song info metadata: {}",
@@ -122,13 +123,16 @@ impl App {
     }
 
     pub(super) fn sync_output_device(&self) -> bool {
-        self.playback.audio.send(crate::audio::AudioCommand::SetOutputDevice(
-            self.library.settings.output_device_name.clone(),
-        ))
+        self.playback
+            .audio
+            .send(crate::audio::AudioCommand::SetOutputDevice(
+                self.library.settings.output_device_name.clone(),
+            ))
     }
 
     pub(super) fn sync_stream_metadata(&self) -> bool {
-        self.playback.audio
+        self.playback
+            .audio
             .send(crate::audio::AudioCommand::SetStreamMetadata(
                 self.library.settings.stream_metadata_enabled,
             ))

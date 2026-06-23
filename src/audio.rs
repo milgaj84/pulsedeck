@@ -1,9 +1,16 @@
-mod engine_loop;
+mod capability;
+pub(super) mod decode;
+pub(super) mod engine_loop_v2;
 mod metadata;
 mod output;
-mod session;
-mod stream_reader;
+mod output_manager;
+pub(super) mod stream_source;
+mod supervisor;
+pub(crate) mod types;
 mod visualizer;
+pub(crate) mod volume;
+
+pub use capability::{codec_capability, PlaybackCapability};
 
 use std::collections::VecDeque;
 
@@ -15,10 +22,6 @@ use std::sync::{Arc, Mutex};
 
 pub(super) const HARDWARE_OUTPUT_ERROR_PREFIX: &str = "Hardware output error:";
 const MAX_HARDWARE_RECOVERY_RETRIES: u8 = 1;
-
-pub(super) fn hardware_output_error(message: impl Into<String>) -> String {
-    format!("{HARDWARE_OUTPUT_ERROR_PREFIX} {}", message.into())
-}
 
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
@@ -40,6 +43,7 @@ pub enum AudioStatus {
     Stopped,
     Error(String),
     Connecting,
+    Buffering { percent: u8 },
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
 }
@@ -58,7 +62,7 @@ impl AudioEngine {
 
         let sample_buffer_clone = sample_buffer.clone();
         std::thread::spawn(move || {
-            engine_loop::audio_loop(cmd_rx, status_tx, sample_buffer_clone);
+            engine_loop_v2::EngineLoop::run(cmd_rx, status_tx, sample_buffer_clone);
         });
 
         Self { cmd_tx, status_rx }

@@ -3,11 +3,11 @@ use ratatui::widgets::Paragraph;
 
 use super::theme;
 use crate::app::SearchStatus;
-use crate::ui::model::UiModel;
 use crate::radio::{
     explain_station_match, has_unknown_prefix, prefix_examples_inline, rank_explanation_label,
     SearchField, StationSearchQuery,
 };
+use crate::ui::model::UiModel;
 
 const SEARCH_DEBOUNCE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -73,7 +73,9 @@ fn highlighted_result_explanation(app: &UiModel<'_>) -> Option<String> {
     let query = StationSearchQuery::parse(&app.search.query);
     let is_saved = app.library.contains_station(station);
     let explanation = explain_station_match(&query, station, is_saved);
-    Some(compact_explanation_label(&rank_explanation_label(&explanation)))
+    Some(compact_explanation_label(&rank_explanation_label(
+        &explanation,
+    )))
 }
 
 fn compact_explanation_label(value: &str) -> String {
@@ -128,7 +130,7 @@ fn empty_search_hint(query: &str) -> String {
             format!("  No language results for {value}; try english, bosnian, or serbian")
         }
         SearchField::Codec => {
-            format!("  No codec results for {value}; try codec:MP3, codec:AAC, or codec:OGG")
+            format!("  No codec results for {value}; codec: filters metadata, playback is MP3-first")
         }
     }
 }

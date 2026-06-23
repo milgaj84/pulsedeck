@@ -1,6 +1,6 @@
 [package]
 name = "pulsedeck"
-version = "0.4.7"
+version = "0.5.0"
 edition = "2021"
 description = "A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback"
 license = "MIT"
@@ -41,6 +41,10 @@ dirs = "6"
 
 # Desktop Notifications
 notify-rust = "4"
+
+[dev-dependencies]
+proptest = "1"
+tiny_http = "0.12"
 
 [profile.release]
 opt-level = 3

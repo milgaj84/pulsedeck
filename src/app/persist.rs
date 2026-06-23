@@ -135,10 +135,6 @@ impl App {
         self.persist.mark_library_dirty();
     }
 
-    pub(super) fn force_flush_persistence(&mut self) {
-        self.flush_persistence();
-    }
-
     pub(super) fn flush_persistence(&mut self) {
         self.flush_persistence_at(Instant::now(), PersistenceFlushMode::Scheduled);
     }
@@ -229,7 +225,13 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn station() -> Station {
-        Station::basic("Persist Test", "http://persist.test/stream", "Radio", "US", 128)
+        Station::basic(
+            "Persist Test",
+            "http://persist.test/stream",
+            "Radio",
+            "US",
+            128,
+        )
     }
 
     fn unique_temp_dir(test_name: &str) -> PathBuf {
@@ -282,7 +284,7 @@ mod tests {
             app.persist.retry.next_retry_at,
             Some(now + PERSIST_RETRY_COOLDOWN)
         );
-        assert!(matches!(app.notice.current, Some(AppNotice::Error(_))));
+        assert!(matches!(app.ui.notice.current, Some(AppNotice::Error(_))));
     }
 
     #[test]
@@ -292,13 +294,16 @@ mod tests {
 
         let now = Instant::now();
         app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
-        let first_notice = app.notice.current.clone();
+        let first_notice = app.ui.notice.current.clone();
         let first_retry = app.persist.retry.next_retry_at;
 
-        app.flush_persistence_at(now + Duration::from_secs(1), PersistenceFlushMode::Scheduled);
+        app.flush_persistence_at(
+            now + Duration::from_secs(1),
+            PersistenceFlushMode::Scheduled,
+        );
 
         assert!(app.persist.library_dirty);
-        assert_eq!(app.notice.current, first_notice);
+        assert_eq!(app.ui.notice.current, first_notice);
         assert_eq!(app.persist.retry.next_retry_at, first_retry);
     }
 
@@ -361,12 +366,15 @@ mod tests {
 
         let now = Instant::now();
         app.flush_persistence_at(now, PersistenceFlushMode::Scheduled);
-        let first_notice = app.notice.current.clone();
+        let first_notice = app.ui.notice.current.clone();
         let first_notice_at = app.persist.retry.last_error_notice_at;
 
-        app.flush_persistence_at(now + PERSIST_RETRY_COOLDOWN, PersistenceFlushMode::Scheduled);
+        app.flush_persistence_at(
+            now + PERSIST_RETRY_COOLDOWN,
+            PersistenceFlushMode::Scheduled,
+        );
 
-        assert_eq!(app.notice.current, first_notice);
+        assert_eq!(app.ui.notice.current, first_notice);
         assert_eq!(app.persist.retry.last_error_notice_at, first_notice_at);
     }
 

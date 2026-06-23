@@ -220,7 +220,10 @@ mod tests {
         let mut app = test_app();
         app.playback.view.playing_url = Some("http://a".to_string());
 
-        assert_eq!(filtered_commands("retry", &app), vec![PaletteCommand::RetryStream]);
+        assert_eq!(
+            filtered_commands("retry", &app),
+            vec![PaletteCommand::RetryStream]
+        );
     }
 
     #[test]

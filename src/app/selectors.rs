@@ -127,13 +127,13 @@ mod tests {
 
     #[test]
     fn now_playing_matches_normalized_library_url() {
-        let mut app = App::new(Library::in_memory(vec![station(
-            "A",
-            " HTTP://STREAM/ ",
-        )]));
+        let mut app = App::new(Library::in_memory(vec![station("A", " HTTP://STREAM/ ")]));
         app.playback.view.playing_url = Some("http://stream".to_string());
 
-        assert_eq!(app.now_playing().map(|station| station.name.as_str()), Some("A"));
+        assert_eq!(
+            app.now_playing().map(|station| station.name.as_str()),
+            Some("A")
+        );
     }
 
     #[test]

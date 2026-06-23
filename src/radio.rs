@@ -8,8 +8,8 @@ pub use query::{has_unknown_prefix, prefix_examples_inline, SearchField, Station
 pub use rank::{explain_station_match, rank_explanation_label};
 pub use station::{
     clean_tag_values, fallback_stations, normalize_codec, normalize_country_code,
-    normalize_station_uuid, sanitize_bitrate, station_identity_matches, station_url_matches, Station,
-    StationHealth, StationIdentity,
+    normalize_station_uuid, sanitize_bitrate, station_identity_matches, station_url_matches,
+    Station, StationHealth, StationIdentity,
 };
 
 const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
@@ -115,8 +115,20 @@ mod tests {
 
     #[test]
     fn metadata_match_falls_back_to_normalized_url() {
-        let saved = Station::basic("Saved", " HTTP://example.com/stream/ ", "Synthwave", "US", 0);
-        let mut candidate = Station::basic("Saved Rich", "http://example.com/stream", "Synthwave", "US", 128);
+        let saved = Station::basic(
+            "Saved",
+            " HTTP://example.com/stream/ ",
+            "Synthwave",
+            "US",
+            0,
+        );
+        let mut candidate = Station::basic(
+            "Saved Rich",
+            "http://example.com/stream",
+            "Synthwave",
+            "US",
+            128,
+        );
         candidate.codec = "MP3".to_string();
 
         let matched = select_metadata_match(&saved, vec![candidate.clone()]);

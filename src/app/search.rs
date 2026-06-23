@@ -34,8 +34,10 @@ impl App {
         self.search.status = SearchStatus::WaitingForInput;
         self.search.searching_api = false;
         self.search.pending_api_search = None;
-        self.ui.nav.selected =
-            clamped_index(self.ui.nav.search_selected_snapshot, self.search.results.len());
+        self.ui.nav.selected = clamped_index(
+            self.ui.nav.search_selected_snapshot,
+            self.search.results.len(),
+        );
     }
 
     pub(super) fn exit_search(&mut self) {
@@ -285,7 +287,9 @@ mod tests {
 
     fn notice_text(app: &App) -> Option<&str> {
         match app.ui.notice.current.as_ref() {
-            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => Some(message.as_str()),
+            Some(AppNotice::Info(message)) | Some(AppNotice::Error(message)) => {
+                Some(message.as_str())
+            }
             None => None,
         }
     }
@@ -518,7 +522,10 @@ mod tests {
         app.update(Action::SearchAudition);
 
         assert_eq!(app.ui.input_mode, InputMode::Search);
-        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://lofi"));
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://lofi")
+        );
         assert_eq!(app.playback.view.state, PlaybackState::Connecting);
         assert!(!app.library.contains("http://lofi"));
         assert_eq!(
@@ -555,7 +562,10 @@ mod tests {
         app.update(Action::SearchConfirm);
 
         assert_eq!(app.ui.input_mode, InputMode::Normal);
-        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://lofi"));
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://lofi")
+        );
         assert!(app.library.contains("http://lofi"));
         assert_eq!(app.search.status, SearchStatus::WaitingForInput);
         assert!(app.search.results.is_empty());

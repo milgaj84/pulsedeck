@@ -53,13 +53,8 @@ mod tests {
     use crate::radio::Station;
 
     fn library_with_settings() -> Library {
-        let mut library = Library::in_memory(vec![Station::basic(
-            "A",
-            "http://a",
-            "Radio",
-            "US",
-            128,
-        )]);
+        let mut library =
+            Library::in_memory(vec![Station::basic("A", "http://a", "Radio", "US", 128)]);
         library.settings.output_device_name = Some("Headphones".to_string());
         library.settings.stream_metadata_enabled = false;
         library
@@ -67,12 +62,8 @@ mod tests {
 
     #[test]
     fn playback_runtime_uses_loaded_volume_mute_and_diagnostics() {
-        let ui_state = super::super::ui_state::UiState::from_app_values(
-            37,
-            true,
-            LayoutMode::Split,
-            1,
-        );
+        let ui_state =
+            super::super::ui_state::UiState::from_app_values(37, true, LayoutMode::Split, 1);
         let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();

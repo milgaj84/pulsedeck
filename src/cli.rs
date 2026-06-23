@@ -15,7 +15,9 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  pulsedeck export <path>                  Export station library to M3U or JSON");
-    println!("  pulsedeck import <path>                  Import and merge stations from M3U or JSON");
+    println!(
+        "  pulsedeck import <path>                  Import and merge stations from M3U or JSON"
+    );
     println!("  pulsedeck import <path> --preview        Preview import changes without saving");
     println!("  pulsedeck import <path> --enrich-only    Refresh matching stations without adding new ones");
     println!("  pulsedeck -h, --help       Show this help message");

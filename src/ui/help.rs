@@ -80,8 +80,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         shortcut("/ / Ctrl+f / F3", "Open worldwide station search"),
         shortcut(": / Ctrl+p", "Open command palette"),
         shortcut("Type", "Search by station, tag, city, or country"),
-        shortcut("Prefixes", "tag:ambient / country:BA / lang:english / codec:mp3"),
+        shortcut(
+            "Prefixes",
+            "tag:ambient / country:BA / lang:english / codec:mp3",
+        ),
         shortcut("Aliases", "genre: / cc: / language: / format: / station:"),
+        shortcut("Codec", "codec: filters station metadata; MP3 is the supported playback path"),
         shortcut("Space", "Audition highlighted result without saving"),
         shortcut("Ctrl+Enter", "Audition too, when your terminal supports it"),
         shortcut("Enter", "Save highlighted result to Library and play it"),

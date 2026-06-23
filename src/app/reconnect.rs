@@ -56,7 +56,10 @@ impl Reconnect {
 impl super::App {
     pub(super) fn drive_reconnect(&mut self, now: Instant) {
         if let Some(url) = self.playback.reconnect.take_due(now) {
-            let (n, max) = (self.playback.reconnect.attempt(), self.playback.reconnect.max());
+            let (n, max) = (
+                self.playback.reconnect.attempt(),
+                self.playback.reconnect.max(),
+            );
             self.set_info_notice(format!("Reconnecting ({n}/{max})"));
             self.playback.view.state = PlaybackState::Connecting;
             if self.send_audio_command(crate::audio::AudioCommand::Play(url)) {

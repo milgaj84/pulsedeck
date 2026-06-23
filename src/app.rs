@@ -5,9 +5,9 @@ mod lifecycle;
 mod nav;
 mod notifier;
 mod overlays;
-mod playback_error;
 mod persist;
 mod playback;
+mod playback_error;
 mod playback_runtime;
 mod reconnect;
 mod search;
@@ -31,15 +31,17 @@ pub use nav::Navigation;
 pub use overlays::{ActiveOverlay, Overlays};
 pub use playback::PlaybackView;
 pub use playback_error::playback_error_action_hint;
+#[cfg(test)]
+pub(crate) use playback_error::{classify_playback_error, PlaybackErrorKind};
 pub use playback_runtime::PlaybackRuntime;
 pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
-pub use ui_runtime::UiRuntimeState;
 pub use types::{
     AppNotice, DecoderState, InputMode, LayoutMode, PlaybackDiagnostics, PlaybackState,
     SearchStatus, SettingRow,
 };
+pub use ui_runtime::UiRuntimeState;
 
 /// Core application state.
 pub struct App {

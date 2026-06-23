@@ -33,7 +33,8 @@ impl App {
             self.playback.view.buffer_seconds = 0;
             self.playback.view.state = PlaybackState::Error("Audio engine stopped".to_string());
             self.playback.diagnostics.decoder_state = DecoderState::Failed;
-            self.playback.diagnostics.last_error = Some("Audio engine command channel closed".to_string());
+            self.playback.diagnostics.last_error =
+                Some("Audio engine command channel closed".to_string());
             self.set_error_notice("Audio engine is not available");
             false
         }
@@ -46,12 +47,16 @@ impl App {
             .copied()
             .cloned();
         if let Some(station) = station {
+            if !self.validate_station_playback_capability(&station) {
+                return;
+            }
+
             self.playback.reconnect.disarm();
             let next_playback = self.playback_after_play_command();
             self.playback.view.playing_url = Some(station.url.clone());
             self.playback.view.state = next_playback;
 
-            // Persist last played station URL.
+            // Persist last played station URL only after capability is confirmed.
             self.library.settings.last_played_url = Some(station.url.clone());
             self.mark_library_dirty();
 
@@ -59,6 +64,51 @@ impl App {
                 self.sync_volume();
             }
         }
+    }
+
+    /// Returns `true` when the station codec is safe to attempt playback.
+    /// For `Unsupported` codecs, sets an error state and notice before returning `false`.
+    pub(super) fn validate_station_playback_capability(
+        &mut self,
+        station: &crate::radio::Station,
+    ) -> bool {
+        use crate::audio::PlaybackCapability;
+
+        let capability = crate::audio::codec_capability(&station.codec);
+
+        match capability.capability {
+            PlaybackCapability::Supported | PlaybackCapability::Unknown => true,
+            PlaybackCapability::Unsupported => {
+                self.playback.view.current_track = None;
+                self.playback.view.buffer_percent = 0;
+                self.playback.view.buffer_seconds = 0;
+                self.playback.view.state = PlaybackState::Error(format!(
+                    "Unsupported codec: {}",
+                    capability.normalized_codec
+                ));
+                self.playback.view.playing_url = None;
+                self.playback.reconnect.disarm();
+                self.playback.diagnostics.decoder_state = DecoderState::Failed;
+                self.playback.diagnostics.last_error = Some(format!(
+                    "{}: {}",
+                    capability.normalized_codec, capability.reason
+                ));
+                self.set_error_notice(format!(
+                    "{} is not playable yet ({})",
+                    display_station_codec(&station.codec),
+                    capability.reason
+                ));
+                false
+            }
+        }
+    }
+
+    /// Thin wrapper used by lifecycle autoplay so the codec gate is in one place.
+    pub(super) fn can_attempt_station_playback(
+        &mut self,
+        station: &crate::radio::Station,
+    ) -> bool {
+        self.validate_station_playback_capability(station)
     }
 
     pub(super) fn retry_stream(&mut self) {
@@ -190,6 +240,15 @@ impl App {
             .as_ref()
             .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
             .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")))
+    }
+}
+
+fn display_station_codec(codec: &str) -> String {
+    let codec = codec.trim();
+    if codec.is_empty() {
+        "Unknown codec".to_string()
+    } else {
+        codec.to_ascii_uppercase()
     }
 }
 
@@ -408,6 +467,105 @@ mod tests {
 
         assert!(app.playback.muted);
         assert_eq!(app.playback.volume, 65);
+    }
+
+    #[test]
+    fn mp3_codec_starts_playback() {
+        let mut st = station("MP3 Radio", "http://mp3");
+        st.codec = "MP3".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://mp3"));
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn empty_codec_is_allowed_to_try_playback() {
+        let mut st = station("Mystery Radio", "http://mystery");
+        st.codec = String::new();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://mystery")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn aac_codec_now_starts_playback() {
+        // AAC is now supported via Symphonia; the codec gate should allow it through.
+        let mut st = station("AAC Radio", "http://aac");
+        st.codec = "AAC".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        // playing_url and last_played_url should be set (gate was not tripped).
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://aac")
+        );
+        assert_eq!(
+            app.library.settings.last_played_url.as_deref(),
+            Some("http://aac")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+    }
+
+    #[test]
+    fn hls_codec_is_blocked_before_audio_command() {
+        // HLS remains unsupported; it should be blocked.
+        let mut st = station("HLS Radio", "http://hls");
+        st.codec = "HLS".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.library.settings.last_played_url, None);
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+        assert!(app
+            .playback
+            .diagnostics
+            .last_error
+            .as_deref()
+            .is_some_and(|msg| msg.contains("HLS")));
+    }
+
+    #[test]
+    fn hls_codec_does_not_set_playing_url_or_last_played_url() {
+        // HLS remains unsupported; playing_url should never be set.
+        let mut st = station("HLS Radio", "http://hls");
+        st.codec = "HLS".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(app.playback.view.playing_url, None);
+        assert_eq!(app.library.settings.last_played_url, None);
+        assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn ogg_codec_now_starts_playback() {
+        // OGG is now supported via Symphonia; it should not be blocked.
+        let mut st = station("OGG Radio", "http://ogg");
+        st.codec = "OGG".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        // playing_url is set since the codec gate does not block OGG.
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://ogg")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }
 
     #[test]
