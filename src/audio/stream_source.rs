@@ -245,7 +245,7 @@ mod tests {
                         out.push(0); // zero-length block
                     } else {
                         let meta_str = format!("StreamTitle='{}';", title);
-                        let body_len = ((meta_str.len() + 15) / 16) * 16;
+                        let body_len = meta_str.len().div_ceil(16) * 16;
                         let len_byte = (body_len / 16) as u8;
                         out.push(len_byte);
                         let mut body = meta_str.into_bytes();
@@ -539,7 +539,7 @@ mod prop_tests {
             return vec![0u8]; // zero-length block
         }
         let body_str = format!("StreamTitle='{}';", title);
-        let body_len = ((body_str.len() + 15) / 16) * 16;
+        let body_len = body_str.len().div_ceil(16) * 16;
         let mut out = Vec::with_capacity(1 + body_len);
         out.push((body_len / 16) as u8);
         let mut body = body_str.into_bytes();

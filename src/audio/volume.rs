@@ -302,12 +302,6 @@ mod property_tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// **Property 8: Volume clamp**
-    ///
-    /// For any `f32` value `v` (including NaN, ±infinity, and normal values),
-    /// `clamp_volume(v)` always produces a result within `[0.0, 1.0]`.
-    ///
-    /// **Validates: Requirements 10.6**
     // **Property 8: Volume clamp**
     //
     // For any `f32` value `v` (including NaN, ±infinity, and normal values),
@@ -319,7 +313,7 @@ mod property_tests {
         fn volume_clamp_result_in_unit_interval(v in any::<f32>()) {
             let clamped = clamp_volume(v);
             prop_assert!(
-                clamped >= 0.0 && clamped <= 1.0,
+                (0.0..=1.0).contains(&clamped),
                 "clamp_volume({v}) = {clamped} is outside [0.0, 1.0]"
             );
         }

@@ -1007,10 +1007,10 @@ mod cooldown_proptests {
     use proptest::prelude::*;
     use std::time::{Duration, Instant};
 
-    /// **Validates: Requirements 2.1**
-    ///
-    /// Property: for any elapsed duration >= 5s, may_notify returns true
-    /// after a prior record_notification.
+    // **Validates: Requirements 2.1**
+    //
+    // Property: for any elapsed duration >= 5s, may_notify returns true
+    // after a prior record_notification.
     proptest! {
         #[test]
         fn may_notify_true_when_elapsed_gte_5s(elapsed_ms in 5000u64..=600_000u64) {
@@ -1024,10 +1024,10 @@ mod cooldown_proptests {
         }
     }
 
-    /// **Validates: Requirements 2.1**
-    ///
-    /// Property: for any elapsed duration < 5s, may_notify returns false
-    /// after a prior record_notification.
+    // **Validates: Requirements 2.1**
+    //
+    // Property: for any elapsed duration < 5s, may_notify returns false
+    // after a prior record_notification.
     proptest! {
         #[test]
         fn may_notify_false_when_elapsed_lt_5s(elapsed_ms in 0u64..5000u64) {
@@ -1041,10 +1041,10 @@ mod cooldown_proptests {
         }
     }
 
-    /// **Validates: Requirements 2.1**
-    ///
-    /// Property: a fresh NotificationCooldown always allows notification
-    /// regardless of what Instant is provided.
+    // **Validates: Requirements 2.1**
+    //
+    // Property: a fresh NotificationCooldown always allows notification
+    // regardless of what Instant is provided.
     proptest! {
         #[test]
         fn may_notify_always_true_when_fresh(offset_ms in 0u64..=1_000_000u64) {
@@ -1055,10 +1055,10 @@ mod cooldown_proptests {
         }
     }
 
-    /// **Validates: Requirements 2.1**
-    ///
-    /// Property: record_notification always updates so that subsequent
-    /// may_notify within cooldown returns false.
+    // **Validates: Requirements 2.1**
+    //
+    // Property: record_notification always updates so that subsequent
+    // may_notify within cooldown returns false.
     proptest! {
         #[test]
         fn record_then_immediate_check_returns_false(

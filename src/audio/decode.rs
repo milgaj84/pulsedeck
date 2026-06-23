@@ -592,11 +592,10 @@ mod prop_tests {
                     Ok(0) => break,
                     Ok(n) => {
                         pre.extend_from_slice(&chunk[..n]);
-                        let percent = if min_bytes > 0 {
-                            ((pre.len() * 100) / min_bytes).min(99) as u8
-                        } else {
-                            99
-                        };
+                        let percent = (pre.len() * 100)
+                            .checked_div(min_bytes)
+                            .unwrap_or(99)
+                            .min(99) as u8;
                         let _ = event_tx.send(EngineEvent::Buffering {
                             generation: 1,
                             percent,

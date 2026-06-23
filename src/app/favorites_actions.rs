@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn sort_with_favorites_partitions_correctly() {
-        let stations = vec![
+        let stations = [
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
             station("C", "http://c", "Synthwave"),
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn sort_with_favorites_preserves_insertion_order_within_groups() {
-        let stations = vec![
+        let stations = [
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
             station("C", "http://c", "Synthwave"),
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn sort_with_favorites_empty_favorites_preserves_order() {
-        let stations = vec![
+        let stations = [
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
             station("C", "http://c", "Synthwave"),
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn sort_with_favorites_all_favorited_preserves_order() {
-        let stations = vec![
+        let stations = [
             station("A", "http://a", "Synthwave"),
             station("B", "http://b", "Synthwave"),
         ];

@@ -120,7 +120,7 @@ mod property_tests {
             let fraction = runtime.output_volume_fraction();
 
             // Requirement 14.1: result is always in [0.0, 1.0]
-            prop_assert!(fraction >= 0.0 && fraction <= 1.0,
+            prop_assert!((0.0..=1.0).contains(&fraction),
                 "fraction {} out of bounds for volume={}, muted={}", fraction, volume, muted);
 
             // Requirement 14.2: muted always yields 0.0
