@@ -18,7 +18,10 @@ fn visualizer_title(app: &UiModel<'_>) -> &'static str {
     }
 }
 
-fn should_render_spectrum_analyzer(playback: &PlaybackState, visualizer_mode: VisualizerMode) -> bool {
+fn should_render_spectrum_analyzer(
+    playback: &PlaybackState,
+    visualizer_mode: VisualizerMode,
+) -> bool {
     visualizer_mode == VisualizerMode::Spectrum
         && matches!(
             playback,
@@ -142,12 +145,18 @@ mod tests {
 
     #[test]
     fn spectrum_renderer_stays_active_while_connecting() {
-        assert!(should_render_spectrum_analyzer(&PlaybackState::Playing, VisualizerMode::Spectrum));
+        assert!(should_render_spectrum_analyzer(
+            &PlaybackState::Playing,
+            VisualizerMode::Spectrum
+        ));
         assert!(should_render_spectrum_analyzer(
             &PlaybackState::Connecting,
             VisualizerMode::Spectrum
         ));
-        assert!(!should_render_spectrum_analyzer(&PlaybackState::Paused, VisualizerMode::Spectrum));
+        assert!(!should_render_spectrum_analyzer(
+            &PlaybackState::Paused,
+            VisualizerMode::Spectrum
+        ));
         assert!(!should_render_spectrum_analyzer(
             &PlaybackState::Connecting,
             VisualizerMode::RealOscilloscope

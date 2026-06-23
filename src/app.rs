@@ -1,14 +1,18 @@
 mod command_palette;
+mod favorites_actions;
 mod idle;
 mod library;
+mod library_filter;
 mod lifecycle;
 mod nav;
 mod notifier;
+mod number_jump_handler;
 mod overlays;
 mod persist;
 mod playback;
 mod playback_error;
 mod playback_runtime;
+mod recent;
 mod reconnect;
 mod search;
 mod selectors;
@@ -22,6 +26,7 @@ mod visualizer;
 pub mod visualizer_mode;
 
 use crate::favorites::Library;
+use crate::number_jump::NumberJump;
 use crate::radio::Station;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -58,7 +63,20 @@ pub struct App {
     pub ui: UiRuntimeState,
     pub playback: PlaybackRuntime,
 
+    /// Library filter query text (active when InputMode::LibraryFilter).
+    pub library_filter_query: String,
+
+    /// Number jump accumulator.
+    pub number_jump: NumberJump,
+
     metadata_refresh_pending: bool,
     metadata_refresh_running: bool,
     persist: persist::PersistFlags,
+
+    /// Cooldown state for notification rate-limiting.
+    pub(crate) notification_cooldown: lifecycle::NotificationCooldown,
+
+    /// Test-only counter for how many notifications were dispatched.
+    #[cfg(test)]
+    pub(crate) notification_count: u32,
 }

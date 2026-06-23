@@ -71,10 +71,22 @@ mod tests {
     #[test]
     fn test_from_key_valid_keys() {
         assert_eq!(ThemeName::from_key("Retrowave"), ThemeName::Retrowave);
-        assert_eq!(ThemeName::from_key("CatppuccinMocha"), ThemeName::CatppuccinMocha);
-        assert_eq!(ThemeName::from_key("CatppuccinMacchiato"), ThemeName::CatppuccinMacchiato);
-        assert_eq!(ThemeName::from_key("CatppuccinFrappe"), ThemeName::CatppuccinFrappe);
-        assert_eq!(ThemeName::from_key("CatppuccinLatte"), ThemeName::CatppuccinLatte);
+        assert_eq!(
+            ThemeName::from_key("CatppuccinMocha"),
+            ThemeName::CatppuccinMocha
+        );
+        assert_eq!(
+            ThemeName::from_key("CatppuccinMacchiato"),
+            ThemeName::CatppuccinMacchiato
+        );
+        assert_eq!(
+            ThemeName::from_key("CatppuccinFrappe"),
+            ThemeName::CatppuccinFrappe
+        );
+        assert_eq!(
+            ThemeName::from_key("CatppuccinLatte"),
+            ThemeName::CatppuccinLatte
+        );
         assert_eq!(ThemeName::from_key("Terminal"), ThemeName::Terminal);
     }
 
@@ -96,7 +108,11 @@ mod tests {
     fn test_label_non_empty_with_alphabetic() {
         for &variant in ThemeName::ALL {
             let label = variant.label();
-            assert!(!label.is_empty(), "label for {:?} should not be empty", variant);
+            assert!(
+                !label.is_empty(),
+                "label for {:?} should not be empty",
+                variant
+            );
             assert!(
                 label.chars().any(|c| c.is_alphabetic()),
                 "label for {:?} should contain at least one alphabetic char",

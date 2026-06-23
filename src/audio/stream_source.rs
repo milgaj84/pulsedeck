@@ -352,9 +352,9 @@ mod tests {
     fn eof_inside_metadata_block_returns_unexpected_eof() {
         // Audio byte 'A', then a metadata block that is cut short.
         // Length byte says 16 bytes follow, but only "partial" (7 bytes) exist.
-        let mut stream = vec![b'A'];  // one audio byte
-        stream.push(0x01);            // length byte: 1 * 16 = 16 bytes
-        stream.extend_from_slice(b"partial");  // only 7 bytes — stream cut short
+        let mut stream = vec![b'A']; // one audio byte
+        stream.push(0x01); // length byte: 1 * 16 = 16 bytes
+        stream.extend_from_slice(b"partial"); // only 7 bytes — stream cut short
 
         let (mut src, _rx) = make_source(stream, Some(1));
 
@@ -391,13 +391,19 @@ mod tests {
 
         let err = src.seek(SeekFrom::Start(0)).unwrap_err();
         // Error message contains "seek not supported on live stream"
-        assert!(err.to_string().contains("seek not supported on live stream"));
+        assert!(err
+            .to_string()
+            .contains("seek not supported on live stream"));
 
         let err2 = src.seek(SeekFrom::Current(4)).unwrap_err();
-        assert!(err2.to_string().contains("seek not supported on live stream"));
+        assert!(err2
+            .to_string()
+            .contains("seek not supported on live stream"));
 
         let err3 = src.seek(SeekFrom::End(0)).unwrap_err();
-        assert!(err3.to_string().contains("seek not supported on live stream"));
+        assert!(err3
+            .to_string()
+            .contains("seek not supported on live stream"));
     }
 
     // ---- abandon on stale generation ---------------------------------------
@@ -418,8 +424,7 @@ mod tests {
     #[test]
     fn read_returns_abandoned_when_generation_bumped_to_new_value() {
         let active = Arc::new(AtomicU64::new(1));
-        let (mut src, _rx) =
-            make_source_with_active(b"ABCDEF".to_vec(), Some(2), active.clone());
+        let (mut src, _rx) = make_source_with_active(b"ABCDEF".to_vec(), Some(2), active.clone());
 
         // Read first audio chunk successfully.
         let mut buf = [0u8; 2];
@@ -600,10 +605,7 @@ mod prop_tests {
     /// Strategy: a list of at most 64 ICY title strings, each up to 128 chars,
     /// avoiding the `';` terminator sequence so the parser stays clean.
     fn arb_titles() -> impl Strategy<Value = Vec<String>> {
-        prop::collection::vec(
-            "[^';]{0,128}",
-            0..=64,
-        )
+        prop::collection::vec("[^';]{0,128}", 0..=64)
     }
 
     // ========================================================================

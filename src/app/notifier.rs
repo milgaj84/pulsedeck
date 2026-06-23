@@ -50,8 +50,11 @@ fn windows_toast_script(summary: &str, title: &str, station: &str) -> String {
     let summary = xml_escape(summary);
     let title = xml_escape(title);
     let station = xml_escape(station);
-    // Use PowerShell's registered AppUserModelID so Windows shows the toast
-    // without requiring PulseDeck to have its own Start Menu shortcut/AUMID.
+    // Use Tag and Group on the toast so newer notifications REPLACE older ones
+    // instead of stacking. This prevents swarm behavior on WSL where multiple
+    // toasts pile up in the Windows Action Center.
+    let app_id =
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe";
     format!(
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
          [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null; \
@@ -62,7 +65,11 @@ fn windows_toast_script(summary: &str, title: &str, station: &str) -> String {
          <text>Station: {station}</text>\
          </binding></visual><audio silent=\"true\"/></toast>'); \
          $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
-         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($toast)"
+         $toast.Tag = 'PulseDeckNowPlaying'; \
+         $toast.Group = 'PulseDeck'; \
+         $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}'); \
+         try {{ $notifier.Hide($toast) }} catch {{}}; \
+         $notifier.Show($toast)"
     )
 }
 
@@ -88,7 +95,10 @@ mod tests {
 
     #[test]
     fn xml_escape_handles_special_chars() {
-        assert_eq!(xml_escape("Bob's <Station> & \"More\""), "Bob&apos;s &lt;Station&gt; &amp; &quot;More&quot;");
+        assert_eq!(
+            xml_escape("Bob's <Station> & \"More\""),
+            "Bob&apos;s &lt;Station&gt; &amp; &quot;More&quot;"
+        );
     }
 
     #[test]
@@ -99,5 +109,7 @@ mod tests {
         assert!(script.contains("PulseDeck"));
         assert!(script.contains("Bob&apos;s Track"));
         assert!(script.contains("Radio &lt;FM&gt;"));
+        assert!(script.contains("$toast.Tag = 'PulseDeckNowPlaying'"));
+        assert!(script.contains("$toast.Group = 'PulseDeck'"));
     }
 }

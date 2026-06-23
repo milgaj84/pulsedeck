@@ -1,5 +1,6 @@
 use super::*;
 use crate::favorites::resolve_parent_genre;
+use crate::library_filter::station_matches_query;
 use crate::radio::{find_station_by_url, station_url_matches};
 
 /// Shared genre filter: returns stations visible for the given genre (or all if genre is "All").
@@ -29,6 +30,7 @@ pub(super) fn count_stations_by_genre(stations: &[Station], genre: Option<&str>)
 
 impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
+    /// In LibraryFilter mode with a non-empty query: genre-filtered then substring-filtered.
     pub fn visible_stations(&self) -> Vec<&Station> {
         if self.ui.input_mode == InputMode::Search {
             return self.search.results.iter().collect();
@@ -39,7 +41,22 @@ impl App {
             .available_genres
             .get(self.ui.nav.selected_genre_idx)
             .map(|s| s.as_str());
-        filter_stations_by_genre(&self.library.stations, genre)
+        let genre_filtered = filter_stations_by_genre(&self.library.stations, genre);
+        let sorted = super::favorites_actions::sort_with_favorites(
+            genre_filtered,
+            &self.library.settings.favorites,
+        );
+
+        if self.ui.input_mode == InputMode::LibraryFilter
+            && !self.library_filter_query.trim().is_empty()
+        {
+            sorted
+                .into_iter()
+                .filter(|s| station_matches_query(s, &self.library_filter_query))
+                .collect()
+        } else {
+            sorted
+        }
     }
 
     /// Get the highlighted station from the currently visible list.
@@ -77,7 +94,17 @@ impl App {
             .available_genres
             .get(self.ui.nav.selected_genre_idx)
             .map(|s| s.as_str());
-        count_stations_by_genre(&self.library.stations, genre)
+
+        if self.ui.input_mode == InputMode::LibraryFilter
+            && !self.library_filter_query.trim().is_empty()
+        {
+            filter_stations_by_genre(&self.library.stations, genre)
+                .into_iter()
+                .filter(|s| station_matches_query(s, &self.library_filter_query))
+                .count()
+        } else {
+            count_stations_by_genre(&self.library.stations, genre)
+        }
     }
 
     /// Try to select the currently playing station in the visible list.
@@ -102,6 +129,10 @@ mod tests {
 
     fn station(name: &str, url: &str) -> Station {
         Station::basic(name, url, "Synthwave", "US", 128)
+    }
+
+    fn station_with_genre(name: &str, url: &str, genre: &str) -> Station {
+        Station::basic(name, url, genre, "US", 128)
     }
 
     #[test]
@@ -148,6 +179,87 @@ mod tests {
 
         assert_eq!(app.ui.nav.selected, 1);
     }
+
+    #[test]
+    fn library_filter_mode_applies_query_within_active_genre() {
+        let mut app = App::new(Library::in_memory(vec![
+            station_with_genre("Jazz FM", "http://jazz", "Jazz"),
+            station_with_genre("Nightride FM", "http://night", "Synthwave"),
+            station_with_genre("SomaFM", "http://soma", "Synthwave"),
+        ]));
+
+        // Set genre to "All" so all stations are genre-visible
+        app.library.available_genres = vec!["All".to_string()];
+        app.ui.nav.selected_genre_idx = 0;
+
+        // Without filter: all 3 visible
+        assert_eq!(app.visible_stations().len(), 3);
+        assert_eq!(app.visible_count(), 3);
+
+        // Enter LibraryFilter mode with query "jazz"
+        app.ui.input_mode = InputMode::LibraryFilter;
+        app.library_filter_query = "jazz".to_string();
+
+        let visible = app.visible_stations();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].name, "Jazz FM");
+        assert_eq!(app.visible_count(), 1);
+    }
+
+    #[test]
+    fn library_filter_empty_query_returns_full_genre_set() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("A", "http://a"),
+            station("B", "http://b"),
+        ]));
+
+        app.ui.input_mode = InputMode::LibraryFilter;
+        app.library_filter_query = "   ".to_string();
+
+        assert_eq!(app.visible_stations().len(), 2);
+        assert_eq!(app.visible_count(), 2);
+    }
+
+    #[test]
+    fn library_filter_respects_genre_scoping() {
+        let mut app = App::new(Library::in_memory(vec![
+            station_with_genre("Jazz FM", "http://jazz", "Jazz"),
+            station_with_genre("Nightride FM", "http://night", "Synthwave"),
+            station_with_genre("SomaFM", "http://soma", "Synthwave"),
+        ]));
+
+        // Set genre filter to Synthwave only
+        app.library.available_genres = vec![
+            "All".to_string(),
+            "Synthwave".to_string(),
+            "Jazz".to_string(),
+        ];
+        app.ui.nav.selected_genre_idx = 1; // "Synthwave"
+
+        // Enter LibraryFilter mode with query "fm" — should only match
+        // within the Synthwave genre (Nightride FM, SomaFM), not Jazz FM
+        app.ui.input_mode = InputMode::LibraryFilter;
+        app.library_filter_query = "fm".to_string();
+
+        let visible = app.visible_stations();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].name, "Nightride FM");
+        assert_eq!(visible[1].name, "SomaFM");
+    }
+
+    #[test]
+    fn library_filter_not_applied_in_normal_mode() {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Jazz FM", "http://jazz"),
+            station("Nightride FM", "http://night"),
+        ]));
+
+        // Query is set but mode is Normal — filter should NOT be applied
+        app.ui.input_mode = InputMode::Normal;
+        app.library_filter_query = "jazz".to_string();
+
+        assert_eq!(app.visible_stations().len(), 2);
+    }
 }
 
 #[cfg(test)]
@@ -172,13 +284,11 @@ mod property_tests {
     fn arb_station_list() -> impl Strategy<Value = Vec<Station>> {
         prop::collection::vec(
             (
-                "[a-zA-Z0-9 ]{1,30}",  // name
-                "[a-z]{1,30}",          // url
-                arb_genre(),            // genre
+                "[a-zA-Z0-9 ]{1,30}", // name
+                "[a-z]{1,30}",        // url
+                arb_genre(),          // genre
             )
-                .prop_map(|(name, url, genre)| {
-                    Station::basic(&name, &url, &genre, "US", 128)
-                }),
+                .prop_map(|(name, url, genre)| Station::basic(&name, &url, &genre, "US", 128)),
             0..=50,
         )
     }

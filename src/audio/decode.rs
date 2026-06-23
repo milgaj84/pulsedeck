@@ -501,7 +501,7 @@ mod tests {
 
         // Either path is fine — we just want to confirm no panic and a result is returned.
         match result {
-            Ok(_) => {}                  // probe succeeded
+            Ok(_) => {}                       // probe succeeded
             Err(EngineError::Decode(_)) => {} // probe failed with decode error (expected)
             Err(e) => panic!("Unexpected error type: {:?}", e),
         }

@@ -130,7 +130,9 @@ fn empty_search_hint(query: &str) -> String {
             format!("  No language results for {value}; try english, bosnian, or serbian")
         }
         SearchField::Codec => {
-            format!("  No codec results for {value}; codec: filters metadata, playback is MP3-first")
+            format!(
+                "  No codec results for {value}; codec: filters metadata, playback is MP3-first"
+            )
         }
     }
 }

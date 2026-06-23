@@ -109,10 +109,7 @@ impl App {
     }
 
     /// Thin wrapper used by lifecycle autoplay so the codec gate is in one place.
-    pub(super) fn can_attempt_station_playback(
-        &mut self,
-        station: &crate::radio::Station,
-    ) -> bool {
+    pub(super) fn can_attempt_station_playback(&mut self, station: &crate::radio::Station) -> bool {
         self.validate_station_playback_capability(station)
     }
 
@@ -509,10 +506,7 @@ mod tests {
         app.play_selected();
 
         // playing_url and last_played_url should be set (gate was not tripped).
-        assert_eq!(
-            app.playback.view.playing_url.as_deref(),
-            Some("http://aac")
-        );
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://aac"));
         assert_eq!(
             app.library.settings.last_played_url.as_deref(),
             Some("http://aac")
@@ -564,10 +558,7 @@ mod tests {
         app.play_selected();
 
         // playing_url is set since the codec gate does not block OGG.
-        assert_eq!(
-            app.playback.view.playing_url.as_deref(),
-            Some("http://ogg")
-        );
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://ogg"));
         assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }
 

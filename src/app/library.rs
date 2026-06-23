@@ -135,6 +135,10 @@ impl App {
     }
 
     pub(super) fn next_genre(&mut self) {
+        if self.show_help() {
+            self.ui.nav.help_tab_index = (self.ui.nav.help_tab_index + 1) % 6;
+            return;
+        }
         if self.ui.input_mode == InputMode::Normal {
             let count = self.library.available_genres.len();
             if count > 0 {
@@ -146,6 +150,14 @@ impl App {
     }
 
     pub(super) fn prev_genre(&mut self) {
+        if self.show_help() {
+            self.ui.nav.help_tab_index = if self.ui.nav.help_tab_index == 0 {
+                5
+            } else {
+                self.ui.nav.help_tab_index - 1
+            };
+            return;
+        }
         if self.ui.input_mode == InputMode::Normal {
             let count = self.library.available_genres.len();
             if count > 0 {

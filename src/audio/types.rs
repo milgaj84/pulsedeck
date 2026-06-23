@@ -17,10 +17,7 @@ pub(super) enum EngineState {
     /// No stream loaded; engine is idle.
     Idle,
     /// HTTP connection is being established for the given generation.
-    Connecting {
-        generation: Generation,
-        url: String,
-    },
+    Connecting { generation: Generation, url: String },
     /// Stream is connected; prebuffer is being filled.
     Buffering {
         generation: Generation,
@@ -28,15 +25,9 @@ pub(super) enum EngineState {
         percent: u8,
     },
     /// Audio is actively playing.
-    Playing {
-        generation: Generation,
-        url: String,
-    },
+    Playing { generation: Generation, url: String },
     /// Audio is paused mid-stream.
-    Paused {
-        generation: Generation,
-        url: String,
-    },
+    Paused { generation: Generation, url: String },
     /// Output device was lost; attempting hardware reopen.
     Recovering {
         generation: Generation,
@@ -58,10 +49,7 @@ pub(super) enum EngineState {
 #[allow(dead_code)]
 pub(super) enum EngineEvent {
     /// Prebuffer progress update from the connection worker.
-    Buffering {
-        generation: Generation,
-        percent: u8,
-    },
+    Buffering { generation: Generation, percent: u8 },
     /// Worker successfully connected and produced a decoded source.
     Connected {
         generation: Generation,
@@ -246,8 +234,7 @@ pub(super) struct StreamFormat {
 /// Workers produce this and hand it to `EngineLoop` via
 /// `EngineEvent::Connected`.  `OutputManager::attach` appends it to the
 /// rodio `Sink`.
-pub(super) type DecodedSource =
-    Box<dyn rodio::Source<Item = f32> + Send + 'static>;
+pub(super) type DecodedSource = Box<dyn rodio::Source<Item = f32> + Send + 'static>;
 
 // ---------------------------------------------------------------------------
 // ConnectRequest
@@ -296,7 +283,9 @@ mod tests {
         assert!(EngineError::Connect("timeout".into())
             .to_status_string()
             .starts_with("Connection failed:"));
-        assert!(EngineError::Http(404).to_status_string().starts_with("HTTP "));
+        assert!(EngineError::Http(404)
+            .to_status_string()
+            .starts_with("HTTP "));
         assert!(EngineError::Decode("unsupported".into())
             .to_status_string()
             .starts_with("Decode error:"));

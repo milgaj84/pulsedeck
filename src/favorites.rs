@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::favorites_set::FavoritesSet;
 use crate::radio::{
     clean_tag_values, normalize_codec, normalize_country_code, normalize_station_uuid,
     sanitize_bitrate, station_identity_matches, station_url_matches, Station,
 };
+use crate::recent_ring::StationSlots;
 
 const LIBRARY_FILE: &str = "library.json";
 
@@ -32,6 +34,10 @@ pub struct Settings {
     pub save_history: bool,
     #[serde(default = "default_true")]
     pub stream_metadata_enabled: bool,
+    #[serde(default)]
+    pub station_slots: StationSlots,
+    #[serde(default)]
+    pub favorites: FavoritesSet,
 }
 
 fn default_true() -> bool {
@@ -52,6 +58,8 @@ impl Default for Settings {
             output_device_name: None,
             save_history: false,
             stream_metadata_enabled: true,
+            station_slots: StationSlots::default(),
+            favorites: FavoritesSet::default(),
         }
     }
 }
@@ -633,6 +641,20 @@ mod tests {
     }
 
     #[test]
+    fn settings_deserializes_missing_station_slots_and_favorites_as_defaults() {
+        let json = r#"{
+            "notifications_enabled": true,
+            "autoplay_last": false,
+            "theme": "Retrowave"
+        }"#;
+
+        let settings: Settings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.station_slots.get(1), None);
+        assert!(settings.favorites.is_empty());
+    }
+
+    #[test]
     fn newer_library_version_loads_with_warning() {
         let json = r#"{
             "version": 2,
@@ -1056,9 +1078,18 @@ mod tests {
         .notice();
 
         let pos_10 = notice.find("10").expect("should contain '10'");
-        let pos_3 = notice[pos_10..].find('3').map(|p| p + pos_10).expect("should contain '3' after '10'");
-        let pos_6 = notice[pos_3..].find('6').map(|p| p + pos_3).expect("should contain '6' after '3'");
-        let pos_1 = notice[pos_6..].find('1').map(|p| p + pos_6).expect("should contain '1' after '6'");
+        let pos_3 = notice[pos_10..]
+            .find('3')
+            .map(|p| p + pos_10)
+            .expect("should contain '3' after '10'");
+        let pos_6 = notice[pos_3..]
+            .find('6')
+            .map(|p| p + pos_3)
+            .expect("should contain '6' after '3'");
+        let pos_1 = notice[pos_6..]
+            .find('1')
+            .map(|p| p + pos_6)
+            .expect("should contain '1' after '6'");
         assert!(pos_10 < pos_3);
         assert!(pos_3 < pos_6);
         assert!(pos_6 < pos_1);
@@ -1093,8 +1124,14 @@ mod tests {
         .notice();
 
         assert!(notice.contains("checked"), "missing 'checked' in: {notice}");
-        assert!(notice.contains("enriched"), "missing 'enriched' in: {notice}");
-        assert!(notice.contains("unchanged"), "missing 'unchanged' in: {notice}");
+        assert!(
+            notice.contains("enriched"),
+            "missing 'enriched' in: {notice}"
+        );
+        assert!(
+            notice.contains("unchanged"),
+            "missing 'unchanged' in: {notice}"
+        );
         assert!(notice.contains("failed"), "missing 'failed' in: {notice}");
     }
 
@@ -1108,7 +1145,10 @@ mod tests {
             128,
         )]);
 
-        let result = lib.mark_station_success("http://stream.example.com/live", "2024-01-15T10:00:00Z".to_string());
+        let result = lib.mark_station_success(
+            "http://stream.example.com/live",
+            "2024-01-15T10:00:00Z".to_string(),
+        );
 
         assert!(result);
         assert_eq!(
@@ -1128,7 +1168,10 @@ mod tests {
             128,
         )]);
 
-        let result = lib.mark_station_success("http://other.example.com/stream", "2024-01-15T10:00:00Z".to_string());
+        let result = lib.mark_station_success(
+            "http://other.example.com/stream",
+            "2024-01-15T10:00:00Z".to_string(),
+        );
 
         assert!(!result);
         assert!(lib.stations[0].health.last_success_at.is_none());
@@ -1216,11 +1259,22 @@ mod tests {
         )]);
 
         // Record some failures first
-        lib.mark_station_failure("http://stream.example.com/live", "t1".to_string(), "timeout");
-        lib.mark_station_failure("http://stream.example.com/live", "t2".to_string(), "timeout");
+        lib.mark_station_failure(
+            "http://stream.example.com/live",
+            "t1".to_string(),
+            "timeout",
+        );
+        lib.mark_station_failure(
+            "http://stream.example.com/live",
+            "t2".to_string(),
+            "timeout",
+        );
 
         assert_eq!(lib.stations[0].health.failure_count, Some(2));
-        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("t2"));
+        assert_eq!(
+            lib.stations[0].health.last_failure_at.as_deref(),
+            Some("t2")
+        );
         assert!(!lib.stations[0].health.last_error_summary.is_empty());
 
         // Now mark success
@@ -1230,8 +1284,98 @@ mod tests {
         assert!(lib.stations[0].health.last_error_summary.is_empty());
         // failure_count and last_failure_at are preserved
         assert_eq!(lib.stations[0].health.failure_count, Some(2));
-        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("t2"));
+        assert_eq!(
+            lib.stations[0].health.last_failure_at.as_deref(),
+            Some("t2")
+        );
         // last_success_at is set
-        assert_eq!(lib.stations[0].health.last_success_at.as_deref(), Some("t3"));
+        assert_eq!(
+            lib.stations[0].health.last_success_at.as_deref(),
+            Some("t3")
+        );
+    }
+
+    #[test]
+    fn persistence_round_trip_station_slots_and_favorites() {
+        use std::fs;
+
+        let dir = std::env::temp_dir().join("pulsedeck_test_persistence_round_trip");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("library.json");
+
+        let mut lib = Library {
+            stations: vec![station(
+                "Test FM",
+                "http://test.fm/stream",
+                "Synthwave",
+                "US",
+                128,
+            )],
+            available_genres: vec![],
+            settings: Settings::default(),
+            path: Some(path.clone()),
+            load_warnings: Vec::new(),
+        };
+        lib.rebuild_genres();
+
+        // Populate station slots
+        lib.settings.station_slots.assign(1, "http://a.com/stream");
+        lib.settings.station_slots.assign(3, "http://c.com/live");
+
+        // Populate favorites
+        lib.settings.favorites.toggle("http://test.fm/stream");
+
+        // Save to disk
+        lib.save().unwrap();
+
+        // Read file back and parse
+        let contents = fs::read_to_string(&path).unwrap();
+        let (stations, settings, warning) = parse_library_file(&contents).unwrap();
+
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].name, "Test FM");
+
+        // Verify station_slots round-tripped
+        assert_eq!(settings.station_slots.get(1), Some("http://a.com/stream"));
+        assert_eq!(settings.station_slots.get(2), None);
+        assert_eq!(settings.station_slots.get(3), Some("http://c.com/live"));
+
+        // Verify favorites round-tripped
+        assert!(settings.favorites.contains("http://test.fm/stream"));
+
+        assert!(warning.is_none());
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn backward_compatibility_missing_station_slots_and_favorites() {
+        // A library.json from an older version without station_slots or favorites
+        let json = r#"{
+            "version": 1,
+            "stations": [
+                {
+                    "name": "Old FM",
+                    "url": "http://old.fm/stream",
+                    "genre": "Ambient",
+                    "country": "DE",
+                    "bitrate": 192
+                }
+            ],
+            "settings": {
+                "notifications_enabled": true,
+                "autoplay_last": false,
+                "theme": "Retrowave"
+            }
+        }"#;
+
+        let (stations, settings, warning) = parse_library_file(json).unwrap();
+
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].name, "Old FM");
+        assert_eq!(settings.station_slots.get(1), None);
+        assert!(settings.favorites.is_empty());
+        assert!(warning.is_none());
     }
 }

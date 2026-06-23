@@ -8,8 +8,9 @@ pub use query::{has_unknown_prefix, prefix_examples_inline, SearchField, Station
 pub use rank::{explain_station_match, rank_explanation_label};
 pub use station::{
     clean_tag_values, fallback_stations, find_station_by_url, find_station_index_by_url,
-    normalize_codec, normalize_country_code, normalize_station_uuid, sanitize_bitrate,
-    station_identity_matches, station_url_matches, Station, StationHealth, StationIdentity,
+    normalize_codec, normalize_country_code, normalize_station_uuid, normalized_station_url,
+    sanitize_bitrate, station_identity_matches, station_url_matches, Station, StationHealth,
+    StationIdentity,
 };
 
 const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[

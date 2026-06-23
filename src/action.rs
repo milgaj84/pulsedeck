@@ -40,6 +40,26 @@ pub enum Action {
     NextGenre,
     PrevGenre,
 
+    /// Library filter
+    EnterLibraryFilter,
+    ExitLibraryFilter,
+    LibraryFilterInput(char),
+    LibraryFilterBackspace,
+    LibraryFilterConfirm,
+
+    /// Station preset slots
+    PlaySlot(u8),
+    AssignSlot(u8),
+
+    /// Favorites
+    ToggleFavorite,
+
+    /// Number jump
+    NumberJumpDigit(char),
+    NumberJumpConfirm,
+    #[allow(dead_code)]
+    NumberJumpCancel,
+
     /// Dynamic TUI Modules
     CycleLayout,
     ToggleHelp,

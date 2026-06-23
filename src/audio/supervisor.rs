@@ -160,7 +160,10 @@ mod tests {
         // Generation 0 is the sentinel; it should never be "active" after
         // a real generation has been allocated.
         let _g = sup.next_generation();
-        assert!(!sup.is_active(0), "generation 0 is the sentinel, never active");
+        assert!(
+            !sup.is_active(0),
+            "generation 0 is the sentinel, never active"
+        );
     }
 
     #[test]

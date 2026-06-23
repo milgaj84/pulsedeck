@@ -210,6 +210,7 @@ fn footer_line(app: &UiModel<'_>) -> Line<'static> {
         ),
         InputMode::Normal => normal_mode_footer(app),
         InputMode::SleepTimer => normal_mode_footer(app),
+        InputMode::LibraryFilter => normal_mode_footer(app),
     }
 }
 
@@ -322,7 +323,10 @@ mod tests {
     #[test]
     fn visualizer_labels_drop_scope_jargon() {
         assert_eq!(visualizer_label(VisualizerMode::Spectrum), "RTA");
-        assert_eq!(visualizer_label(VisualizerMode::RealOscilloscope), "REAL OSC");
+        assert_eq!(
+            visualizer_label(VisualizerMode::RealOscilloscope),
+            "REAL OSC"
+        );
         assert_eq!(visualizer_label(VisualizerMode::SimOscilloscope), "SIM OSC");
     }
 }

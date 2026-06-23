@@ -60,14 +60,27 @@ mod tests {
     #[test]
     fn from_index_clamps_out_of_range() {
         assert_eq!(VisualizerMode::from_index(0), VisualizerMode::Spectrum);
-        assert_eq!(VisualizerMode::from_index(1), VisualizerMode::RealOscilloscope);
-        assert_eq!(VisualizerMode::from_index(2), VisualizerMode::SimOscilloscope);
-        assert_eq!(VisualizerMode::from_index(99), VisualizerMode::SimOscilloscope);
+        assert_eq!(
+            VisualizerMode::from_index(1),
+            VisualizerMode::RealOscilloscope
+        );
+        assert_eq!(
+            VisualizerMode::from_index(2),
+            VisualizerMode::SimOscilloscope
+        );
+        assert_eq!(
+            VisualizerMode::from_index(99),
+            VisualizerMode::SimOscilloscope
+        );
     }
 
     #[test]
     fn to_index_roundtrips() {
-        for mode in [VisualizerMode::Spectrum, VisualizerMode::RealOscilloscope, VisualizerMode::SimOscilloscope] {
+        for mode in [
+            VisualizerMode::Spectrum,
+            VisualizerMode::RealOscilloscope,
+            VisualizerMode::SimOscilloscope,
+        ] {
             assert_eq!(VisualizerMode::from_index(mode.to_index()), mode);
         }
     }

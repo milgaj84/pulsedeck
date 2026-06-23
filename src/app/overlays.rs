@@ -79,7 +79,6 @@ impl App {
         self.set_overlay(ActiveOverlay::SleepTimer);
     }
 
-    #[cfg(test)]
     pub fn show_help(&self) -> bool {
         self.ui.overlays.active == ActiveOverlay::Help
     }

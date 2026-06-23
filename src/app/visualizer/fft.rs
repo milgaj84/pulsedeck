@@ -197,10 +197,7 @@ mod tests {
 
         // Find peak magnitude
         let magnitudes: Vec<f32> = output.iter().map(|c| c.norm()).collect();
-        let peak = magnitudes
-            .iter()
-            .cloned()
-            .fold(0.0_f32, f32::max);
+        let peak = magnitudes.iter().cloned().fold(0.0_f32, f32::max);
 
         // Bin k=1 should be the dominant peak (or bin n-k=7 due to symmetry)
         let mag_at_k = magnitudes[k];

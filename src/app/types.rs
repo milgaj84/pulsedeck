@@ -11,6 +11,9 @@ pub enum InputMode {
     /// Modal sleep-timer overlay; keys route through an isolated table so they
     /// can never collide with Normal or Search bindings.
     SleepTimer,
+    /// In-library substring filter mode; the user types to filter their library
+    /// stations by name, genre, or tag.
+    LibraryFilter,
 }
 
 /// Explicit search state for UI messages and stale-response handling.

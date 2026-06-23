@@ -137,7 +137,6 @@ impl App {
                 self.library.settings.stream_metadata_enabled,
             ))
     }
-
 }
 
 fn available_output_device_choices() -> Vec<String> {

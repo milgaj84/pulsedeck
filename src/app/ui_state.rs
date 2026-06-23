@@ -182,7 +182,12 @@ mod tests {
 
     #[test]
     fn from_app_values_clamps_visualizer_mode() {
-        let state = UiState::from_app_values(65, true, LayoutMode::RightOnly, VisualizerMode::SimOscilloscope);
+        let state = UiState::from_app_values(
+            65,
+            true,
+            LayoutMode::RightOnly,
+            VisualizerMode::SimOscilloscope,
+        );
 
         assert_eq!(state.volume(), 65);
         assert!(state.muted());

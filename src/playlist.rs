@@ -145,19 +145,27 @@ mod property_tests {
     /// - Genres: non-empty, no newlines, no leading/trailing whitespace (trim-stable)
     fn arb_station() -> impl Strategy<Value = Station> {
         (
-            "[^\n]{1,200}",     // name: non-empty, no newlines
+            "[^\n]{1,200}",                          // name: non-empty, no newlines
             "[a-zA-Z0-9_./:~@!$&*+,;=%\\-]{1,2000}", // url: safe ASCII, no whitespace, no '#'
-            "[^\n]{1,100}",     // genre: non-empty, no newlines
-            "[A-Z]{0,2}",       // country: 0-2 uppercase ASCII chars
-            0u32..=1024u32,     // bitrate
+            "[^\n]{1,100}",                          // genre: non-empty, no newlines
+            "[A-Z]{0,2}",                            // country: 0-2 uppercase ASCII chars
+            0u32..=1024u32,                          // bitrate
         )
             .prop_map(|(name, url, genre, country, bitrate)| {
                 // Trim name/genre to ensure round-trip stability (from_m3u trims parsed values)
                 let name = name.trim().to_string();
                 let genre = genre.trim().to_string();
                 // Ensure non-empty after trim
-                let name = if name.is_empty() { "Station".to_string() } else { name };
-                let genre = if genre.is_empty() { "Genre".to_string() } else { genre };
+                let name = if name.is_empty() {
+                    "Station".to_string()
+                } else {
+                    name
+                };
+                let genre = if genre.is_empty() {
+                    "Genre".to_string()
+                } else {
+                    genre
+                };
                 Station::basic(name, url, genre, country, bitrate)
             })
     }

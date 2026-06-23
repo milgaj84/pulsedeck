@@ -4,6 +4,49 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.6.1] - Unreleased
+
+### Fixed
+- **Unicode library filter matching**: Library filter now uses proper Unicode case folding (`to_lowercase()`) instead of ASCII-only. International station names with accented characters, Cyrillic, etc. now match correctly.
+- **Number jump validates digit input**: `push_digit` now rejects non-digit characters at the domain layer, preventing silent logic errors if invalid input reaches the accumulator.
+- **Number jump cleared on mode switch**: Entering library filter mode while digits are accumulated now clears the number jump state, preventing stale digits from causing unexpected jumps.
+- **Integer-only digit_count**: Replaced floating-point `log10` with an integer loop in the row number width calculation, avoiding potential precision issues.
+
+### Internal
+- 693 tests pass, zero clippy warnings.
+- Added property-based tests for `StationSlots` assign/get roundtrip and out-of-range rejection.
+- Added `NotificationCooldown` multi-record test verifying window reset behavior.
+- Added library filter edge-case tests for regex-special characters (`(`, `[`, `+`, `.*`).
+- Added Unicode case-insensitivity test for library filter.
+
+---
+
+## [0.6.0] - Unreleased
+
+### Added
+- **Fuzzy library search**: Press `Ctrl+l` to activate an in-library substring filter. Type to instantly narrow your saved stations by name, genre, or tag — no network calls, purely in-memory. Navigate filtered results with j/k and press Enter to play. Press Esc to restore the previous view.
+- **Station preset slots**: Press `Ctrl+1`–`Ctrl+5` to assign the currently playing station to a slot. Press `Alt+1`–`Alt+5` to instantly switch to that slot. Slots are fixed — they never shift until you explicitly reassign them. Slots persist across restarts.
+- **Favorites / pinned stations**: Press `*` to star any station. Favorited stations display a ★ indicator and float to the top of their genre category (stable sort preserving insertion order within groups). Favorites persist in your library file.
+- **Station quick-jump by number**: Row numbers now display next to stations in the library. Type digits followed by `G` or `Enter` to jump directly to that row (vim-style). A transient indicator shows your pending count. 1500ms timeout auto-cancels.
+- **Tabbed help overlay**: The help screen (`h` / `?`) is now organized into 6 tabs — Playback, Library, Search, Visuals, Settings, App. Use `Tab` / `Shift+Tab` to cycle between tabs.
+
+### Fixed
+- **Notification swarm on WSL**: Desktop notifications no longer flood when multiple track titles arrive in quick succession (stream reconnection, station switch, chatty ICY metadata). A 5-second cooldown between notifications ensures at most one fires per burst while internal track state and song history continue to update for every event.
+
+### Changed
+- **Help overlay reorganized**: Controls are now grouped into logical tabs instead of one long scrollable list. Each tab focuses on a specific area (playback, library management, search, visuals, settings, app lifecycle).
+
+### Internal
+- 686 tests pass, zero clippy warnings.
+- 4 new domain modules: `library_filter`, `recent_ring`, `favorites_set`, `number_jump`.
+- `NotificationCooldown` struct enforces rate-limiting for desktop notifications.
+- New `InputMode::LibraryFilter` variant with fully isolated key mapping.
+- 11 new Action variants for the four library UX features.
+- Property-based tests for `NotificationCooldown` boundary conditions.
+- Persistence backward-compatible via `#[serde(default)]` — existing `library.json` files load cleanly.
+
+---
+
 ## [0.5.1] - Unreleased
 
 ### Added

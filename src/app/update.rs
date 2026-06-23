@@ -54,6 +54,24 @@ impl App {
             Action::NextGenre => self.next_genre(),
             Action::PrevGenre => self.prev_genre(),
 
+            Action::EnterLibraryFilter => self.enter_library_filter(),
+            Action::ExitLibraryFilter => self.exit_library_filter(),
+            Action::LibraryFilterInput(c) => self.library_filter_input(c),
+            Action::LibraryFilterBackspace => self.library_filter_backspace(),
+            Action::LibraryFilterConfirm => self.library_filter_confirm(),
+
+            // Station preset slots
+            Action::PlaySlot(n) => self.play_slot(n),
+            Action::AssignSlot(n) => self.assign_slot(n),
+
+            // Favorites (handler added in task 13)
+            Action::ToggleFavorite => self.toggle_favorite(),
+
+            // Number jump
+            Action::NumberJumpDigit(c) => self.handle_number_jump_digit(c),
+            Action::NumberJumpConfirm => self.handle_number_jump_confirm(),
+            Action::NumberJumpCancel => self.handle_number_jump_cancel(),
+
             Action::ToggleHelp => self.toggle_help(),
             Action::ToggleStationDetails => self.toggle_station_details(),
             Action::ToggleRecentTracks => self.toggle_recent_tracks(),
@@ -85,6 +103,7 @@ impl App {
         self.update_visualizer();
         self.drive_reconnect(now);
         self.check_sleep_timer(now);
+        self.check_number_jump_timeout(now);
         self.flush_persistence();
     }
 
@@ -98,6 +117,10 @@ impl App {
     }
 
     fn next_station(&mut self) {
+        if self.ui.input_mode == InputMode::LibraryFilter {
+            self.library_filter_next();
+            return;
+        }
         let count = self.visible_count();
         if count > 0 {
             self.ui.nav.selected = (self.ui.nav.selected + 1) % count;
@@ -105,6 +128,10 @@ impl App {
     }
 
     fn prev_station(&mut self) {
+        if self.ui.input_mode == InputMode::LibraryFilter {
+            self.library_filter_prev();
+            return;
+        }
         let count = self.visible_count();
         if count > 0 {
             self.ui.nav.selected = if self.ui.nav.selected == 0 {
@@ -115,7 +142,6 @@ impl App {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

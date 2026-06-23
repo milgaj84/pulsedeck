@@ -36,8 +36,12 @@ mod tests {
 
     #[test]
     fn ui_runtime_uses_loaded_layout_and_visualizer_mode() {
-        let ui_state =
-            super::super::ui_state::UiState::from_app_values(42, true, LayoutMode::RightOnly, VisualizerMode::SimOscilloscope);
+        let ui_state = super::super::ui_state::UiState::from_app_values(
+            42,
+            true,
+            LayoutMode::RightOnly,
+            VisualizerMode::SimOscilloscope,
+        );
 
         let runtime = UiRuntimeState::from_ui_state(&ui_state);
 

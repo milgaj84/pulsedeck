@@ -88,8 +88,8 @@ impl OutputManager {
 
         self.recovery_retries = self.recovery_retries.saturating_add(1);
 
-        let sel = open_output_stream(self.preferred_device.as_deref())
-            .map_err(EngineError::Output)?;
+        let sel =
+            open_output_stream(self.preferred_device.as_deref()).map_err(EngineError::Output)?;
 
         self.stream = Some(sel.stream);
         self.handle = Some(sel.handle);
@@ -113,10 +113,9 @@ impl OutputManager {
         // via `Sink::new`).
         self.ensure_open()?;
 
-        let handle = self
-            .handle
-            .as_ref()
-            .ok_or_else(|| EngineError::Output("output handle lost after ensure_open".to_string()))?;
+        let handle = self.handle.as_ref().ok_or_else(|| {
+            EngineError::Output("output handle lost after ensure_open".to_string())
+        })?;
 
         let sink = Sink::try_new(handle)
             .map_err(|e| EngineError::Output(format!("failed to create sink: {e}")))?;

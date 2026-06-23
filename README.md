@@ -43,13 +43,17 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 🎛️ **Three-way dashboard layout**: press `b` to cycle Split View, Library Focus, and Signal Focus
 - 📊 **Deck visualizers**: press `v` to cycle RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope
 - 💾 **Library management**: saved stations persist between sessions, rows show compact country/bitrate/health metadata, and removals are undoable with `u`
+- 🔎 **Fuzzy library search**: press `Ctrl+l` to instantly filter saved stations by name, genre, or tag — no network, pure in-memory substring matching
+- ⭐ **Favorites & pinned stations**: star your daily drivers with `*` — they float to the top of their genre with a ★ indicator
+- ⏪ **Station preset slots**: `Ctrl+1`–`Ctrl+5` assigns the playing station to a slot; `Alt+1`–`Alt+5` plays it back — like TV preset buttons that never shift
+- 🔢 **Station quick-jump by number**: row numbers display next to stations; type `{n}G` to jump directly (vim-style)
 - 🪪 **Station details**: press `i` in normal mode to inspect grouped identity, playback, catalog, and health metadata for the highlighted station
 - 🧭 **Command palette**: press `:` or `Ctrl+p` to search and run common actions, including metadata refresh, settings, help, export, retry, and Playback Doctor
 - 🧾 **Persistent History**: opt-in settings to save song titles to `history.json` and persist across runs; view with `g`
 - 💤 **Sleep Timer**: press `t` to open a sleep-timer panel; nudge by 5 minutes with ↑ / ↓, jump to presets (15-120 min) with number keys, turn it off with `0` / `c`, and playback fades out and stops when time is up
 - 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line with preview and enrich-only modes
 - 🩺 **Playback Doctor**: press `d` to inspect output, metadata, reconnect, decoder, recent events, and recovery hints while troubleshooting a stream
-- 🔔 **Desktop notifications**: a quiet system notification can show the current track when a new song starts
+- 🔔 **Desktop notifications**: a quiet system notification shows the current track when a new song starts, rate-limited to one per 5 seconds to prevent notification floods during stream reconnects
 - 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
 - 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
@@ -102,6 +106,11 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Esc` | Search or overlay | Leave search / close overlay |
 | `f` | Library only | Remove the highlighted station from your **Library** |
 | `u` | Library only | Undo the most recent station removal |
+| `Ctrl+l` | Library | Fuzzy filter saved stations (type to search) |
+| `*` | Library | Toggle favorite (★ pin to top of genre) |
+| `{n}G` or `{n}Enter` | Library | Jump to row number (vim-style) |
+| `Ctrl+1`–`Ctrl+5` | Normal mode | Assign playing station to preset slot |
+| `Alt+1`–`Alt+5` | Normal mode | Play station from preset slot |
 | `Tab` / `Shift+Tab` | Library | Switch genre categories |
 | `i` | Library | Show details for the highlighted station |
 | `d` | Library / playback | Open Playback Doctor diagnostics |
@@ -285,7 +294,7 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
-**528 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, and sleep timer state transitions.
+**693 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, and number jump clamping.
 
 ---
 

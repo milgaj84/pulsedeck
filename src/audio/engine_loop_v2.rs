@@ -18,8 +18,8 @@ use std::time::Duration;
 use super::output_manager::OutputManager;
 use super::supervisor::ConnectionSupervisor;
 use super::types::{
-    ConnectRequest, EndReason, EngineError, EngineEvent, EngineState,
-    PlaybackOptions, PrebufferConfig,
+    ConnectRequest, EndReason, EngineError, EngineEvent, EngineState, PlaybackOptions,
+    PrebufferConfig,
 };
 use super::volume::{clamp_volume, VolumeRamp};
 use super::{AudioCommand, AudioStatus, MAX_HARDWARE_RECOVERY_RETRIES};
@@ -60,10 +60,7 @@ impl EngineLoop {
     // -----------------------------------------------------------------------
 
     /// Creates a new `EngineLoop` in `Idle` state.
-    fn new(
-        status_tx: mpsc::Sender<AudioStatus>,
-        sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    ) -> Self {
+    fn new(status_tx: mpsc::Sender<AudioStatus>, sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
         let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
         Self {
             state: EngineState::Idle,
@@ -136,12 +133,7 @@ impl EngineLoop {
                 });
                 self.emit(AudioStatus::Connecting);
                 self.supervisor.spawn(
-                    ConnectRequest::new(
-                        gen,
-                        url,
-                        default_prebuffer_config(),
-                        self.options.clone(),
-                    ),
+                    ConnectRequest::new(gen, url, default_prebuffer_config(), self.options.clone()),
                     self.event_tx.clone(),
                     Arc::clone(&self.sample_buffer),
                 );
@@ -201,7 +193,10 @@ impl EngineLoop {
         }
 
         match ev {
-            EngineEvent::Buffering { percent, generation } => {
+            EngineEvent::Buffering {
+                percent,
+                generation,
+            } => {
                 // Only update state if we're in Connecting or Buffering.
                 let new_state = match &self.state {
                     EngineState::Connecting { url, .. } => Some(EngineState::Buffering {
@@ -355,10 +350,7 @@ impl EngineLoop {
                         );
                     } else {
                         let status_str = error.to_status_string();
-                        self.transition_to(EngineState::Failed {
-                            url: None,
-                            error,
-                        });
+                        self.transition_to(EngineState::Failed { url: None, error });
                         self.emit(AudioStatus::Error(status_str));
                     }
                 }
@@ -384,10 +376,7 @@ impl EngineLoop {
     /// emits `Connecting`. On exhaustion, emits `Error`.
     fn try_recover_output(&mut self) {
         let url = self.current_url().map(str::to_string);
-        self.fail_or_recover(
-            EngineError::Output("output device lost".to_string()),
-            url,
-        );
+        self.fail_or_recover(EngineError::Output("output device lost".to_string()), url);
     }
 }
 
@@ -419,9 +408,9 @@ mod tests {
 
     /// Returns `true` if any status in `statuses` matches the discriminant of `expected`.
     fn has_status(statuses: &[AudioStatus], expected: &AudioStatus) -> bool {
-        statuses.iter().any(|s| {
-            std::mem::discriminant(s) == std::mem::discriminant(expected)
-        })
+        statuses
+            .iter()
+            .any(|s| std::mem::discriminant(s) == std::mem::discriminant(expected))
     }
 
     // -----------------------------------------------------------------------
@@ -494,7 +483,10 @@ mod tests {
             .count();
 
         assert!(matches!(engine.state, EngineState::Idle));
-        assert_eq!(stopped_count, 1, "expected exactly one Stopped, got {stopped_count}");
+        assert_eq!(
+            stopped_count, 1,
+            "expected exactly one Stopped, got {stopped_count}"
+        );
     }
 
     #[test]
@@ -515,7 +507,10 @@ mod tests {
             .count();
 
         assert!(matches!(engine.state, EngineState::Idle));
-        assert_eq!(stopped_count, 1, "expected exactly one Stopped, got {stopped_count}");
+        assert_eq!(
+            stopped_count, 1,
+            "expected exactly one Stopped, got {stopped_count}"
+        );
     }
 
     #[test]
@@ -536,7 +531,10 @@ mod tests {
             .count();
 
         assert!(matches!(engine.state, EngineState::Idle));
-        assert_eq!(stopped_count, 1, "expected exactly one Stopped, got {stopped_count}");
+        assert_eq!(
+            stopped_count, 1,
+            "expected exactly one Stopped, got {stopped_count}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -674,11 +672,10 @@ mod tests {
         let _ = drain_status(&status_rx);
 
         // Build a dummy source to use in the event.
-        let dummy_source: super::super::types::DecodedSource =
-            Box::new({
-                use rodio::Source;
-                rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
-            });
+        let dummy_source: super::super::types::DecodedSource = Box::new({
+            use rodio::Source;
+            rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
+        });
         let format = super::super::types::StreamFormat {
             codec: "MP3".into(),
             sample_rate: 44100,
@@ -722,11 +719,10 @@ mod tests {
         };
         let _ = drain_status(&status_rx);
 
-        let dummy_source: super::super::types::DecodedSource =
-            Box::new({
-                use rodio::Source;
-                rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
-            });
+        let dummy_source: super::super::types::DecodedSource = Box::new({
+            use rodio::Source;
+            rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
+        });
         let format = super::super::types::StreamFormat {
             codec: "MP3".into(),
             sample_rate: 44100,
@@ -760,7 +756,10 @@ mod tests {
         engine.handle_command(AudioCommand::Pause);
         let statuses = drain_status(&status_rx);
         assert!(matches!(engine.state, EngineState::Idle));
-        assert!(statuses.is_empty(), "no status should be emitted on no-op Pause");
+        assert!(
+            statuses.is_empty(),
+            "no status should be emitted on no-op Pause"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -773,7 +772,10 @@ mod tests {
         engine.handle_command(AudioCommand::Resume);
         let statuses = drain_status(&status_rx);
         assert!(matches!(engine.state, EngineState::Idle));
-        assert!(statuses.is_empty(), "no status should be emitted on no-op Resume");
+        assert!(
+            statuses.is_empty(),
+            "no status should be emitted on no-op Resume"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -830,7 +832,10 @@ mod tests {
             "state should not change on Abandoned, got {:?}",
             engine.state,
         );
-        assert!(statuses.is_empty(), "no status should be emitted for Abandoned");
+        assert!(
+            statuses.is_empty(),
+            "no status should be emitted for Abandoned"
+        );
     }
 
     // -----------------------------------------------------------------------

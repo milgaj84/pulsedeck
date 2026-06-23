@@ -51,14 +51,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
     // ── Render Station List ───────────────────────────────────────
     let row_width = list_area.width.saturating_sub(4) as usize;
+    let is_library_mode =
+        app.input_mode == InputMode::Normal || app.input_mode == InputMode::LibraryFilter;
+    let row_number_width = if is_library_mode {
+        digit_count(visible.len())
+    } else {
+        0
+    };
     let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
         .map(|(idx, station)| {
             let is_playing = app.player.playing_url.as_ref() == Some(&station.url);
             let is_selected = app.nav.selected == idx;
-            let is_saved_search_result =
-                app.input_mode == InputMode::Search && app.library.contains_station(station);
 
             let cursor = station_cursor(is_playing, is_selected);
             let cursor_style = if is_playing {
@@ -69,12 +74,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
                 theme::dim()
             };
 
-            let save_marker = if is_saved_search_result { "★ " } else { "  " };
-            let save_style = if is_saved_search_result {
-                Style::default().fg(theme::warm())
+            // In Search mode: ★ marks stations already saved in library.
+            // In Normal/LibraryFilter mode: ★ marks favorited stations.
+            let (save_marker, save_style) = if app.input_mode == InputMode::Search {
+                let is_saved = app.library.contains_station(station);
+                if is_saved {
+                    ("★ ", Style::default().fg(theme::warm()))
+                } else {
+                    ("  ", theme::dim())
+                }
+            } else if is_library_mode && app.favorites.contains(&station.url) {
+                ("★ ", Style::default().fg(theme::warm()))
             } else {
-                theme::dim()
+                ("  ", theme::dim())
             };
+
+            // Row number prefix (only in Normal/LibraryFilter mode)
+            let row_number_str = if is_library_mode {
+                format!("{:>width$} ", idx + 1, width = row_number_width)
+            } else {
+                String::new()
+            };
+            let row_number_style = theme::dim();
 
             let name_style = station_name_style(is_playing, is_selected, idx);
             let meta_style = if is_selected {
@@ -89,6 +110,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             let meta_chip = format!(" {} ", meta);
             let fixed_width = crate::text::visible_len(cursor)
                 + crate::text::visible_len(save_marker)
+                + crate::text::visible_len(&row_number_str)
                 + crate::text::visible_len(&meta_chip)
                 + 2;
             let name_width = row_width.saturating_sub(fixed_width).max(8);
@@ -101,6 +123,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             let padding = row_width.saturating_sub(
                 crate::text::visible_len(cursor)
                     + crate::text::visible_len(save_marker)
+                    + crate::text::visible_len(&row_number_str)
                     + crate::text::visible_len(&name)
                     + crate::text::visible_len(&meta_chip),
             );
@@ -108,6 +131,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             ListItem::new(Line::from(vec![
                 Span::styled(cursor, cursor_style),
                 Span::styled(save_marker, save_style),
+                Span::styled(row_number_str, row_number_style),
                 Span::styled(name, name_style),
                 Span::raw(" ".repeat(padding)),
                 Span::styled(meta_chip, meta_style),
@@ -178,6 +202,21 @@ fn onboarding_hint(key: &'static str, label: &'static str) -> Line<'static> {
         Span::styled("  ", theme::dim()),
         Span::styled(label, theme::dim()),
     ])
+}
+
+/// Return the number of decimal digits needed to display `n`.
+/// Returns 1 for n == 0.
+fn digit_count(n: usize) -> usize {
+    if n == 0 {
+        return 1;
+    }
+    let mut count = 0;
+    let mut value = n;
+    while value > 0 {
+        count += 1;
+        value /= 10;
+    }
+    count
 }
 
 fn station_cursor(is_playing: bool, is_selected: bool) -> &'static str {
@@ -320,6 +359,8 @@ fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> String {
                 search_title_label(&app.search.query)
             )
         }
+    } else if app.library_filter_active {
+        library_filter_title(app.library_filter_query, visible_count)
     } else if visible_count == 0 {
         " ◇ Empty Library — press / to search ".to_string()
     } else {
@@ -329,7 +370,26 @@ fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> String {
             .get(app.nav.selected_genre_idx)
             .map(|s| s.as_str())
             .unwrap_or("All");
-        format!(" ◇ Library / {} ({}) ", genre_name, visible_count)
+        let base = format!(" ◇ Library / {} ({}) ", genre_name, visible_count);
+        append_number_jump_indicator(&base, app)
+    }
+}
+
+fn append_number_jump_indicator(base: &str, app: &UiModel<'_>) -> String {
+    if app.number_jump_active {
+        format!("{}│ → {} ", base, app.number_jump_display)
+    } else {
+        base.to_string()
+    }
+}
+
+fn library_filter_title(query: &str, visible_count: usize) -> String {
+    if query.is_empty() {
+        " ◇ Library Filter: ▎ ".to_string()
+    } else if visible_count == 0 {
+        format!(" ◇ Library Filter: {} — no matches ", query)
+    } else {
+        format!(" ◇ Library Filter: {}▎ ", query)
     }
 }
 
@@ -581,5 +641,169 @@ mod tests {
         let truncated = truncate_station_name("São Paulo Rádio Underground", Some("rádio"), 10);
 
         assert!(truncated.contains("Rádio"));
+    }
+
+    #[test]
+    fn library_filter_title_shows_cursor_when_query_empty() {
+        let title = library_filter_title("", 5);
+        assert_eq!(title, " ◇ Library Filter: ▎ ");
+    }
+
+    #[test]
+    fn library_filter_title_shows_query_with_cursor() {
+        let title = library_filter_title("soma", 3);
+        assert_eq!(title, " ◇ Library Filter: soma▎ ");
+    }
+
+    #[test]
+    fn library_filter_title_shows_no_matches_indicator() {
+        let title = library_filter_title("zzz", 0);
+        assert_eq!(title, " ◇ Library Filter: zzz — no matches ");
+    }
+
+    #[test]
+    fn station_list_title_uses_filter_title_when_filter_active() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::LibraryFilter;
+        app.library_filter_query = "synth".to_string();
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("Library Filter"));
+        assert!(title.contains("synth"));
+        assert!(title.contains("▎"));
+    }
+
+    #[test]
+    fn station_list_title_shows_normal_when_filter_inactive() {
+        let app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("Library"));
+        assert!(!title.contains("Filter:"));
+    }
+
+    #[test]
+    fn station_list_title_shows_number_jump_indicator_when_active() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.number_jump.push_digit('4');
+        app.number_jump.push_digit('2');
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(title.contains("│ → 42"));
+    }
+
+    #[test]
+    fn station_list_title_hides_number_jump_indicator_when_inactive() {
+        let app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        let model = UiModel::from(&app);
+
+        let title = station_list_title(&model, 1);
+        assert!(!title.contains("│ →"));
+    }
+
+    #[test]
+    fn digit_count_returns_correct_width() {
+        assert_eq!(digit_count(0), 1);
+        assert_eq!(digit_count(1), 1);
+        assert_eq!(digit_count(9), 1);
+        assert_eq!(digit_count(10), 2);
+        assert_eq!(digit_count(99), 2);
+        assert_eq!(digit_count(100), 3);
+        assert_eq!(digit_count(999), 3);
+        assert_eq!(digit_count(1000), 4);
+    }
+
+    #[test]
+    fn favorite_indicator_shown_for_favorited_station() {
+        let mut app = App::new(Library::in_memory(vec![
+            crate::radio::Station::basic("A", "http://a", "Synthwave", "US", 128),
+            crate::radio::Station::basic("B", "http://b", "Synthwave", "US", 128),
+        ]));
+        app.library.settings.favorites.toggle("http://a");
+        let model = UiModel::from(&app);
+
+        assert!(model.favorites.contains("http://a"));
+        assert!(!model.favorites.contains("http://b"));
+    }
+
+    #[test]
+    fn row_number_format_single_digit_list() {
+        let width = digit_count(5);
+        assert_eq!(width, 1);
+        let row_str = format!("{:>width$} ", 1, width = width);
+        assert_eq!(row_str, "1 ");
+        let row_str = format!("{:>width$} ", 5, width = width);
+        assert_eq!(row_str, "5 ");
+    }
+
+    #[test]
+    fn row_number_format_double_digit_list() {
+        let width = digit_count(12);
+        assert_eq!(width, 2);
+        let row_str = format!("{:>width$} ", 1, width = width);
+        assert_eq!(row_str, " 1 ");
+        let row_str = format!("{:>width$} ", 12, width = width);
+        assert_eq!(row_str, "12 ");
+    }
+
+    #[test]
+    fn row_number_not_shown_in_search_mode() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::Search;
+        let model = UiModel::from(&app);
+
+        let is_library_mode =
+            model.input_mode == InputMode::Normal || model.input_mode == InputMode::LibraryFilter;
+        assert!(!is_library_mode);
+    }
+
+    #[test]
+    fn row_number_shown_in_library_filter_mode() {
+        let mut app = App::new(Library::in_memory(vec![crate::radio::Station::basic(
+            "A",
+            "http://a",
+            "Synthwave",
+            "US",
+            128,
+        )]));
+        app.ui.input_mode = InputMode::LibraryFilter;
+        let model = UiModel::from(&app);
+
+        let is_library_mode =
+            model.input_mode == InputMode::Normal || model.input_mode == InputMode::LibraryFilter;
+        assert!(is_library_mode);
     }
 }

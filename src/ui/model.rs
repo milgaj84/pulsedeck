@@ -6,6 +6,7 @@ use crate::app::{
     VisualizerMode,
 };
 use crate::favorites::Library;
+use crate::favorites_set::FavoritesSet;
 use crate::history::History;
 use crate::radio::Station;
 
@@ -30,6 +31,11 @@ pub struct UiModel<'a> {
     pub samples: Vec<f32>,
     pub visualizer_mode: VisualizerMode,
     pub visualizer_peaks: &'a [f32],
+    pub library_filter_query: &'a str,
+    pub library_filter_active: bool,
+    pub number_jump_display: &'a str,
+    pub number_jump_active: bool,
+    pub favorites: &'a FavoritesSet,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -102,6 +108,11 @@ impl<'a> From<&'a App> for UiModel<'a> {
             samples,
             visualizer_mode: app.ui.visualizer_mode,
             visualizer_peaks: &app.ui.visualizer_peaks,
+            library_filter_query: &app.library_filter_query,
+            library_filter_active: app.ui.input_mode == InputMode::LibraryFilter,
+            number_jump_display: app.number_jump.display(),
+            number_jump_active: app.number_jump.is_active(),
+            favorites: &app.library.settings.favorites,
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }
