@@ -1044,4 +1044,194 @@ mod tests {
         );
         assert!(lib.stations[0].health.last_error_summary.is_empty());
     }
+
+    #[test]
+    fn metadata_refresh_notice_contains_values_in_order() {
+        let notice = MetadataRefreshSummary {
+            checked: 10,
+            enriched: 3,
+            unchanged: 6,
+            failed: 1,
+        }
+        .notice();
+
+        let pos_10 = notice.find("10").expect("should contain '10'");
+        let pos_3 = notice[pos_10..].find('3').map(|p| p + pos_10).expect("should contain '3' after '10'");
+        let pos_6 = notice[pos_3..].find('6').map(|p| p + pos_3).expect("should contain '6' after '3'");
+        let pos_1 = notice[pos_6..].find('1').map(|p| p + pos_6).expect("should contain '1' after '6'");
+        assert!(pos_10 < pos_3);
+        assert!(pos_3 < pos_6);
+        assert!(pos_6 < pos_1);
+    }
+
+    #[test]
+    fn metadata_refresh_notice_all_zero_contains_four_zeros() {
+        let notice = MetadataRefreshSummary {
+            checked: 0,
+            enriched: 0,
+            unchanged: 0,
+            failed: 0,
+        }
+        .notice();
+
+        assert!(!notice.is_empty());
+        let zero_count = notice.matches('0').count();
+        assert!(
+            zero_count >= 4,
+            "expected at least 4 occurrences of '0', got {zero_count} in: {notice}"
+        );
+    }
+
+    #[test]
+    fn metadata_refresh_notice_contains_field_labels() {
+        let notice = MetadataRefreshSummary {
+            checked: 10,
+            enriched: 3,
+            unchanged: 6,
+            failed: 1,
+        }
+        .notice();
+
+        assert!(notice.contains("checked"), "missing 'checked' in: {notice}");
+        assert!(notice.contains("enriched"), "missing 'enriched' in: {notice}");
+        assert!(notice.contains("unchanged"), "missing 'unchanged' in: {notice}");
+        assert!(notice.contains("failed"), "missing 'failed' in: {notice}");
+    }
+
+    #[test]
+    fn mark_station_success_returns_true_and_updates_health_for_matching_url() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let result = lib.mark_station_success("http://stream.example.com/live", "2024-01-15T10:00:00Z".to_string());
+
+        assert!(result);
+        assert_eq!(
+            lib.stations[0].health.last_success_at.as_deref(),
+            Some("2024-01-15T10:00:00Z")
+        );
+        assert!(lib.stations[0].health.last_error_summary.is_empty());
+    }
+
+    #[test]
+    fn mark_station_success_returns_false_for_non_matching_url() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let result = lib.mark_station_success("http://other.example.com/stream", "2024-01-15T10:00:00Z".to_string());
+
+        assert!(!result);
+        assert!(lib.stations[0].health.last_success_at.is_none());
+        assert!(lib.stations[0].health.last_failure_at.is_none());
+        assert_eq!(lib.stations[0].health.failure_count, None);
+        assert!(lib.stations[0].health.last_error_summary.is_empty());
+    }
+
+    #[test]
+    fn mark_station_failure_returns_true_and_updates_health_for_matching_url() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let long_error = "a".repeat(200);
+        let result = lib.mark_station_failure(
+            "http://stream.example.com/live",
+            "2024-01-15T10:05:00Z".to_string(),
+            &long_error,
+        );
+
+        assert!(result);
+        assert_eq!(
+            lib.stations[0].health.last_failure_at.as_deref(),
+            Some("2024-01-15T10:05:00Z")
+        );
+        assert_eq!(lib.stations[0].health.failure_count, Some(1));
+        // Error summary is truncated to 96 characters
+        assert!(lib.stations[0].health.last_error_summary.chars().count() <= 96);
+        assert!(!lib.stations[0].health.last_error_summary.is_empty());
+    }
+
+    #[test]
+    fn mark_station_failure_consecutive_calls_increment_failure_count() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        lib.mark_station_failure("http://stream.example.com/live", "t1".to_string(), "err1");
+        lib.mark_station_failure("http://stream.example.com/live", "t2".to_string(), "err2");
+        lib.mark_station_failure("http://stream.example.com/live", "t3".to_string(), "err3");
+
+        assert_eq!(lib.stations[0].health.failure_count, Some(3));
+    }
+
+    #[test]
+    fn mark_station_failure_returns_false_for_non_matching_url() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        let result = lib.mark_station_failure(
+            "http://other.example.com/stream",
+            "2024-01-15T10:05:00Z".to_string(),
+            "connection refused",
+        );
+
+        assert!(!result);
+        assert!(lib.stations[0].health.last_success_at.is_none());
+        assert!(lib.stations[0].health.last_failure_at.is_none());
+        assert_eq!(lib.stations[0].health.failure_count, None);
+        assert!(lib.stations[0].health.last_error_summary.is_empty());
+    }
+
+    #[test]
+    fn mark_station_success_after_failures_clears_error_but_preserves_failure_history() {
+        let mut lib = Library::in_memory(vec![Station::basic(
+            "Test FM",
+            "http://stream.example.com/live",
+            "Synthwave",
+            "US",
+            128,
+        )]);
+
+        // Record some failures first
+        lib.mark_station_failure("http://stream.example.com/live", "t1".to_string(), "timeout");
+        lib.mark_station_failure("http://stream.example.com/live", "t2".to_string(), "timeout");
+
+        assert_eq!(lib.stations[0].health.failure_count, Some(2));
+        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("t2"));
+        assert!(!lib.stations[0].health.last_error_summary.is_empty());
+
+        // Now mark success
+        lib.mark_station_success("http://stream.example.com/live", "t3".to_string());
+
+        // last_error_summary is cleared
+        assert!(lib.stations[0].health.last_error_summary.is_empty());
+        // failure_count and last_failure_at are preserved
+        assert_eq!(lib.stations[0].health.failure_count, Some(2));
+        assert_eq!(lib.stations[0].health.last_failure_at.as_deref(), Some("t2"));
+        // last_success_at is set
+        assert_eq!(lib.stations[0].health.last_success_at.as_deref(), Some("t3"));
+    }
 }

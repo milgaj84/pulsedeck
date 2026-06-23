@@ -6,6 +6,24 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [0.5.1] - Unreleased
 
+### Added
+- **Comprehensive test coverage**: Added 60+ new tests across 11 modules covering previously untested public functions, error paths, state transitions, and data transformations.
+  - Unit tests for `ThemeName` module (from_key, key round-trip, label, ALL)
+  - Unit tests for `Station::enrich_from` covering all 9 field-path scenarios
+  - Unit tests for `StationHealth::is_empty` covering each field trigger
+  - Unit tests for FFT functions (`fft_rec`, `average_log_band_energy`) including pure-sine peak verification
+  - Unit tests for `Library::mark_station_success` / `mark_station_failure` health tracking
+  - Unit tests for `MetadataRefreshSummary::notice` format verification
+  - State transition tests for `SleepTimer` pause/resume/clear behavior
+  - Boundary tests for `Reconnect` backoff timing (exact deadline, 1ns before, exhaustion persistence)
+  - Edge-case tests for `clean_tag_values` case-insensitive deduplication
+  - Edge-case tests for command palette filtering (empty, no-match, multi-token, whitespace trimming)
+  - Edge-case tests for ICY metadata parsing (multiple keys, missing delimiter, unicode, embedded quotes)
+  - Property-based tests for station normalization functions (country code, codec, bitrate, URL, reflexivity)
+  - Property-based tests for playlist serialization round-trips (JSON and M3U)
+  - Property-based test for volume output fraction bounds and mute invariant
+  - Property-based tests for genre filtering count/length consistency and "All"/None identity
+
 ### Changed
 - **ThemeName extracted to cross-cutting module**: `ThemeName` now lives in `src/theme_name.rs`, removing the `app-state → ui-rendering` boundary violation (F-06).
 - **UiModel sample buffer snapshot**: `UiModel` now holds a pre-copied `Vec<f32>` instead of `&Arc<Mutex<VecDeque<f32>>>`, eliminating interior-mutable shared state in the render path (F-07).
@@ -32,7 +50,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Internal
 - Added 11 tests to `src/app/update.rs` covering mode-gating, action routing, and overlay isolation (F-03).
 - Gated 6 dead-code functions with `#[cfg(test)]` instead of `#[allow(dead_code)]`: `load_json`, `is_codec_playback_supported`, `active_generation_arc`, `set_volume`, `reopen_needed`/`clear_reopen_needed`, `begin_fade_out`, `is_done` (F-28).
-- 459 tests pass, zero warnings, `cargo build --release` clean.
+- 528 tests pass, zero warnings, `cargo build --release` clean.
 
 ---
 

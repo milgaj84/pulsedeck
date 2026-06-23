@@ -345,4 +345,43 @@ mod tests {
         assert!(SLEEP_PRESETS.iter().all(|m| *m <= SLEEP_MAX_MINUTES));
         assert!(SLEEP_PRESETS.windows(2).all(|w| w[0] < w[1]));
     }
+
+    #[test]
+    fn pause_resume_preserves_remaining_time() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes(15, now);
+        timer.pause(now + Duration::from_secs(2 * 60));
+        timer.start(now + Duration::from_secs(10 * 60));
+
+        let remaining = timer.remaining(now + Duration::from_secs(10 * 60)).unwrap();
+        assert_eq!(remaining.as_secs(), 780); // 13 minutes = 780 seconds
+    }
+
+    #[test]
+    fn waiting_timer_returns_full_duration_regardless_of_wall_time() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes_waiting(15);
+
+        let remaining = timer.remaining(now + Duration::from_secs(99 * 60)).unwrap();
+        assert_eq!(remaining.as_secs(), 900); // 15 minutes = 900 seconds
+    }
+
+    #[test]
+    fn clear_resets_armed_timer() {
+        let now = Instant::now();
+        let mut timer = SleepTimer::default();
+
+        timer.set_minutes(30, now);
+        assert!(timer.is_armed());
+
+        timer.clear();
+
+        assert_eq!(timer.minutes(), 0);
+        assert!(!timer.is_armed());
+        assert!(timer.remaining(now).is_none());
+    }
 }

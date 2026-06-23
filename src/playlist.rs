@@ -131,3 +131,108 @@ mod tests {
         assert_eq!(parsed, stations);
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Strategy for generating valid Station instances for playlist property tests.
+    ///
+    /// Constraints for M3U round-trip compatibility:
+    /// - Names: non-empty, no newlines, no leading/trailing whitespace (trim-stable)
+    /// - URLs: non-empty, only safe ASCII chars, no '#' prefix, no whitespace
+    /// - Genres: non-empty, no newlines, no leading/trailing whitespace (trim-stable)
+    fn arb_station() -> impl Strategy<Value = Station> {
+        (
+            "[^\n]{1,200}",     // name: non-empty, no newlines
+            "[a-zA-Z0-9_./:~@!$&*+,;=%\\-]{1,2000}", // url: safe ASCII, no whitespace, no '#'
+            "[^\n]{1,100}",     // genre: non-empty, no newlines
+            "[A-Z]{0,2}",       // country: 0-2 uppercase ASCII chars
+            0u32..=1024u32,     // bitrate
+        )
+            .prop_map(|(name, url, genre, country, bitrate)| {
+                // Trim name/genre to ensure round-trip stability (from_m3u trims parsed values)
+                let name = name.trim().to_string();
+                let genre = genre.trim().to_string();
+                // Ensure non-empty after trim
+                let name = if name.is_empty() { "Station".to_string() } else { name };
+                let genre = if genre.is_empty() { "Genre".to_string() } else { genre };
+                Station::basic(name, url, genre, country, bitrate)
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Feature: test-coverage-improvement, Property 6: JSON playlist round-trip**
+        ///
+        /// For any valid Station list, from_json(to_json(stations)) produces an equal list.
+        ///
+        /// **Validates: Requirements 7.1**
+        #[test]
+        fn json_round_trip(stations in proptest::collection::vec(arb_station(), 0..=50)) {
+            let json = to_json(&stations).unwrap();
+            let parsed = from_json(&json).unwrap();
+            prop_assert_eq!(parsed.len(), stations.len());
+            for (original, restored) in stations.iter().zip(parsed.iter()) {
+                prop_assert_eq!(&original.name, &restored.name);
+                prop_assert_eq!(&original.url, &restored.url);
+                prop_assert_eq!(&original.genre, &restored.genre);
+                prop_assert_eq!(&original.country, &restored.country);
+                prop_assert_eq!(original.bitrate, restored.bitrate);
+            }
+        }
+
+        /// **Feature: test-coverage-improvement, Property 7: M3U playlist round-trip**
+        ///
+        /// For any valid Station list, from_m3u(to_m3u(stations)) produces same length
+        /// list with identical name, URL, and genre per element.
+        ///
+        /// **Validates: Requirements 7.2**
+        #[test]
+        fn m3u_round_trip(stations in proptest::collection::vec(arb_station(), 0..=50)) {
+            let m3u = to_m3u(&stations);
+            let parsed = from_m3u(&m3u);
+            prop_assert_eq!(parsed.len(), stations.len());
+            for (original, restored) in stations.iter().zip(parsed.iter()) {
+                prop_assert_eq!(&original.name, &restored.name);
+                prop_assert_eq!(&original.url, &restored.url);
+                prop_assert_eq!(&original.genre, &restored.genre);
+            }
+        }
+
+        /// **Feature: test-coverage-improvement, Property 8: M3U structural invariant**
+        ///
+        /// For any valid Station list (1–50), to_m3u output starts with `#EXTM3U\n` and
+        /// contains exactly one non-comment, non-empty line per station equal to that station's URL.
+        ///
+        /// **Validates: Requirements 7.3**
+        #[test]
+        fn m3u_structural_invariant(stations in proptest::collection::vec(arb_station(), 1..=50)) {
+            let m3u = to_m3u(&stations);
+            prop_assert!(m3u.starts_with("#EXTM3U\n"));
+
+            let url_lines: Vec<&str> = m3u
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .collect();
+            prop_assert_eq!(url_lines.len(), stations.len());
+            for (station, url_line) in stations.iter().zip(url_lines.iter()) {
+                prop_assert_eq!(*url_line, station.url.as_str());
+            }
+        }
+
+        /// **Feature: test-coverage-improvement, Property 9: JSON output validity**
+        ///
+        /// For any valid Station list, to_json output is parseable by serde_json without error.
+        ///
+        /// **Validates: Requirements 7.4**
+        #[test]
+        fn json_output_validity(stations in proptest::collection::vec(arb_station(), 0..=50)) {
+            let json = to_json(&stations).unwrap();
+            let result: Result<serde_json::Value, _> = serde_json::from_str(&json);
+            prop_assert!(result.is_ok(), "to_json produced invalid JSON: {:?}", result.err());
+        }
+    }
+}

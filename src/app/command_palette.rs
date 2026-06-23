@@ -272,4 +272,55 @@ mod tests {
         assert_eq!(app.ui.input_mode, InputMode::Normal);
         assert!(app.ui.command_palette.query.is_empty());
     }
+
+    #[test]
+    fn empty_query_returns_all_available_commands() {
+        let app = test_app();
+
+        let commands = filtered_commands("", &app);
+
+        assert!(
+            commands.len() >= 8,
+            "Expected at least 8 always-available commands, got {}",
+            commands.len()
+        );
+        assert_eq!(commands.len(), ALWAYS_AVAILABLE_COMMANDS.len());
+    }
+
+    #[test]
+    fn non_matching_query_returns_zero_results() {
+        let app = test_app();
+
+        let commands = filtered_commands("zzz", &app);
+
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn multi_token_conjunctive_matching() {
+        let app = test_app();
+
+        // "open settings" has both "open" and "settings" tokens
+        let commands = filtered_commands("open settings", &app);
+        assert_eq!(commands, vec![PaletteCommand::OpenSettings]);
+
+        // "open" alone matches multiple commands (settings, playback doctor, help)
+        let open_commands = filtered_commands("open", &app);
+        assert!(open_commands.len() > 1);
+
+        // A query where only one token matches but not the other returns nothing
+        let commands = filtered_commands("open zzz", &app);
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn leading_trailing_whitespace_is_trimmed() {
+        let app = test_app();
+
+        let trimmed = filtered_commands("search", &app);
+        let with_whitespace = filtered_commands("  search  ", &app);
+
+        assert_eq!(trimmed, with_whitespace);
+        assert!(!trimmed.is_empty());
+    }
 }

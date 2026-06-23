@@ -141,4 +141,94 @@ mod tests {
         rec.arm("http://b".to_string(), now);
         assert_eq!(rec.attempts, 0);
     }
+
+    #[test]
+    fn test_take_due_at_exact_deadline_returns_url() {
+        let mut rec = Reconnect::default();
+        let now = Instant::now();
+        let url = "http://exact-boundary".to_string();
+
+        rec.arm(url.clone(), now);
+
+        // First backoff is 3 seconds; calling at exactly now + 3s should return the URL.
+        let deadline = now + Duration::from_secs(3);
+        assert_eq!(rec.take_due(deadline), Some(url));
+    }
+
+    #[test]
+    fn test_take_due_one_nanosecond_before_deadline_returns_none() {
+        let mut rec = Reconnect::default();
+        let now = Instant::now();
+        let url = "http://one-ns-early".to_string();
+
+        rec.arm(url, now);
+
+        // 1 nanosecond before the 3-second deadline
+        let before_deadline = now + Duration::from_secs(3) - Duration::from_nanos(1);
+        assert_eq!(rec.take_due(before_deadline), None);
+    }
+
+    #[test]
+    fn test_exhaustion_persists_until_disarm() {
+        let mut rec = Reconnect::default();
+        let now = Instant::now();
+        let url = "http://exhaust-me".to_string();
+
+        // Consume all 3 attempts
+        rec.arm(url.clone(), now);
+        let t1 = now + Duration::from_secs(3);
+        assert!(rec.take_due(t1).is_some());
+
+        rec.arm(url.clone(), t1);
+        let t2 = t1 + Duration::from_secs(6);
+        assert!(rec.take_due(t2).is_some());
+
+        rec.arm(url.clone(), t2);
+        let t3 = t2 + Duration::from_secs(12);
+        assert!(rec.take_due(t3).is_some());
+        assert!(rec.exhausted());
+
+        // Re-arm same URL after exhaustion — take_due must return None
+        rec.arm(url.clone(), t3);
+        let t4 = t3 + Duration::from_secs(100);
+        assert_eq!(rec.take_due(t4), None);
+
+        // Disarm clears exhaustion, allowing re-use
+        rec.disarm();
+        assert!(!rec.exhausted());
+        rec.arm(url.clone(), t4);
+        let t5 = t4 + Duration::from_secs(3);
+        assert_eq!(rec.take_due(t5), Some(url));
+    }
+
+    #[test]
+    fn test_different_url_after_exhaustion_resets_and_fires() {
+        let mut rec = Reconnect::default();
+        let now = Instant::now();
+        let url_a = "http://old-url".to_string();
+        let url_b = "http://new-url".to_string();
+
+        // Exhaust attempts on url_a
+        rec.arm(url_a.clone(), now);
+        let t1 = now + Duration::from_secs(3);
+        assert!(rec.take_due(t1).is_some());
+
+        rec.arm(url_a.clone(), t1);
+        let t2 = t1 + Duration::from_secs(6);
+        assert!(rec.take_due(t2).is_some());
+
+        rec.arm(url_a.clone(), t2);
+        let t3 = t2 + Duration::from_secs(12);
+        assert!(rec.take_due(t3).is_some());
+        assert!(rec.exhausted());
+
+        // Arm a different URL — attempts reset to 0
+        rec.arm(url_b.clone(), t3);
+        assert_eq!(rec.attempts, 0);
+        assert!(!rec.exhausted());
+
+        // After the new backoff (3s), the new URL is returned
+        let t4 = t3 + Duration::from_secs(3);
+        assert_eq!(rec.take_due(t4), Some(url_b));
+    }
 }

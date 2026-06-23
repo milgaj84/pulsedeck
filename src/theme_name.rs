@@ -63,3 +63,50 @@ impl ThemeName {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_key_valid_keys() {
+        assert_eq!(ThemeName::from_key("Retrowave"), ThemeName::Retrowave);
+        assert_eq!(ThemeName::from_key("CatppuccinMocha"), ThemeName::CatppuccinMocha);
+        assert_eq!(ThemeName::from_key("CatppuccinMacchiato"), ThemeName::CatppuccinMacchiato);
+        assert_eq!(ThemeName::from_key("CatppuccinFrappe"), ThemeName::CatppuccinFrappe);
+        assert_eq!(ThemeName::from_key("CatppuccinLatte"), ThemeName::CatppuccinLatte);
+        assert_eq!(ThemeName::from_key("Terminal"), ThemeName::Terminal);
+    }
+
+    #[test]
+    fn test_from_key_unknown_defaults_to_retrowave() {
+        assert_eq!(ThemeName::from_key(""), ThemeName::Retrowave);
+        assert_eq!(ThemeName::from_key("unknown"), ThemeName::Retrowave);
+        assert_eq!(ThemeName::from_key("catppuccin"), ThemeName::Retrowave);
+    }
+
+    #[test]
+    fn test_from_key_round_trip() {
+        for &variant in ThemeName::ALL {
+            assert_eq!(ThemeName::from_key(variant.key()), variant);
+        }
+    }
+
+    #[test]
+    fn test_label_non_empty_with_alphabetic() {
+        for &variant in ThemeName::ALL {
+            let label = variant.label();
+            assert!(!label.is_empty(), "label for {:?} should not be empty", variant);
+            assert!(
+                label.chars().any(|c| c.is_alphabetic()),
+                "label for {:?} should contain at least one alphabetic char",
+                variant,
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_contains_six_elements() {
+        assert_eq!(ThemeName::ALL.len(), 6);
+    }
+}

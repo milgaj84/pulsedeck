@@ -102,3 +102,122 @@ pub(super) fn average_log_band_energy(
         0.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fft_rec_single_element_returns_unchanged() {
+        let input = [Complex::new(3.5, -1.2)];
+        let mut output = [Complex::zero()];
+        fft_rec(&input, &mut output);
+        assert!((output[0].re - 3.5).abs() < 1e-5);
+        assert!((output[0].im - (-1.2)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn fft_rec_four_element_known_output() {
+        // Input: [1, 2, 3, 4] (real-valued)
+        // Expected DFT:
+        //   X[0] = 10 + 0i
+        //   X[1] = -2 + 2i
+        //   X[2] = -2 + 0i
+        //   X[3] = -2 - 2i
+        let input = [
+            Complex::from_real(1.0),
+            Complex::from_real(2.0),
+            Complex::from_real(3.0),
+            Complex::from_real(4.0),
+        ];
+        let mut output = vec![Complex::zero(); 4];
+        fft_rec(&input, &mut output);
+
+        let expected = [
+            Complex::new(10.0, 0.0),
+            Complex::new(-2.0, 2.0),
+            Complex::new(-2.0, 0.0),
+            Complex::new(-2.0, -2.0),
+        ];
+
+        for (i, (out, exp)) in output.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (out.re - exp.re).abs() < 1e-5,
+                "bin {i} real: got {}, expected {}",
+                out.re,
+                exp.re
+            );
+            assert!(
+                (out.im - exp.im).abs() < 1e-5,
+                "bin {i} imag: got {}, expected {}",
+                out.im,
+                exp.im
+            );
+        }
+    }
+
+    #[test]
+    fn average_log_band_energy_all_zeros_returns_zero() {
+        let fft_output = vec![Complex::zero(); 512];
+        let result = average_log_band_energy(&fft_output, 0, 40, 256, 512);
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn average_log_band_energy_nonzero_returns_positive() {
+        // Band 0 with total_bands=40, bins_count=256 covers bins starting at index 1.
+        // Place a non-zero value at bin index 1.
+        let mut fft_output = vec![Complex::zero(); 512];
+        fft_output[1] = Complex::new(5.0, 0.0);
+        let result = average_log_band_energy(&fft_output, 0, 40, 256, 512);
+        assert!(result > 0.0, "expected positive energy, got {result}");
+    }
+
+    #[test]
+    fn fft_rec_output_length_matches_input() {
+        let input: Vec<Complex> = (0..8).map(|i| Complex::from_real(i as f32)).collect();
+        let mut output = vec![Complex::zero(); 8];
+        fft_rec(&input, &mut output);
+        assert_eq!(output.len(), input.len());
+    }
+
+    #[test]
+    fn fft_rec_pure_sine_dominant_peak() {
+        // Pure sine at bin frequency k=1: x[n] = sin(2π·1·n/8)
+        let n = 8;
+        let k = 1;
+        let input: Vec<Complex> = (0..n)
+            .map(|i| {
+                let angle = 2.0 * std::f32::consts::PI * k as f32 * i as f32 / n as f32;
+                Complex::from_real(angle.sin())
+            })
+            .collect();
+        let mut output = vec![Complex::zero(); n];
+        fft_rec(&input, &mut output);
+
+        // Find peak magnitude
+        let magnitudes: Vec<f32> = output.iter().map(|c| c.norm()).collect();
+        let peak = magnitudes
+            .iter()
+            .cloned()
+            .fold(0.0_f32, f32::max);
+
+        // Bin k=1 should be the dominant peak (or bin n-k=7 due to symmetry)
+        let mag_at_k = magnitudes[k];
+        assert!(
+            mag_at_k > peak * 0.9,
+            "bin {k} magnitude {mag_at_k} should be near the peak {peak}"
+        );
+
+        // All other bins (excluding the symmetric bin at n-k) should be below 10% of peak
+        for (i, &mag) in magnitudes.iter().enumerate() {
+            if i == k || i == n - k {
+                continue;
+            }
+            assert!(
+                mag < peak * 0.1,
+                "bin {i} magnitude {mag} should be below 10% of peak {peak}"
+            );
+        }
+    }
+}

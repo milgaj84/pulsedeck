@@ -81,3 +81,61 @@ mod tests {
         assert_eq!(runtime.diagnostics.reconnect_limit, 3);
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use crate::audio::AudioEngine;
+    use proptest::prelude::*;
+
+    /// Helper to construct a PlaybackRuntime with specific volume and muted values.
+    fn runtime_with(volume: u8, muted: bool) -> PlaybackRuntime {
+        let ui_state = super::super::ui_state::UiState::from_app_values(
+            volume,
+            muted,
+            LayoutMode::Split,
+            VisualizerMode::RealOscilloscope,
+        );
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let audio = AudioEngine::disconnected_for_test();
+        PlaybackRuntime::new(&ui_state, "Test".to_string(), false, audio, sample_buffer)
+    }
+
+    proptest! {
+        /// **Feature: test-coverage-improvement, Property 10: Volume fraction bounds and mute invariant**
+        ///
+        /// For any volume in 0..=100 and muted state in {true, false},
+        /// `output_volume_fraction` returns a value in [0.0, 1.0],
+        /// returns 0.0 when muted, returns 1.0 when unmuted at max volume,
+        /// and returns 0.0 when unmuted at zero volume.
+        ///
+        /// **Validates: Requirements 14.1, 14.2, 14.3, 14.4**
+        #[test]
+        fn volume_fraction_bounds_and_mute_invariant(volume in 0u8..=100u8, muted in proptest::bool::ANY) {
+            let runtime = runtime_with(volume, muted);
+            let fraction = runtime.output_volume_fraction();
+
+            // Requirement 14.1: result is always in [0.0, 1.0]
+            prop_assert!(fraction >= 0.0 && fraction <= 1.0,
+                "fraction {} out of bounds for volume={}, muted={}", fraction, volume, muted);
+
+            // Requirement 14.2: muted always yields 0.0
+            if muted {
+                prop_assert_eq!(fraction, 0.0,
+                    "expected 0.0 when muted, got {} for volume={}", fraction, volume);
+            }
+
+            // Requirement 14.3: unmuted at volume 100 yields exactly 1.0
+            if !muted && volume == 100 {
+                prop_assert_eq!(fraction, 1.0,
+                    "expected 1.0 for unmuted volume=100, got {}", fraction);
+            }
+
+            // Requirement 14.4: unmuted at volume 0 yields exactly 0.0
+            if !muted && volume == 0 {
+                prop_assert_eq!(fraction, 0.0,
+                    "expected 0.0 for unmuted volume=0, got {}", fraction);
+            }
+        }
+    }
+}

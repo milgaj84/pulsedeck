@@ -285,6 +285,8 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
+**528 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, and sleep timer state transitions.
+
 ---
 
 ## Built with

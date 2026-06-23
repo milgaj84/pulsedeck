@@ -149,3 +149,72 @@ mod tests {
         assert_eq!(app.ui.nav.selected, 1);
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use crate::radio::Station;
+    use proptest::prelude::*;
+
+    /// Strategy generating genre strings including known parent genres and random strings.
+    fn arb_genre() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("Synthwave".to_string()),
+            Just("Ambient".to_string()),
+            Just("Rock".to_string()),
+            Just("Vaporwave".to_string()),
+            Just("Other".to_string()),
+            "[a-zA-Z ]{0,50}",
+        ]
+    }
+
+    /// Strategy generating a Vec<Station> of 0–50 elements with varied genre strings.
+    fn arb_station_list() -> impl Strategy<Value = Vec<Station>> {
+        prop::collection::vec(
+            (
+                "[a-zA-Z0-9 ]{1,30}",  // name
+                "[a-z]{1,30}",          // url
+                arb_genre(),            // genre
+            )
+                .prop_map(|(name, url, genre)| {
+                    Station::basic(&name, &url, &genre, "US", 128)
+                }),
+            0..=50,
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// **Feature: test-coverage-improvement, Property 11: Genre filter count-length consistency**
+        ///
+        /// For any station list and any genre string, count_stations_by_genre equals
+        /// filter_stations_by_genre(...).len().
+        ///
+        /// **Validates: Requirements 16.1**
+        #[test]
+        fn genre_filter_count_length_consistency(
+            stations in arb_station_list(),
+            genre in arb_genre(),
+        ) {
+            let count = count_stations_by_genre(&stations, Some(&genre));
+            let filtered_len = filter_stations_by_genre(&stations, Some(&genre)).len();
+            prop_assert_eq!(count, filtered_len);
+        }
+
+        /// **Feature: test-coverage-improvement, Property 12: Genre filter "All"/None identity**
+        ///
+        /// For any station list, filtering by "All" or None returns all stations.
+        ///
+        /// **Validates: Requirements 16.2**
+        #[test]
+        fn genre_filter_all_none_identity(
+            stations in arb_station_list(),
+        ) {
+            let all_len = filter_stations_by_genre(&stations, Some("All")).len();
+            let none_len = filter_stations_by_genre(&stations, None).len();
+            prop_assert_eq!(all_len, stations.len());
+            prop_assert_eq!(none_len, stations.len());
+        }
+    }
+}

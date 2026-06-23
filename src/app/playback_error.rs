@@ -71,4 +71,61 @@ mod tests {
             PlaybackErrorKind::Network
         );
     }
+
+    #[test]
+    fn action_hint_non_empty_for_all_variants() {
+        let representative_errors = [
+            ("network failure", PlaybackErrorKind::Network),
+            ("HTTP 500 error", PlaybackErrorKind::Http),
+            ("Decode error: bad codec", PlaybackErrorKind::Decode),
+            ("Sink error: soundcard not found", PlaybackErrorKind::Output),
+            ("timeout waiting for data", PlaybackErrorKind::Timeout),
+            ("xyzzy foobar", PlaybackErrorKind::Unknown),
+        ];
+
+        for (error_str, expected_kind) in &representative_errors {
+            assert_eq!(
+                classify_playback_error(error_str),
+                *expected_kind,
+                "error string '{}' should classify as {:?}",
+                error_str,
+                expected_kind
+            );
+            let hint = playback_error_action_hint(error_str);
+            assert!(
+                !hint.is_empty(),
+                "action hint for {:?} (error: '{}') should be non-empty",
+                expected_kind,
+                error_str
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_timeout_lowercase() {
+        assert_eq!(
+            classify_playback_error("timeout"),
+            PlaybackErrorKind::Timeout
+        );
+    }
+
+    #[test]
+    fn classifies_unknown_for_unrecognized_string() {
+        assert_eq!(
+            classify_playback_error("xyzzy foobar"),
+            PlaybackErrorKind::Unknown
+        );
+    }
+
+    #[test]
+    fn classifies_timeout_case_insensitive() {
+        assert_eq!(
+            classify_playback_error("TIMEOUT"),
+            PlaybackErrorKind::Timeout
+        );
+        assert_eq!(
+            classify_playback_error("Timeout"),
+            PlaybackErrorKind::Timeout
+        );
+    }
 }
