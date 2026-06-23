@@ -19,6 +19,7 @@ mod ui_runtime;
 mod ui_state;
 mod update;
 mod visualizer;
+pub mod visualizer_mode;
 
 use crate::favorites::Library;
 use crate::radio::Station;
@@ -42,6 +43,7 @@ pub use types::{
     SearchStatus, SettingRow,
 };
 pub use ui_runtime::UiRuntimeState;
+pub use visualizer_mode::VisualizerMode;
 
 /// Core application state.
 pub struct App {

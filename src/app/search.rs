@@ -77,7 +77,7 @@ impl App {
                         self.set_info_notice("Saved station metadata refreshed");
                     }
                 }
-                Err(err) => self.set_error_notice(format!("Could not add station: {err}")),
+                Err(err) => self.set_operation_error_notice("Could not add station", &err),
             }
             self.playback.view.playing_url = Some(station.url.clone());
 

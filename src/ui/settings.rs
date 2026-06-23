@@ -1,7 +1,7 @@
 use super::critical;
 use super::theme;
-use super::theme::ThemeName;
 use crate::app::SettingRow;
+use crate::theme_name::ThemeName;
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -75,7 +75,7 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &UiModel<'_>, row: Set
     let active_style = Style::default()
         .fg(theme::accent_secondary())
         .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(theme::text().fg.unwrap());
+    let normal_style = Style::default().fg(theme::text().fg.unwrap_or_default());
     let active_bg = Style::default().bg(theme::surface_color());
 
     let cursor_style = active_style;
@@ -200,7 +200,7 @@ fn checkbox_row(enabled: bool, label: &'static str, label_style: Style) -> Vec<S
                 .fg(if enabled {
                     theme::accent_secondary()
                 } else {
-                    theme::dim().fg.unwrap()
+                    theme::dim().fg.unwrap_or_default()
                 })
                 .add_modifier(Modifier::BOLD),
         ),

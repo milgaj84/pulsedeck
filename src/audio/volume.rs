@@ -73,7 +73,7 @@ impl VolumeRamp {
 
     /// Begin a fade-out: ramp `current_volume` exponentially toward 0.0.
     /// Resets any in-progress fade.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn begin_fade_out(&mut self) {
         self.active_fade = Some(FadeDirection::Out);
     }
@@ -148,7 +148,7 @@ impl VolumeRamp {
     ///
     /// The caller should stop the sink and transition state when this returns
     /// `true`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn is_done(&self) -> bool {
         // Done means: was fading out and has now finished.
         // active_fade is cleared by tick once the threshold is crossed, so

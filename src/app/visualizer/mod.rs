@@ -9,7 +9,7 @@ use spectrum::*;
 impl App {
     /// Run Fast Fourier Transform (FFT) on the audio samples and update the spectrum peaks with gravity decay.
     pub fn update_visualizer(&mut self) {
-        if self.playback.view.state == PlaybackState::Connecting && self.ui.visualizer_mode == 0 {
+        if self.playback.view.state == PlaybackState::Connecting && self.ui.visualizer_mode == VisualizerMode::Spectrum {
             update_connecting_spectrum_peaks(&mut self.ui.visualizer_peaks, self.ui.tick_count);
             return;
         }

@@ -132,7 +132,7 @@ fn section(label: &'static str) -> Row<'static> {
         Cell::from(Span::styled(
             format!("▸ {label}"),
             Style::default()
-                .fg(theme::dim().fg.unwrap())
+                .fg(theme::dim().fg.unwrap_or_default())
                 .add_modifier(Modifier::UNDERLINED),
         )),
         Cell::from(""),

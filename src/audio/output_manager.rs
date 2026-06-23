@@ -57,8 +57,9 @@ impl OutputManager {
             self.stream = Some(sel.stream);
             self.handle = Some(sel.handle);
         }
-        // SAFETY: we just confirmed/set `handle` to Some above.
-        Ok(self.handle.as_ref().expect("handle was just set"))
+        self.handle
+            .as_ref()
+            .ok_or_else(|| EngineError::Output("output device handle unavailable".to_string()))
     }
 
     /// Store the normalized preferred device name and mark that a reopen is
@@ -112,7 +113,10 @@ impl OutputManager {
         // via `Sink::new`).
         self.ensure_open()?;
 
-        let handle = self.handle.as_ref().expect("ensure_open guarantees Some");
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| EngineError::Output("output handle lost after ensure_open".to_string()))?;
 
         let sink = Sink::try_new(handle)
             .map_err(|e| EngineError::Output(format!("failed to create sink: {e}")))?;
@@ -123,7 +127,7 @@ impl OutputManager {
     }
 
     /// Set the playback volume on the current sink, if one exists.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn set_volume(&mut self, v: f32) {
         if let Some(sink) = &self.sink {
             sink.set_volume(v);
@@ -169,13 +173,13 @@ impl OutputManager {
 
     /// Returns `true` if `set_preferred_device` has been called since the last
     /// `clear_reopen_needed`.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn reopen_needed(&self) -> bool {
         self.reopen_needed
     }
 
     /// Clears the `reopen_needed` flag.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn clear_reopen_needed(&mut self) {
         self.reopen_needed = false;
     }

@@ -11,6 +11,7 @@ mod playlist_export;
 mod radio;
 mod runtime;
 mod text;
+mod theme_name;
 mod ui;
 
 use anyhow::Result;
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
 
     let library = Library::load(fallback_stations());
 
-    let saved_theme = ui::theme::ThemeName::from_key(&library.settings.theme);
+    let saved_theme = theme_name::ThemeName::from_key(&library.settings.theme);
     ui::theme::set_active(saved_theme);
 
     let mut app = App::new(library);

@@ -34,7 +34,7 @@ impl App {
                     Ok(false) => {}
                     Err(err) => {
                         self.remember_removed_station(station, removed_index, removed_genre);
-                        self.set_error_notice(format!("Could not remove station: {err}"));
+                        self.set_operation_error_notice("Could not remove station", &err);
                     }
                 }
                 let count = self.visible_count();
@@ -130,7 +130,7 @@ impl App {
                 }
                 self.set_info_notice(summary.notice());
             }
-            Err(message) => self.set_error_notice(format!("Metadata refresh failed: {message}")),
+            Err(message) => self.set_operation_error_notice("Metadata refresh failed", &message),
         }
     }
 

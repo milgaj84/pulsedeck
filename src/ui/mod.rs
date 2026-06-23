@@ -189,6 +189,43 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+/// Shared overlay chrome rendering: centered popup with title, rounded border,
+/// and background clear. Returns the inner area for content rendering.
+///
+/// Use this in overlay renderers to eliminate boilerplate:
+/// ```ignore
+/// let inner = render_overlay_chrome(frame, area, " Title ", 70, 60);
+/// // render content into `inner`
+/// ```
+#[allow(dead_code)]
+pub fn render_overlay_chrome(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    width_pct: u16,
+    height_pct: u16,
+) -> Rect {
+    use ratatui::widgets::Clear;
+
+    let popup_area = centered_rect(width_pct, height_pct, area);
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(Span::styled(title, theme::title()))
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(theme::accent_secondary())
+                .add_modifier(Modifier::BOLD),
+        )
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .style(theme::clear());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+    inner
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

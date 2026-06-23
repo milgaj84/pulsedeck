@@ -4,6 +4,38 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.5.1] - Unreleased
+
+### Changed
+- **ThemeName extracted to cross-cutting module**: `ThemeName` now lives in `src/theme_name.rs`, removing the `app-state → ui-rendering` boundary violation (F-06).
+- **UiModel sample buffer snapshot**: `UiModel` now holds a pre-copied `Vec<f32>` instead of `&Arc<Mutex<VecDeque<f32>>>`, eliminating interior-mutable shared state in the render path (F-07).
+- **VisualizerMode enum**: Replaced `usize` with a proper `VisualizerMode` enum with exhaustive matching — adding a new mode now produces a compiler error (F-04).
+- **Audio output manager error handling**: Replaced `expect()` calls with proper `Result`-returning error handling in `OutputManager` (F-01).
+- **Stream source graceful fallback**: Replaced `expect()` calls in ICY demux with `let ... else` fallbacks that return IO errors instead of panicking (F-02).
+- **Audio module visibility tightened**: `pub(crate) mod types` and `pub(crate) mod volume` narrowed to `pub(super)` (F-24).
+- **Genre filtering consolidated**: Extracted `filter_stations_by_genre()` and `count_stations_by_genre()` shared helpers; `UiModel` now delegates to `app.visible_stations()` (F-12, F-23).
+- **Station URL lookup helpers**: Added `find_station_by_url()` and `find_station_index_by_url()` to `src/radio/station.rs`, used across 4 files (F-17).
+- **PlaybackView::reset_transient_status()**: Extracted repeated buffer/track reset triple into a single method (F-14).
+- **PlaybackDiagnostics constructor**: Added `PlaybackDiagnostics::new()` for validated initial state (F-22).
+- **Overlay chrome helper**: Added `render_overlay_chrome()` shared helper for overlay rendering boilerplate (F-13).
+- **set_operation_error_notice()**: Added convenience method for context+error notice formatting (F-25).
+- **step_choice monomorphized**: `step_choice<T>` replaced with `step_choice(ThemeName)` (F-33).
+- **apply_directional_setting inlined**: Removed trivial forwarding wrapper (F-32).
+
+### Fixed
+- **never_loop in decode.rs**: Fixed unconditional-break loop in prebuffer timeout test to properly loop until timeout fires (F-30).
+- **Theme color unwrap safety**: Replaced 3 `unwrap()` calls on theme foreground colors with `unwrap_or_default()` (F-27).
+
+### Removed
+- **tiny_http dev-dependency**: Removed unused `tiny_http` from `[dev-dependencies]` (F-31).
+
+### Internal
+- Added 11 tests to `src/app/update.rs` covering mode-gating, action routing, and overlay isolation (F-03).
+- Gated 6 dead-code functions with `#[cfg(test)]` instead of `#[allow(dead_code)]`: `load_json`, `is_codec_playback_supported`, `active_generation_arc`, `set_volume`, `reopen_needed`/`clear_reopen_needed`, `begin_fade_out`, `is_done` (F-28).
+- 459 tests pass, zero warnings, `cargo build --release` clean.
+
+---
+
 ## [0.5.0] - Unreleased
 
 ### Added

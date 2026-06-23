@@ -54,11 +54,6 @@ pub fn load_json_with_warning<T: DeserializeOwned + Default>(file: &str) -> (T, 
     }
 }
 
-#[allow(dead_code)]
-pub fn load_json<T: DeserializeOwned + Default>(file: &str) -> T {
-    load_json_with_warning(file).0
-}
-
 #[cfg_attr(test, allow(dead_code))]
 pub fn save_json<T: Serialize>(file: &str, value: &T) -> Result<()> {
     let Some(dir) = config_dir() else {

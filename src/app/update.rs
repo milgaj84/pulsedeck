@@ -115,3 +115,152 @@ impl App {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::action::Action;
+    use crate::favorites::Library;
+    use crate::radio::Station;
+
+    fn station(name: &str, url: &str) -> Station {
+        Station::basic(name, url, "Synthwave", "US", 128)
+    }
+
+    fn test_app() -> App {
+        App::new(Library::in_memory(vec![
+            station("A", "http://a"),
+            station("B", "http://b"),
+        ]))
+    }
+
+    // ---- Mode-gating: settings overlay swallows actions --------------------
+
+    #[test]
+    fn settings_overlay_swallows_play_and_navigation() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = 0;
+        app.ui.nav.selected = 0;
+
+        app.update(Action::NextStation);
+        // NextStation in settings navigates settings rows, not the station list
+        assert_eq!(app.ui.overlays.selected_setting_idx, 1);
+        // Station nav unchanged
+        assert_eq!(app.ui.nav.selected, 0);
+    }
+
+    #[test]
+    fn settings_overlay_swallows_search_entry() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+
+        app.update(Action::EnterSearch);
+
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Settings);
+    }
+
+    // ---- Mode-gating: sleep timer overlay isolation ------------------------
+
+    #[test]
+    fn sleep_timer_overlay_swallows_non_timer_actions() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::SleepTimer;
+        app.ui.input_mode = InputMode::SleepTimer;
+
+        app.update(Action::NextStation);
+
+        // Navigation should not change station index
+        assert_eq!(app.ui.nav.selected, 0);
+    }
+
+    // ---- Action routing: basic dispatch ------------------------------------
+
+    #[test]
+    fn play_selected_action_triggers_connecting_state() {
+        let mut app = test_app();
+
+        app.update(Action::PlaySelected);
+
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
+        assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://a"));
+    }
+
+    #[test]
+    fn stop_action_stops_playback() {
+        let mut app = test_app();
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Connecting;
+
+        app.update(Action::Stop);
+
+        assert_eq!(app.playback.view.state, PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn next_station_wraps_around() {
+        let mut app = test_app();
+        app.ui.nav.selected = 1;
+
+        app.update(Action::NextStation);
+
+        assert_eq!(app.ui.nav.selected, 0);
+    }
+
+    #[test]
+    fn prev_station_wraps_around() {
+        let mut app = test_app();
+        app.ui.nav.selected = 0;
+
+        app.update(Action::PrevStation);
+
+        assert_eq!(app.ui.nav.selected, 1);
+    }
+
+    #[test]
+    fn quit_action_quits_when_no_overlay_active() {
+        let mut app = test_app();
+
+        app.update(Action::Quit);
+
+        assert!(app.ui.should_quit);
+    }
+
+    #[test]
+    fn quit_action_closes_overlay_before_quitting() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Help;
+
+        app.update(Action::Quit);
+
+        assert!(!app.ui.should_quit);
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::None);
+    }
+
+    // ---- Command palette mode routing ------------------------------------
+
+    #[test]
+    fn command_palette_mode_routes_to_palette_handler() {
+        let mut app = test_app();
+        app.ui.input_mode = InputMode::CommandPalette;
+
+        // Actions should be handled by palette handler, not the main dispatch
+        app.update(Action::CommandPaletteClose);
+
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+    }
+
+    // ---- Tick action always runs ------------------------------------------
+
+    #[test]
+    fn tick_increments_tick_count() {
+        let mut app = test_app();
+        let before = app.ui.tick_count;
+
+        app.update(Action::Tick);
+
+        assert_eq!(app.ui.tick_count, before + 1);
+    }
+}

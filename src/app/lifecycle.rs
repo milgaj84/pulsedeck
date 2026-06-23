@@ -1,6 +1,6 @@
 use super::*;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
-use crate::radio::station_url_matches;
+use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
 
 const NOTICE_INFO_TICKS: u16 = 90;
 const NOTICE_ERROR_TICKS: u16 = 150;
@@ -8,9 +8,7 @@ const SONG_HISTORY_CAP: usize = 100;
 const NOTIFY_IDLE_MS: u64 = 120_000;
 
 fn last_played_station_position(stations: &[Station], last_played_url: &str) -> Option<usize> {
-    stations
-        .iter()
-        .position(|station| station_url_matches(&station.url, last_played_url))
+    find_station_index_by_url(stations, last_played_url)
 }
 
 fn unix_now_string() -> String {
@@ -141,12 +139,7 @@ impl App {
         // If the URL matches a known library station, check codec capability
         // before attempting autoplay. Unknown stations (not in library) are
         // allowed to try in case the library state is stale.
-        if let Some(station) = self
-            .library
-            .stations
-            .iter()
-            .find(|s| crate::radio::station_url_matches(&s.url, &url))
-            .cloned()
+        if let Some(station) = find_station_by_url(&self.library.stations, &url).cloned()
         {
             if !self.can_attempt_station_playback(&station) {
                 return;
@@ -171,6 +164,11 @@ impl App {
     pub(super) fn set_error_notice(&mut self, message: impl Into<String>) {
         self.ui.notice.current = Some(AppNotice::Error(message.into()));
         self.ui.notice.ticks_remaining = NOTICE_ERROR_TICKS;
+    }
+
+    /// Convenience: set an error notice with a context prefix and error details.
+    pub(super) fn set_operation_error_notice(&mut self, context: &str, err: &dyn std::fmt::Display) {
+        self.set_error_notice(format!("{context}: {err}"));
     }
 
     pub(super) fn tick_notice(&mut self) {
@@ -282,9 +280,7 @@ impl App {
         if self.playback.view.intentional_stop || !was_playing {
             self.playback.view.intentional_stop = false;
             self.playback.view.playing_url = None;
-            self.playback.view.current_track = None;
-            self.playback.view.buffer_percent = 0;
-            self.playback.view.buffer_seconds = 0;
+            self.playback.view.reset_transient_status();
             self.playback.view.state = PlaybackState::Stopped;
             self.playback.diagnostics.decoder_state = DecoderState::Idle;
             self.playback.diagnostics.buffer_percent = 0;
@@ -309,9 +305,7 @@ impl App {
                 self.mark_library_dirty();
             }
         }
-        self.playback.view.current_track = None;
-        self.playback.view.buffer_percent = 0;
-        self.playback.view.buffer_seconds = 0;
+        self.playback.view.reset_transient_status();
         self.playback.diagnostics.buffer_percent = 0;
         self.playback.diagnostics.buffer_seconds = 0;
         self.playback.diagnostics.reconnect_attempts = 1;
@@ -331,7 +325,7 @@ mod tests {
                 37,
                 true,
                 LayoutMode::RightOnly,
-                2,
+                VisualizerMode::SimOscilloscope,
             ),
             ui_state_warning: None,
             history: crate::history::History::default(),
@@ -348,7 +342,7 @@ mod tests {
         assert_eq!(app.playback.volume, 37);
         assert!(app.playback.muted);
         assert_eq!(app.ui.layout_mode, LayoutMode::RightOnly);
-        assert_eq!(app.ui.visualizer_mode, 2);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::SimOscilloscope);
     }
 
     #[test]

@@ -23,14 +23,21 @@ impl Default for PlaybackView {
     }
 }
 
+impl PlaybackView {
+    /// Reset transient buffer/track status without changing playback state or URL.
+    pub fn reset_transient_status(&mut self) {
+        self.current_track = None;
+        self.buffer_percent = 0;
+        self.buffer_seconds = 0;
+    }
+}
+
 impl App {
     pub(super) fn send_audio_command(&mut self, command: AudioCommand) -> bool {
         if self.playback.audio.send(command) {
             true
         } else {
-            self.playback.view.current_track = None;
-            self.playback.view.buffer_percent = 0;
-            self.playback.view.buffer_seconds = 0;
+            self.playback.view.reset_transient_status();
             self.playback.view.state = PlaybackState::Error("Audio engine stopped".to_string());
             self.playback.diagnostics.decoder_state = DecoderState::Failed;
             self.playback.diagnostics.last_error =
@@ -79,9 +86,7 @@ impl App {
         match capability.capability {
             PlaybackCapability::Supported | PlaybackCapability::Unknown => true,
             PlaybackCapability::Unsupported => {
-                self.playback.view.current_track = None;
-                self.playback.view.buffer_percent = 0;
-                self.playback.view.buffer_seconds = 0;
+                self.playback.view.reset_transient_status();
                 self.playback.view.state = PlaybackState::Error(format!(
                     "Unsupported codec: {}",
                     capability.normalized_codec
@@ -118,9 +123,7 @@ impl App {
         };
 
         self.playback.reconnect.disarm();
-        self.playback.view.current_track = None;
-        self.playback.view.buffer_percent = 0;
-        self.playback.view.buffer_seconds = 0;
+        self.playback.view.reset_transient_status();
         self.playback.view.state = PlaybackState::Connecting;
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();

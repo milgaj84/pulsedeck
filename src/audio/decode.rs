@@ -441,10 +441,11 @@ mod tests {
                 if remaining_cap == 0 {
                     break;
                 }
+                // In this test, timeout fires before we reach here.
+                // Simulate a "no data available" iteration by simply continuing.
                 let read_len = chunk.len().min(remaining_cap);
-                // Reader never reached — timeout fires first.
                 let _ = read_len;
-                break;
+                std::thread::sleep(Duration::from_millis(1));
             }
         });
 

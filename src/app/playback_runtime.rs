@@ -25,12 +25,7 @@ impl PlaybackRuntime {
             volume: ui_state.volume(),
             muted: ui_state.muted(),
             reconnect: Reconnect::default(),
-            diagnostics: PlaybackDiagnostics {
-                output_device,
-                metadata_enabled,
-                reconnect_limit: 3,
-                ..PlaybackDiagnostics::default()
-            },
+            diagnostics: PlaybackDiagnostics::new(output_device, metadata_enabled, 3),
             sleep_timer: SleepTimer::default(),
             audio,
             sample_buffer,
@@ -63,7 +58,7 @@ mod tests {
     #[test]
     fn playback_runtime_uses_loaded_volume_mute_and_diagnostics() {
         let ui_state =
-            super::super::ui_state::UiState::from_app_values(37, true, LayoutMode::Split, 1);
+            super::super::ui_state::UiState::from_app_values(37, true, LayoutMode::Split, VisualizerMode::RealOscilloscope);
         let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();

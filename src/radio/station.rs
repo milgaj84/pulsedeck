@@ -215,6 +215,20 @@ pub fn station_url_matches(left: &str, right: &str) -> bool {
     normalized_station_url(left) == normalized_station_url(right)
 }
 
+/// Find the first station in `stations` whose URL matches `target`.
+pub fn find_station_by_url<'a>(stations: &'a [Station], target: &str) -> Option<&'a Station> {
+    stations
+        .iter()
+        .find(|station| station_url_matches(&station.url, target))
+}
+
+/// Find the index of the first station in `stations` whose URL matches `target`.
+pub fn find_station_index_by_url(stations: &[Station], target: &str) -> Option<usize> {
+    stations
+        .iter()
+        .position(|station| station_url_matches(&station.url, target))
+}
+
 /// Returns hardcoded fallback stations so the app works offline.
 pub fn fallback_stations() -> Vec<Station> {
     vec![

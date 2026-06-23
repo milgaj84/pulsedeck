@@ -1,6 +1,6 @@
 use super::*;
 use crate::action::Action;
-use crate::ui::theme::ThemeName;
+use crate::theme_name::ThemeName;
 
 impl App {
     pub(super) fn handle_settings_action(&mut self, action: Action) {
@@ -20,11 +20,11 @@ impl App {
             Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
                 self.mark_library_dirty();
             }
-            Action::StepSettingForward if self.apply_directional_setting(true) => {
+            Action::StepSettingForward if self.apply_selected_setting(true) => {
                 self.mark_library_dirty();
             }
             Action::StepSettingBackward | Action::ToggleHelp
-                if self.apply_directional_setting(false) =>
+                if self.apply_selected_setting(false) =>
             {
                 self.mark_library_dirty();
             }
@@ -138,9 +138,6 @@ impl App {
             ))
     }
 
-    fn apply_directional_setting(&mut self, forward: bool) -> bool {
-        self.apply_selected_setting(forward)
-    }
 }
 
 fn available_output_device_choices() -> Vec<String> {
@@ -183,7 +180,7 @@ fn step_output_device_preference(
     }
 }
 
-fn step_choice<T: Copy + PartialEq>(choices: &[T], current: T, forward: bool) -> T {
+fn step_choice(choices: &[ThemeName], current: ThemeName, forward: bool) -> ThemeName {
     if choices.is_empty() {
         return current;
     }

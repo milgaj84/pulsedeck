@@ -83,7 +83,7 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
 /// `Unknown` returns `true` because missing or stale Radio Browser metadata
 /// is common and blocking unknowns would produce false negatives on working
 /// MP3 streams that simply lack codec metadata.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn is_codec_playback_supported(codec: &str) -> bool {
     !matches!(
         codec_capability(codec).capability,

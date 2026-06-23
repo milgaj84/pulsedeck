@@ -155,7 +155,9 @@ impl<R: Read> Read for StreamSource<R> {
         if demux.bytes_until_next_meta == 0 {
             // We need a mutable borrow of both `self` fields simultaneously, so
             // we take the demux out, operate, and put it back.
-            let mut demux_owned = self.icy.take().expect("just matched Some");
+            let Some(mut demux_owned) = self.icy.take() else {
+                return Err(io::Error::other("ICY demux state lost"));
+            };
             let result = self.consume_metadata_block(&mut demux_owned);
             self.icy = Some(demux_owned);
             result?;
@@ -163,7 +165,9 @@ impl<R: Read> Read for StreamSource<R> {
 
         // Deliver at most `bytes_until_next_meta` audio bytes so we never
         // straddle a metadata boundary in a single read call.
-        let demux = self.icy.as_mut().expect("just restored");
+        let Some(demux) = self.icy.as_mut() else {
+            return Err(io::Error::other("ICY demux state lost after restore"));
+        };
         let max = buf.len().min(demux.bytes_until_next_meta);
         let n = self.inner.read(&mut buf[..max])?;
         demux.bytes_until_next_meta -= n;

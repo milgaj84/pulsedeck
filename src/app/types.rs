@@ -64,6 +64,18 @@ pub struct PlaybackDiagnostics {
     pub decoder_state: DecoderState,
 }
 
+impl PlaybackDiagnostics {
+    /// Create diagnostics with the initial output device and metadata config.
+    pub fn new(output_device: String, metadata_enabled: bool, reconnect_limit: u8) -> Self {
+        Self {
+            output_device,
+            metadata_enabled,
+            reconnect_limit,
+            ..Self::default()
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DecoderState {

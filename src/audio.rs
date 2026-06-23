@@ -6,9 +6,9 @@ mod output;
 mod output_manager;
 pub(super) mod stream_source;
 mod supervisor;
-pub(crate) mod types;
+pub(super) mod types;
 mod visualizer;
-pub(crate) mod volume;
+pub(super) mod volume;
 
 pub use capability::{codec_capability, PlaybackCapability};
 

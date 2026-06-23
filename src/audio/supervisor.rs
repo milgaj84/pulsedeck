@@ -101,7 +101,7 @@ impl ConnectionSupervisor {
 
     /// Clones the `Arc<AtomicU64>` so workers can share access to the active
     /// generation counter without taking a lock.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn active_generation_arc(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.active_generation)
     }

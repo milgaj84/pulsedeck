@@ -2,7 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
 use super::theme;
-use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState};
+use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState, VisualizerMode};
 use crate::ui::model::UiModel;
 
 /// Render the bottom control bar: playback status + volume + keybinds.
@@ -145,11 +145,11 @@ fn layout_label(layout_mode: LayoutMode) -> &'static str {
     }
 }
 
-fn visualizer_label(visualizer_mode: usize) -> &'static str {
+fn visualizer_label(visualizer_mode: VisualizerMode) -> &'static str {
     match visualizer_mode {
-        0 => "RTA",
-        1 => "REAL OSC",
-        _ => "SIM OSC",
+        VisualizerMode::Spectrum => "RTA",
+        VisualizerMode::RealOscilloscope => "REAL OSC",
+        VisualizerMode::SimOscilloscope => "SIM OSC",
     }
 }
 
@@ -321,8 +321,8 @@ mod tests {
 
     #[test]
     fn visualizer_labels_drop_scope_jargon() {
-        assert_eq!(visualizer_label(0), "RTA");
-        assert_eq!(visualizer_label(1), "REAL OSC");
-        assert_eq!(visualizer_label(2), "SIM OSC");
+        assert_eq!(visualizer_label(VisualizerMode::Spectrum), "RTA");
+        assert_eq!(visualizer_label(VisualizerMode::RealOscilloscope), "REAL OSC");
+        assert_eq!(visualizer_label(VisualizerMode::SimOscilloscope), "SIM OSC");
     }
 }

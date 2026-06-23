@@ -108,7 +108,7 @@ impl App {
     }
 
     pub(super) fn toggle_visualizer_mode(&mut self) {
-        self.ui.visualizer_mode = (self.ui.visualizer_mode + 1) % 3;
+        self.ui.visualizer_mode = self.ui.visualizer_mode.next();
         self.mark_ui_state_dirty();
     }
 }
@@ -215,10 +215,10 @@ mod tests {
         let mut app = test_app();
 
         app.toggle_visualizer_mode();
-        assert_eq!(app.ui.visualizer_mode, 1);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::RealOscilloscope);
         app.toggle_visualizer_mode();
-        assert_eq!(app.ui.visualizer_mode, 2);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::SimOscilloscope);
         app.toggle_visualizer_mode();
-        assert_eq!(app.ui.visualizer_mode, 0);
+        assert_eq!(app.ui.visualizer_mode, VisualizerMode::Spectrum);
     }
 }

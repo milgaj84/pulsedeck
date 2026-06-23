@@ -1,6 +1,31 @@
 use super::*;
 use crate::favorites::resolve_parent_genre;
-use crate::radio::station_url_matches;
+use crate::radio::{find_station_by_url, station_url_matches};
+
+/// Shared genre filter: returns stations visible for the given genre (or all if genre is "All").
+pub(super) fn filter_stations_by_genre<'a>(
+    stations: &'a [Station],
+    genre: Option<&str>,
+) -> Vec<&'a Station> {
+    match genre {
+        Some("All") | None => stations.iter().collect(),
+        Some(genre) => stations
+            .iter()
+            .filter(|s| resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
+            .collect(),
+    }
+}
+
+/// Shared genre count: returns the number of stations visible for the given genre.
+pub(super) fn count_stations_by_genre(stations: &[Station], genre: Option<&str>) -> usize {
+    match genre {
+        Some("All") | None => stations.len(),
+        Some(genre) => stations
+            .iter()
+            .filter(|s| resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
+            .count(),
+    }
+}
 
 impl App {
     /// The currently visible list. In Normal mode: library. In Search mode: search results.
@@ -9,23 +34,12 @@ impl App {
             return self.search.results.iter().collect();
         }
 
-        if let Some(genre) = self
+        let genre = self
             .library
             .available_genres
             .get(self.ui.nav.selected_genre_idx)
-        {
-            if genre == "All" {
-                self.library.stations.iter().collect()
-            } else {
-                self.library
-                    .stations
-                    .iter()
-                    .filter(|s| resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
-                    .collect()
-            }
-        } else {
-            self.library.stations.iter().collect()
-        }
+            .map(|s| s.as_str());
+        filter_stations_by_genre(&self.library.stations, genre)
     }
 
     /// Get the highlighted station from the currently visible list.
@@ -37,10 +51,7 @@ impl App {
     /// Get the currently playing station, if any.
     pub fn now_playing(&self) -> Option<&Station> {
         self.playback.view.playing_url.as_ref().and_then(|url| {
-            self.library
-                .stations
-                .iter()
-                .find(|station| station_url_matches(&station.url, url))
+            find_station_by_url(&self.library.stations, url)
                 .or_else(|| {
                     self.search
                         .results
@@ -61,23 +72,12 @@ impl App {
             return self.search.results.len();
         }
 
-        if let Some(genre) = self
+        let genre = self
             .library
             .available_genres
             .get(self.ui.nav.selected_genre_idx)
-        {
-            if genre == "All" {
-                self.library.stations.len()
-            } else {
-                self.library
-                    .stations
-                    .iter()
-                    .filter(|s| resolve_parent_genre(&s.genre).eq_ignore_ascii_case(genre))
-                    .count()
-            }
-        } else {
-            self.library.stations.len()
-        }
+            .map(|s| s.as_str());
+        count_stations_by_genre(&self.library.stations, genre)
     }
 
     /// Try to select the currently playing station in the visible list.
