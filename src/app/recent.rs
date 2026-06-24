@@ -66,6 +66,9 @@ impl App {
         self.playback.view.playing_url = Some(station.url.clone());
         self.playback.view.state = next_playback;
 
+        self.playback.elapsed_timer.reset();
+        self.playback.elapsed_timer.start();
+
         self.library.settings.last_played_url = Some(station.url.clone());
         self.mark_library_dirty();
 

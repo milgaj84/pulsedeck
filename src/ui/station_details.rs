@@ -1,3 +1,4 @@
+use crate::radio::health_classifier::{classify_health, HealthLevel};
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -10,6 +11,7 @@ const MIN_DETAILS_HEIGHT: u16 = 12;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DetailSection {
     title: &'static str,
+    title_prefix: Option<(&'static str, Style)>,
     rows: Vec<DetailRow>,
 }
 
@@ -110,6 +112,7 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
     vec![
         DetailSection {
             title: "Identity",
+            title_prefix: None,
             rows: vec![
                 detail_data("Name", station.name.as_str()),
                 detail_data("UUID", station_uuid),
@@ -118,6 +121,7 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
         },
         DetailSection {
             title: "Playback",
+            title_prefix: None,
             rows: {
                 let codec_label = codec_detail(station);
                 vec![
@@ -130,6 +134,7 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
         },
         DetailSection {
             title: "Catalog",
+            title_prefix: None,
             rows: vec![
                 detail_data("Genre", fallback(station.genre.as_str(), "Other")),
                 detail_data("Tags", metadata_list(&station.tags, "N/A").as_str()),
@@ -141,6 +146,7 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
         },
         DetailSection {
             title: "Health",
+            title_prefix: health_dot_prefix(station),
             rows: vec![
                 detail_data("Last check", last_check),
                 detail_data("Local health", local_health_label(station).as_str()),
@@ -157,7 +163,7 @@ fn section_lines(sections: Vec<DetailSection>) -> Vec<Line<'static>> {
         if idx > 0 {
             lines.push(Line::from(""));
         }
-        lines.push(Line::from(Span::styled(section.title, theme::title())));
+        lines.push(section_title_line(&section));
         lines.extend(
             section
                 .rows
@@ -168,6 +174,42 @@ fn section_lines(sections: Vec<DetailSection>) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.push(close_hint());
     lines
+}
+
+fn health_dot_prefix(station: &crate::radio::Station) -> Option<(&'static str, Style)> {
+    let now = now_timestamp_string();
+    health_dot_prefix_at(station, &now)
+}
+
+fn health_dot_prefix_at(
+    station: &crate::radio::Station,
+    now: &str,
+) -> Option<(&'static str, Style)> {
+    match classify_health(&station.health, now) {
+        Some(HealthLevel::Healthy) => Some(("● ", theme::health_healthy())),
+        Some(HealthLevel::Flaky) => Some(("● ", theme::health_flaky())),
+        Some(HealthLevel::Failed) => Some(("● ", theme::health_failed())),
+        None => None,
+    }
+}
+
+fn now_timestamp_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    secs.to_string()
+}
+
+fn section_title_line(section: &DetailSection) -> Line<'static> {
+    match &section.title_prefix {
+        Some((text, style)) => Line::from(vec![
+            Span::styled(*text, *style),
+            Span::styled(section.title, theme::title()),
+        ]),
+        None => Line::from(Span::styled(section.title, theme::title())),
+    }
 }
 
 fn codec_detail(station: &crate::radio::Station) -> String {
@@ -413,5 +455,30 @@ mod tests {
 
         station.health.last_success_at = Some("101".to_string());
         assert_eq!(local_health_label(&station), "Last played 101");
+    }
+
+    #[test]
+    fn health_dot_present_when_station_has_health_data() {
+        let mut station = station("A", "http://a");
+        station.health.last_success_at = Some("1700000000".to_string());
+        station.health.failure_count = Some(0);
+
+        let now = "1700000100"; // recent
+        let prefix = health_dot_prefix_at(&station, now);
+        assert!(
+            prefix.is_some(),
+            "dot should be present for healthy station"
+        );
+        assert_eq!(prefix.unwrap().0, "● ");
+    }
+
+    #[test]
+    fn health_dot_absent_when_no_health_data() {
+        let station = station("A", "http://a");
+        // Default station has empty health (no success/failure timestamps)
+
+        let now = "1700000000";
+        let prefix = health_dot_prefix_at(&station, now);
+        assert!(prefix.is_none(), "dot should be absent when no health data");
     }
 }

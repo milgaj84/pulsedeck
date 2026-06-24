@@ -110,6 +110,19 @@ impl App {
         self.ui.visualizer_mode = self.ui.visualizer_mode.next();
         self.mark_ui_state_dirty();
     }
+
+    pub(super) fn toggle_mini_mode(&mut self) {
+        if self.ui.input_mode == InputMode::LibraryFilter {
+            self.exit_library_filter();
+        } else if self.ui.input_mode != InputMode::Normal {
+            return;
+        }
+        self.ui.display_mode = match self.ui.display_mode {
+            DisplayMode::Normal => DisplayMode::Mini,
+            DisplayMode::Mini => DisplayMode::Normal,
+        };
+        self.mark_ui_state_dirty();
+    }
 }
 
 #[cfg(test)]

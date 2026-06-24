@@ -81,6 +81,11 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         ));
     }
 
+    if let Some(ref elapsed) = app.elapsed_display {
+        spans.push(Span::styled("  │  ", theme::dim()));
+        spans.push(Span::styled(format!("⏱ {elapsed}"), theme::dim()));
+    }
+
     if let Some(ref notice) = app.notice.current {
         spans.push(Span::styled("  │  ", theme::dim()));
         match notice {
@@ -312,6 +317,10 @@ fn hint_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{App, PlaybackState};
+    use crate::favorites::Library;
+    use crate::radio::Station;
+    use crate::ui::model::UiModel;
 
     #[test]
     fn layout_labels_use_user_facing_focus_terms() {
@@ -328,5 +337,49 @@ mod tests {
             "REAL OSC"
         );
         assert_eq!(visualizer_label(VisualizerMode::SimOscilloscope), "SIM OSC");
+    }
+
+    #[test]
+    fn test_elapsed_display_present_when_playing() {
+        let mut app = App::new(Library::in_memory(vec![Station::basic(
+            "A", "http://a", "Genre", "US", 128,
+        )]));
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(125));
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, Some("02:05".to_string()));
+    }
+
+    #[test]
+    fn test_elapsed_display_present_when_paused() {
+        let mut app = App::new(Library::in_memory(vec![Station::basic(
+            "A", "http://a", "Genre", "US", 128,
+        )]));
+        app.playback.view.state = PlaybackState::Paused;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(42));
+        app.playback.elapsed_timer.pause();
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, Some("00:42".to_string()));
+    }
+
+    #[test]
+    fn test_elapsed_display_hidden_when_stopped() {
+        let app = App::new(Library::in_memory(vec![Station::basic(
+            "A", "http://a", "Genre", "US", 128,
+        )]));
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, None);
     }
 }

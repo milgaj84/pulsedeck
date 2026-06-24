@@ -1,10 +1,12 @@
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use crate::app::{
-    ActiveOverlay, App, CommandPaletteState, InputMode, LayoutMode, Navigation, NoticeState,
-    Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackView, SearchState, SleepTimer,
-    VisualizerMode,
+    ActiveOverlay, App, CommandPaletteState, DisplayMode, InputMode, LayoutMode, Navigation,
+    NoticeState, Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackState, PlaybackView,
+    SearchState, SleepTimer, VisualizerMode,
 };
+use crate::elapsed_format::format_elapsed;
 use crate::favorites::Library;
 use crate::favorites_set::FavoritesSet;
 use crate::history::History;
@@ -36,6 +38,9 @@ pub struct UiModel<'a> {
     pub number_jump_display: &'a str,
     pub number_jump_active: bool,
     pub favorites: &'a FavoritesSet,
+    pub display_mode: DisplayMode,
+    pub elapsed_display: Option<String>,
+    pub volume_flash_active: bool,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -87,6 +92,11 @@ impl<'a> From<&'a App> for UiModel<'a> {
             .map(|buf| buf.iter().copied().collect())
             .unwrap_or_default();
 
+        let elapsed_display = elapsed_display_for_state(
+            &app.playback.view.state,
+            app.playback.elapsed_timer.elapsed(),
+        );
+
         Self {
             library: &app.library,
             nav: &app.ui.nav,
@@ -113,9 +123,24 @@ impl<'a> From<&'a App> for UiModel<'a> {
             number_jump_display: app.number_jump.display(),
             number_jump_active: app.number_jump.is_active(),
             favorites: &app.library.settings.favorites,
+            display_mode: app.ui.display_mode,
+            elapsed_display,
+            volume_flash_active: app.ui.volume_flash_remaining > Duration::ZERO,
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }
+    }
+}
+
+/// Compute the formatted elapsed display string.
+/// Returns Some when Playing or Paused; None when Stopped or other states.
+fn elapsed_display_for_state(
+    state: &PlaybackState,
+    elapsed: std::time::Duration,
+) -> Option<String> {
+    match state {
+        PlaybackState::Playing | PlaybackState::Paused => Some(format_elapsed(elapsed)),
+        _ => None,
     }
 }
 
@@ -202,5 +227,73 @@ mod tests {
         assert!(!model.show_help());
         assert!(!model.show_station_details());
         assert!(!model.show_sleep_timer());
+    }
+
+    #[test]
+    fn ui_model_populates_display_mode_normal() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.display_mode = DisplayMode::Normal;
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.display_mode, DisplayMode::Normal);
+    }
+
+    #[test]
+    fn ui_model_populates_display_mode_mini() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.display_mode = DisplayMode::Mini;
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.display_mode, DisplayMode::Mini);
+    }
+
+    #[test]
+    fn ui_model_elapsed_display_some_when_playing() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(67));
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, Some("01:07".to_string()));
+    }
+
+    #[test]
+    fn ui_model_elapsed_display_some_when_paused() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.playback.view.state = PlaybackState::Paused;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(3661));
+        app.playback.elapsed_timer.pause();
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, Some("1:01:01".to_string()));
+    }
+
+    #[test]
+    fn ui_model_elapsed_display_none_when_stopped() {
+        let app = App::new(Library::in_memory(vec![]));
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, None);
+    }
+
+    #[test]
+    fn ui_model_elapsed_display_none_when_connecting() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.playback.view.state = PlaybackState::Connecting;
+
+        let model = UiModel::from(&app);
+
+        assert_eq!(model.elapsed_display, None);
     }
 }

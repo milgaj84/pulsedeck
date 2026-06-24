@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::AudioEngine;
+use crate::elapsed_timer::ElapsedTimer;
 
 pub struct PlaybackRuntime {
     pub view: PlaybackView,
@@ -10,6 +11,7 @@ pub struct PlaybackRuntime {
     pub sleep_timer: SleepTimer,
     pub audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+    pub elapsed_timer: ElapsedTimer,
 }
 
 impl PlaybackRuntime {
@@ -29,6 +31,7 @@ impl PlaybackRuntime {
             sleep_timer: SleepTimer::default(),
             audio,
             sample_buffer,
+            elapsed_timer: ElapsedTimer::new(),
         }
     }
 
@@ -62,6 +65,7 @@ mod tests {
             true,
             LayoutMode::Split,
             VisualizerMode::RealOscilloscope,
+            DisplayMode::Normal,
         );
         let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
@@ -99,6 +103,7 @@ mod property_tests {
             muted,
             LayoutMode::Split,
             VisualizerMode::RealOscilloscope,
+            DisplayMode::Normal,
         );
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();

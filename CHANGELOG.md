@@ -4,6 +4,46 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.7.1] - Unreleased
+
+### Fixed
+- **Health classification decay**: Stations are no longer permanently penalized by old failures. Failures older than 7 days now decay (Failed→Flaky, Flaky→cleared). Recent failures remain visible.
+- **Elapsed timer resets on auto-reconnect**: The listening timer now resets to zero when PulseDeck auto-reconnects after a stream dropout, so it accurately reflects the current session.
+- **Mini mode Ctrl+C during Connecting**: Pressing Ctrl+C while connecting in mini mode now quits cleanly with proper timer reset and audio teardown.
+- **F6 works from library filter mode**: Pressing F6 while filtering now exits the filter and toggles into mini mode in one step.
+- **Health dot contrast on light themes**: Health dots on Catppuccin Latte now use darker green/amber/red values (WCAG AA compliant) instead of the generic theme colors that were washed out on light backgrounds.
+
+### Improved
+- **Volume flash in mini mode**: Volume changes now briefly highlight the percentage text (1.5s cyan flash) so you get visual feedback in the compact display.
+- **Elapsed time visible earlier**: Mini mode shows elapsed time at 40+ columns (previously 60+).
+- **Health dot in station details**: The station details overlay (`i` key) now shows a colored health dot inline with the "Health" section header.
+
+### Internal
+- 807 tests pass, zero clippy warnings.
+- Health classifier accepts a `now` timestamp parameter for time-aware decay (pure function, no I/O).
+- `ThemePalette` has dedicated `health_healthy`/`health_flaky`/`health_failed` color fields per theme.
+- Mini mode renderer uses `Cow<'a, str>` to avoid unnecessary string allocations.
+- Module visibility tightened (`pub(crate)` for `elapsed_timer`, `elapsed_format`).
+- `src/ui/stations/` and `src/favorites/` extracted as directory modules; all other files keep inline tests.
+
+---
+
+## [0.7.0] - Unreleased
+
+### Added
+- **Mini mode**: Press `F6` to toggle a compact 1-2 line display showing station name, track title, volume, and play state. Designed for small tmux panes and tiling window manager corners. Persists across restarts. Automatically adapts between single-line (height < 3) and two-line layout on resize.
+- **Color-coded station health**: Library stations now show a colored dot (● green = reliable, ● yellow = flaky, ● red = recently failed) based on local connection history. No-data stations show no dot. Health is derived from existing `StationHealth` fields — no new persistence needed.
+- **Elapsed listening time**: The footer (normal mode) and mini mode display how long you've been tuned to the current station. Pauses when playback pauses, resets on station change or stop. Format: `MM:SS` or `H:MM:SS`, capped at `99:59:59`.
+
+### Internal
+- 784 tests pass, zero clippy warnings.
+- New domain modules: `elapsed_timer`, `elapsed_format`, `radio::health_classifier`.
+- `DisplayMode` enum (Normal/Mini) persisted in `ui-state.json`.
+- Mini mode key handler (`src/app/mini_mode.rs`) restricts input to playback controls only.
+- Property-testable pure functions for elapsed formatting (round-trip verified) and health classification.
+
+---
+
 ## [0.6.1] - Unreleased
 
 ### Fixed

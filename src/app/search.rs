@@ -85,6 +85,9 @@ impl App {
             self.library.settings.last_played_url = Some(station.url.clone());
             self.mark_library_dirty();
 
+            self.playback.elapsed_timer.reset();
+            self.playback.elapsed_timer.start();
+
             if self.send_audio_command(AudioCommand::Play(station.url)) {
                 self.sync_volume();
                 true
@@ -121,6 +124,8 @@ impl App {
 
             self.playback.view.playing_url = Some(station.url.clone());
             self.playback.view.state = next_playback;
+            self.playback.elapsed_timer.reset();
+            self.playback.elapsed_timer.start();
             if self.send_audio_command(AudioCommand::Play(station.url)) {
                 self.sync_volume();
                 self.set_info_notice("Auditioning stream (not saved to library)");

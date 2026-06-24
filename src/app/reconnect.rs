@@ -56,6 +56,7 @@ impl Reconnect {
 impl super::App {
     pub(super) fn drive_reconnect(&mut self, now: Instant) {
         if let Some(url) = self.playback.reconnect.take_due(now) {
+            self.playback.elapsed_timer.reset();
             let (n, max) = (
                 self.playback.reconnect.attempt(),
                 self.playback.reconnect.max(),
@@ -230,5 +231,72 @@ mod tests {
         // After the new backoff (3s), the new URL is returned
         let t4 = t3 + Duration::from_secs(3);
         assert_eq!(rec.take_due(t4), Some(url_b));
+    }
+
+    /// **Validates: Requirements 3.1, 3.2**
+    #[test]
+    fn test_drive_reconnect_resets_elapsed_timer() {
+        use super::super::lifecycle::AppParts;
+        use super::super::ui_state::UiState;
+        use super::super::{App, DisplayMode, LayoutMode, VisualizerMode};
+        use crate::audio::AudioEngine;
+        use crate::favorites::Library;
+        use crate::radio::Station;
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let library = Library::in_memory(vec![Station::basic(
+            "Test",
+            "http://test-stream",
+            "Radio",
+            "US",
+            128,
+        )]);
+        let parts = AppParts {
+            library,
+            ui_state: UiState::from_app_values(
+                50,
+                false,
+                LayoutMode::Split,
+                VisualizerMode::RealOscilloscope,
+                DisplayMode::Normal,
+            ),
+            ui_state_warning: None,
+            history: crate::history::History::default(),
+            history_warning: None,
+            audio: AudioEngine::disconnected_for_test(),
+            sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
+        };
+        let mut app = App::from_parts(parts);
+
+        // Simulate accumulated elapsed time
+        app.playback.elapsed_timer.start();
+        app.playback.elapsed_timer.tick(Duration::from_secs(120));
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            Duration::from_secs(120)
+        );
+        assert!(app.playback.elapsed_timer.is_running());
+
+        // Arm a reconnect
+        let now = Instant::now();
+        app.playback
+            .reconnect
+            .arm("http://test-stream".to_string(), now);
+
+        // Drive reconnect after backoff elapses
+        let after_backoff = now + Duration::from_secs(3);
+        app.drive_reconnect(after_backoff);
+
+        // Timer should be reset to zero and not running
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            Duration::ZERO,
+            "elapsed_timer should be zero after drive_reconnect fires"
+        );
+        assert!(
+            !app.playback.elapsed_timer.is_running(),
+            "elapsed_timer should not be running after drive_reconnect fires"
+        );
     }
 }

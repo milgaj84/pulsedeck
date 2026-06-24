@@ -130,6 +130,10 @@ impl App {
         &self.ui.input_mode
     }
 
+    pub fn display_mode(&self) -> &DisplayMode {
+        &self.ui.display_mode
+    }
+
     fn sync_startup_audio_settings(&mut self) {
         self.sync_output_device();
         self.sync_stream_metadata();
@@ -181,6 +185,8 @@ impl App {
         }
         self.playback.view.playing_url = Some(url.clone());
         self.playback.view.state = PlaybackState::Connecting;
+        self.playback.elapsed_timer.reset();
+        self.playback.elapsed_timer.start();
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();
         }
@@ -369,6 +375,7 @@ mod tests {
                 true,
                 LayoutMode::RightOnly,
                 VisualizerMode::SimOscilloscope,
+                DisplayMode::Normal,
             ),
             ui_state_warning: None,
             history: crate::history::History::default(),
@@ -453,7 +460,6 @@ mod tests {
 
     #[test]
     fn startup_autoplay_allows_aac_codec() {
-        // AAC is now supported via Symphonia; autoplay should proceed (not be blocked).
         let mut station = Station::basic("AAC Radio", "http://aac", "Pop", "US", 128);
         station.codec = "AAC".to_string();
 
@@ -463,14 +469,11 @@ mod tests {
 
         let app = App::from_parts(test_parts(library));
 
-        // Audio engine is disconnected in test_parts so we get an Error,
-        // but playing_url was set — the codec gate did NOT block it.
         assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://aac"));
     }
 
     #[test]
     fn startup_autoplay_blocks_hls_codec() {
-        // HLS remains unsupported; autoplay should be blocked.
         let mut station = Station::basic("HLS Radio", "http://hls", "Pop", "US", 128);
         station.codec = "HLS".to_string();
 
@@ -495,8 +498,6 @@ mod tests {
 
         let app = App::from_parts(test_parts(library));
 
-        // Audio engine is disconnected in test_parts, so it goes to Error,
-        // but the important thing is playing_url was set (codec was not blocked).
         assert_eq!(
             app.playback.view.playing_url.as_deref(),
             Some("http://mystery")
@@ -505,7 +506,6 @@ mod tests {
 
     #[test]
     fn startup_autoplay_allows_url_not_in_library() {
-        // URL not in the library: capability gate should not block it.
         let mut library = Library::in_memory(vec![]);
         library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://unknown-station".to_string());
@@ -547,15 +547,6 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // Preservation tests — verify existing correct behaviors that must not
-    // regress after the notification cooldown fix is applied.
-    // =========================================================================
-
-    /// A single new distinct title (with notifications enabled, user active,
-    /// matching URL) fires exactly one notification.
-    ///
-    /// **Validates: Requirement 3.1**
     #[test]
     fn test_single_title_fires_notification() {
         let station_url = "http://stream";
@@ -571,16 +562,9 @@ mod tests {
 
         app.handle_track_changed(station_url.to_string(), "Artist - New Song".to_string());
 
-        assert_eq!(
-            app.notification_count, 1,
-            "A single new title should fire exactly 1 notification"
-        );
+        assert_eq!(app.notification_count, 1);
     }
 
-    /// With `notifications_enabled = false`, no notification fires regardless
-    /// of the title content.
-    ///
-    /// **Validates: Requirement 3.2**
     #[test]
     fn test_disabled_notifications_suppresses() {
         let station_url = "http://stream";
@@ -596,15 +580,9 @@ mod tests {
 
         app.handle_track_changed(station_url.to_string(), "Artist - New Song".to_string());
 
-        assert_eq!(
-            app.notification_count, 0,
-            "No notification should fire when notifications are disabled"
-        );
+        assert_eq!(app.notification_count, 0);
     }
 
-    /// If the title is the same as current_track, no notification fires.
-    ///
-    /// **Validates: Requirement 3.4**
     #[test]
     fn test_duplicate_title_no_notification() {
         let station_url = "http://stream";
@@ -617,20 +595,13 @@ mod tests {
         )])));
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
-        // Pre-set current_track to simulate an already-known title
         app.playback.view.current_track = Some("Already Playing".to_string());
 
         app.handle_track_changed(station_url.to_string(), "Already Playing".to_string());
 
-        assert_eq!(
-            app.notification_count, 0,
-            "Duplicate title should not fire a notification"
-        );
+        assert_eq!(app.notification_count, 0);
     }
 
-    /// If the title is empty, no notification fires.
-    ///
-    /// **Validates: Requirement 3.5**
     #[test]
     fn test_empty_title_no_notification() {
         let station_url = "http://stream";
@@ -646,16 +617,9 @@ mod tests {
 
         app.handle_track_changed(station_url.to_string(), String::new());
 
-        assert_eq!(
-            app.notification_count, 0,
-            "Empty title should not fire a notification"
-        );
+        assert_eq!(app.notification_count, 0);
     }
 
-    /// `current_track` always reflects the latest title after handle_track_changed,
-    /// regardless of whether a notification fired.
-    ///
-    /// **Validates: Requirement 3.6**
     #[test]
     fn test_current_track_always_updated() {
         let station_url = "http://stream";
@@ -666,7 +630,7 @@ mod tests {
             "US",
             128,
         )])));
-        app.library.settings.notifications_enabled = false; // disabled — but state should still update
+        app.library.settings.notifications_enabled = false;
         app.playback.view.playing_url = Some(station_url.to_string());
 
         app.handle_track_changed(station_url.to_string(), "Latest Title".to_string());
@@ -674,13 +638,9 @@ mod tests {
         assert_eq!(
             app.playback.view.current_track.as_deref(),
             Some("Latest Title"),
-            "current_track must reflect the latest title regardless of notification state"
         );
     }
 
-    /// song_history records new distinct titles.
-    ///
-    /// **Validates: Requirement 3.6**
     #[test]
     fn test_song_history_records_new_title() {
         let station_url = "http://stream";
@@ -697,28 +657,10 @@ mod tests {
         app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
         app.handle_track_changed(station_url.to_string(), "Song Beta".to_string());
 
-        assert!(
-            app.song_history.contains(&"Song Alpha".to_string()),
-            "song_history should contain 'Song Alpha'"
-        );
-        assert!(
-            app.song_history.contains(&"Song Beta".to_string()),
-            "song_history should contain 'Song Beta'"
-        );
+        assert!(app.song_history.contains(&"Song Alpha".to_string()));
+        assert!(app.song_history.contains(&"Song Beta".to_string()));
     }
 
-    // =========================================================================
-    // Bug condition exploration test
-    // =========================================================================
-
-    /// Bug condition exploration test: demonstrates the notification swarm bug.
-    ///
-    /// This test asserts the EXPECTED (fixed) behavior: at most 1 notification
-    /// fires when multiple distinct titles arrive in immediate succession.
-    /// On UNFIXED code, this FAILS because each distinct title fires its own
-    /// notification — confirming the bug exists.
-    ///
-    /// **Validates: Requirements 1.1, 1.2, 1.3**
     #[test]
     fn test_burst_titles_produce_at_most_one_notification() {
         let station_url = "http://stream";
@@ -732,7 +674,6 @@ mod tests {
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        // Simulate a burst of 5 distinct TrackChanged events in immediate succession
         let burst_titles = [
             "Connecting...",
             "Ad Break",
@@ -745,32 +686,16 @@ mod tests {
             app.handle_track_changed(station_url.to_string(), title.to_string());
         }
 
-        // EXPECTED (fixed) behavior: at most 1 notification per burst window.
-        // UNFIXED behavior: 5 notifications fire (one per distinct title).
-        assert!(
-            app.notification_count <= 1,
-            "Expected at most 1 notification for a burst of {} titles, but got {}",
-            burst_titles.len(),
-            app.notification_count,
-        );
+        assert!(app.notification_count <= 1);
     }
 
-    // =========================================================================
-    // Task 3.1: Unit tests for NotificationCooldown
-    // =========================================================================
-
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_notification_cooldown_new_has_no_last_notified() {
         let cooldown = NotificationCooldown::new();
         let now = Instant::now();
-        assert!(
-            cooldown.may_notify(now),
-            "A fresh cooldown should allow notification (last_notified is None)"
-        );
+        assert!(cooldown.may_notify(now));
     }
 
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_may_notify_true_when_no_previous_notification() {
         let cooldown = NotificationCooldown::new();
@@ -778,7 +703,6 @@ mod tests {
         assert!(cooldown.may_notify(now));
     }
 
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_may_notify_true_when_elapsed_gte_cooldown() {
         let mut cooldown = NotificationCooldown::new();
@@ -786,13 +710,9 @@ mod tests {
         cooldown.record_notification(t1);
 
         let t2 = t1 + Duration::from_secs(5);
-        assert!(
-            cooldown.may_notify(t2),
-            "may_notify should return true when elapsed >= 5s"
-        );
+        assert!(cooldown.may_notify(t2));
     }
 
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_may_notify_false_when_elapsed_lt_cooldown() {
         let mut cooldown = NotificationCooldown::new();
@@ -800,31 +720,22 @@ mod tests {
         cooldown.record_notification(t1);
 
         let t2 = t1 + Duration::from_millis(4999);
-        assert!(
-            !cooldown.may_notify(t2),
-            "may_notify should return false when elapsed < 5s"
-        );
+        assert!(!cooldown.may_notify(t2));
     }
 
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_record_notification_updates_timestamp() {
         let mut cooldown = NotificationCooldown::new();
         let t1 = Instant::now();
         cooldown.record_notification(t1);
 
-        // Within cooldown of t1 → should be false
         let t2 = t1 + Duration::from_secs(2);
         assert!(!cooldown.may_notify(t2));
 
-        // After cooldown of t1 → should be true
         let t3 = t1 + Duration::from_secs(6);
         assert!(cooldown.may_notify(t3));
     }
 
-    /// Boundary: exactly 5000ms elapsed → returns true.
-    ///
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_may_notify_boundary_exactly_5000ms_returns_true() {
         let mut cooldown = NotificationCooldown::new();
@@ -832,15 +743,9 @@ mod tests {
         cooldown.record_notification(t1);
 
         let t2 = t1 + Duration::from_millis(5000);
-        assert!(
-            cooldown.may_notify(t2),
-            "Exactly 5000ms elapsed should return true (>= boundary)"
-        );
+        assert!(cooldown.may_notify(t2));
     }
 
-    /// Boundary: 4999ms elapsed → returns false.
-    ///
-    /// **Validates: Requirements 2.1**
     #[test]
     fn test_may_notify_boundary_4999ms_returns_false() {
         let mut cooldown = NotificationCooldown::new();
@@ -848,20 +753,9 @@ mod tests {
         cooldown.record_notification(t1);
 
         let t2 = t1 + Duration::from_millis(4999);
-        assert!(
-            !cooldown.may_notify(t2),
-            "4999ms elapsed should return false (< boundary)"
-        );
+        assert!(!cooldown.may_notify(t2));
     }
 
-    // =========================================================================
-    // Task 4.1: Integration tests for handle_track_changed with cooldown
-    // =========================================================================
-
-    /// Burst of 5 distinct titles in immediate succession → exactly 1
-    /// notification fires (the first one; subsequent ones suppressed by cooldown).
-    ///
-    /// **Validates: Requirements 1.1, 1.2, 2.1**
     #[test]
     fn test_burst_5_titles_at_most_1_notification() {
         let station_url = "http://stream";
@@ -880,15 +774,9 @@ mod tests {
             app.handle_track_changed(station_url.to_string(), title.to_string());
         }
 
-        assert_eq!(
-            app.notification_count, 1,
-            "Burst of 5 distinct titles should fire exactly 1 notification"
-        );
+        assert_eq!(app.notification_count, 1);
     }
 
-    /// Single title after ≥5s since last notification → fires immediately.
-    ///
-    /// **Validates: Requirements 3.1**
     #[test]
     fn test_single_title_after_cooldown_fires_immediately() {
         let station_url = "http://stream";
@@ -902,22 +790,14 @@ mod tests {
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        // Simulate a past notification well beyond cooldown
         let past = Instant::now() - Duration::from_secs(10);
         app.notification_cooldown.record_notification(past);
 
         app.handle_track_changed(station_url.to_string(), "Fresh Song".to_string());
 
-        assert_eq!(
-            app.notification_count, 1,
-            "Title after cooldown elapsed should fire immediately"
-        );
+        assert_eq!(app.notification_count, 1);
     }
 
-    /// Title during cooldown window → notification suppressed but current_track
-    /// updated.
-    ///
-    /// **Validates: Requirements 2.1, 3.6**
     #[test]
     fn test_title_during_cooldown_suppresses_notification() {
         let station_url = "http://stream";
@@ -931,26 +811,17 @@ mod tests {
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        // First title fires (records cooldown)
         app.handle_track_changed(station_url.to_string(), "First Song".to_string());
         assert_eq!(app.notification_count, 1);
 
-        // Second title during cooldown → suppressed
         app.handle_track_changed(station_url.to_string(), "Second Song".to_string());
-        assert_eq!(
-            app.notification_count, 1,
-            "Second title within cooldown should NOT fire notification"
-        );
+        assert_eq!(app.notification_count, 1);
         assert_eq!(
             app.playback.view.current_track.as_deref(),
             Some("Second Song"),
-            "current_track must still update even when notification suppressed"
         );
     }
 
-    /// Title during cooldown window → song_history still updated.
-    ///
-    /// **Validates: Requirements 2.1, 3.6**
     #[test]
     fn test_title_during_cooldown_song_history_still_updated() {
         let station_url = "http://stream";
@@ -964,19 +835,11 @@ mod tests {
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        // First title fires (records cooldown)
         app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
-        // Second title during cooldown → suppressed, but history updated
         app.handle_track_changed(station_url.to_string(), "Song Beta".to_string());
 
-        assert!(
-            app.song_history.contains(&"Song Alpha".to_string()),
-            "song_history should contain first title"
-        );
-        assert!(
-            app.song_history.contains(&"Song Beta".to_string()),
-            "song_history should contain second title even when notification suppressed"
-        );
+        assert!(app.song_history.contains(&"Song Alpha".to_string()));
+        assert!(app.song_history.contains(&"Song Beta".to_string()));
     }
 
     #[test]
@@ -984,33 +847,25 @@ mod tests {
         let mut cooldown = NotificationCooldown::new();
         let t0 = Instant::now();
         let t1 = t0 + Duration::from_secs(3);
-        let t2 = t0 + Duration::from_secs(6); // 6s after t0, but only 3s after t1
+        let t2 = t0 + Duration::from_secs(6);
 
         cooldown.record_notification(t0);
-        assert!(!cooldown.may_notify(t1)); // 3s < 5s
+        assert!(!cooldown.may_notify(t1));
 
-        // Record again at t1 — this should reset the window
         cooldown.record_notification(t1);
-        assert!(!cooldown.may_notify(t2)); // only 3s since t1
+        assert!(!cooldown.may_notify(t2));
 
-        let t3 = t1 + Duration::from_secs(5); // 5s after t1
-        assert!(cooldown.may_notify(t3)); // now allowed
+        let t3 = t1 + Duration::from_secs(5);
+        assert!(cooldown.may_notify(t3));
     }
 }
 
-// =============================================================================
-// Task 3.2: Property-based tests for NotificationCooldown
-// =============================================================================
 #[cfg(test)]
 mod cooldown_proptests {
     use super::*;
     use proptest::prelude::*;
     use std::time::{Duration, Instant};
 
-    // **Validates: Requirements 2.1**
-    //
-    // Property: for any elapsed duration >= 5s, may_notify returns true
-    // after a prior record_notification.
     proptest! {
         #[test]
         fn may_notify_true_when_elapsed_gte_5s(elapsed_ms in 5000u64..=600_000u64) {
@@ -1024,10 +879,6 @@ mod cooldown_proptests {
         }
     }
 
-    // **Validates: Requirements 2.1**
-    //
-    // Property: for any elapsed duration < 5s, may_notify returns false
-    // after a prior record_notification.
     proptest! {
         #[test]
         fn may_notify_false_when_elapsed_lt_5s(elapsed_ms in 0u64..5000u64) {
@@ -1041,10 +892,6 @@ mod cooldown_proptests {
         }
     }
 
-    // **Validates: Requirements 2.1**
-    //
-    // Property: a fresh NotificationCooldown always allows notification
-    // regardless of what Instant is provided.
     proptest! {
         #[test]
         fn may_notify_always_true_when_fresh(offset_ms in 0u64..=1_000_000u64) {
@@ -1055,10 +902,6 @@ mod cooldown_proptests {
         }
     }
 
-    // **Validates: Requirements 2.1**
-    //
-    // Property: record_notification always updates so that subsequent
-    // may_notify within cooldown returns false.
     proptest! {
         #[test]
         fn record_then_immediate_check_returns_false(

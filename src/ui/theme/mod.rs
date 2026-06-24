@@ -148,6 +148,24 @@ pub fn vol_empty() -> Style {
     Style::default().fg(p.vol_empty).bg(p.bg)
 }
 
+/// Health dot: healthy (green/success)
+pub fn health_healthy() -> Style {
+    let p = active();
+    Style::default().fg(p.health_healthy)
+}
+
+/// Health dot: flaky (yellow/warm)
+pub fn health_flaky() -> Style {
+    let p = active();
+    Style::default().fg(p.health_flaky)
+}
+
+/// Health dot: failed (red/error)
+pub fn health_failed() -> Style {
+    let p = active();
+    Style::default().fg(p.health_failed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

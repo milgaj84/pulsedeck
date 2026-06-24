@@ -4,6 +4,7 @@ mod idle;
 mod library;
 mod library_filter;
 mod lifecycle;
+pub mod mini_mode;
 mod nav;
 mod notifier;
 mod number_jump_handler;
@@ -44,8 +45,8 @@ pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{
-    AppNotice, DecoderState, InputMode, LayoutMode, PlaybackDiagnostics, PlaybackState,
-    SearchStatus, SettingRow,
+    AppNotice, DecoderState, DisplayMode, InputMode, LayoutMode, PlaybackDiagnostics,
+    PlaybackState, SearchStatus, SettingRow,
 };
 pub use ui_runtime::UiRuntimeState;
 pub use visualizer_mode::VisualizerMode;

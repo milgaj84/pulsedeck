@@ -1,3 +1,4 @@
+use super::DisplayMode;
 use super::LayoutMode;
 use super::VisualizerMode;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ pub(super) struct UiState {
     layout_mode: String,
     #[serde(default)]
     visualizer_mode: usize,
+    #[serde(default = "default_display_mode_key")]
+    display_mode: String,
 }
 
 impl Default for UiState {
@@ -27,6 +30,7 @@ impl Default for UiState {
             muted: false,
             layout_mode: default_layout_mode_key(),
             visualizer_mode: 0,
+            display_mode: default_display_mode_key(),
         }
     }
 }
@@ -59,12 +63,14 @@ impl UiState {
         muted: bool,
         layout_mode: LayoutMode,
         visualizer_mode: VisualizerMode,
+        display_mode: DisplayMode,
     ) -> Self {
         Self {
             volume,
             muted,
             layout_mode: layout_mode_key(layout_mode).to_string(),
             visualizer_mode: visualizer_mode.to_index(),
+            display_mode: display_mode_key(display_mode).to_string(),
         }
         .sanitized()
     }
@@ -79,6 +85,10 @@ impl UiState {
 
     pub(super) fn layout_mode(&self) -> LayoutMode {
         parse_layout_mode_key(&self.layout_mode).unwrap_or(LayoutMode::Split)
+    }
+
+    pub(super) fn display_mode(&self) -> DisplayMode {
+        parse_display_mode_key(&self.display_mode).unwrap_or(DisplayMode::Normal)
     }
 
     pub(super) fn visualizer_mode(&self) -> usize {
@@ -99,6 +109,9 @@ impl UiState {
         self.volume = self.volume.min(MAX_VOLUME);
         if parse_layout_mode_key(&self.layout_mode).is_none() {
             self.layout_mode = default_layout_mode_key();
+        }
+        if parse_display_mode_key(&self.display_mode).is_none() {
+            self.display_mode = default_display_mode_key();
         }
         self.visualizer_mode = self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1);
         self
@@ -130,6 +143,25 @@ fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
     }
 }
 
+fn default_display_mode_key() -> String {
+    display_mode_key(DisplayMode::Normal).to_string()
+}
+
+fn display_mode_key(display_mode: DisplayMode) -> &'static str {
+    match display_mode {
+        DisplayMode::Normal => "normal",
+        DisplayMode::Mini => "mini",
+    }
+}
+
+fn parse_display_mode_key(key: &str) -> Option<DisplayMode> {
+    match key {
+        "normal" => Some(DisplayMode::Normal),
+        "mini" => Some(DisplayMode::Mini),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +173,7 @@ mod tests {
         assert_eq!(state.volume(), 80);
         assert!(!state.muted());
         assert_eq!(state.layout_mode(), LayoutMode::Split);
+        assert_eq!(state.display_mode(), DisplayMode::Normal);
         assert_eq!(state.visualizer_mode(), 0);
     }
 
@@ -159,6 +192,7 @@ mod tests {
             muted: true,
             layout_mode: "garbage".to_string(),
             visualizer_mode: 99,
+            display_mode: "garbage".to_string(),
         };
 
         let state = state.sanitized();
@@ -166,6 +200,7 @@ mod tests {
         assert_eq!(state.volume(), 100);
         assert!(state.muted());
         assert_eq!(state.layout_mode(), LayoutMode::Split);
+        assert_eq!(state.display_mode(), DisplayMode::Normal);
         assert_eq!(state.visualizer_mode(), 2);
     }
 
@@ -181,17 +216,48 @@ mod tests {
     }
 
     #[test]
+    fn display_mode_keys_roundtrip() {
+        for mode in [DisplayMode::Normal, DisplayMode::Mini] {
+            assert_eq!(parse_display_mode_key(display_mode_key(mode)), Some(mode));
+        }
+    }
+
+    #[test]
+    fn display_mode_invalid_key_defaults_to_normal() {
+        let state = UiState {
+            display_mode: "invalid".to_string(),
+            ..UiState::default()
+        };
+
+        assert_eq!(state.display_mode(), DisplayMode::Normal);
+    }
+
+    #[test]
+    fn display_mode_sanitized_clamps_invalid() {
+        let state = UiState {
+            display_mode: "unknown".to_string(),
+            ..UiState::default()
+        };
+
+        let state = state.sanitized();
+
+        assert_eq!(state.display_mode, "normal");
+    }
+
+    #[test]
     fn from_app_values_clamps_visualizer_mode() {
         let state = UiState::from_app_values(
             65,
             true,
             LayoutMode::RightOnly,
             VisualizerMode::SimOscilloscope,
+            DisplayMode::Mini,
         );
 
         assert_eq!(state.volume(), 65);
         assert!(state.muted());
         assert_eq!(state.layout_mode(), LayoutMode::RightOnly);
+        assert_eq!(state.display_mode(), DisplayMode::Mini);
         assert_eq!(state.visualizer_mode(), 2);
     }
 }

@@ -57,6 +57,9 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
 - 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
+- 📐 **Mini mode**: press `F6` to toggle a compact 1-2 line display showing station, track, volume, and play state — designed for small tmux panes and tiling WM corners
+- 🟢 **Station health dots**: color-coded indicators (green/yellow/red) next to stations in the library based on local connection history — spot unreliable stations at a glance; old failures decay after 7 days
+- ⏱️ **Elapsed listening time**: shows how long you've been tuned to the current station in the footer and mini mode
 
 ---
 
@@ -127,6 +130,7 @@ PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control 
 | `Ctrl+m` / `Alt+m` | Search | Mute / unmute without leaving search |
 | `b` | View | Cycle Split View / Library Focus / Signal Focus |
 | `v` | View | Cycle RTA Spectrum / Real Osc / Sim Osc |
+| `F6` | Anywhere | Toggle mini mode (compact 1-2 line display) |
 | `,` | App | Open settings |
 | `h` / `?` | App | Show / hide help |
 | `q` | App | Quit, or close an open overlay first |

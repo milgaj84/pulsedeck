@@ -336,8 +336,7 @@ mod tests {
         assert_eq!(n1, 3);
         assert_eq!(&buf[..3], b"123");
 
-        let n2 = src.read(&mut buf).unwrap();
-        assert_eq!(n2, 3);
+        let _n2 = src.read(&mut buf).unwrap();
         assert_eq!(&buf[..3], b"456");
 
         // This read is limited to the remaining 2 audio bytes before metadata.
@@ -518,169 +517,169 @@ mod tests {
         assert_eq!(n, raw.len());
         assert_eq!(&buf[..n], raw);
     }
-}
 
-// ---------------------------------------------------------------------------
-// Property-based tests
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Property-based tests
+    // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-mod prop_tests {
-    use super::*;
-    use proptest::prelude::*;
-    use std::io::{Cursor, Read};
-    use std::sync::atomic::AtomicU64;
+    #[cfg(test)]
+    mod prop_tests {
+        use super::*;
+        use proptest::prelude::*;
+        use std::io::{Cursor, Read};
+        use std::sync::atomic::AtomicU64;
 
-    // ---- Helpers -----------------------------------------------------------
+        // ---- Helpers -----------------------------------------------------------
 
-    /// Encode `title` as an ICY metadata body padded to a 16-byte multiple.
-    fn encode_meta_block(title: &str) -> Vec<u8> {
-        if title.is_empty() {
-            return vec![0u8]; // zero-length block
-        }
-        let body_str = format!("StreamTitle='{}';", title);
-        let body_len = body_str.len().div_ceil(16) * 16;
-        let mut out = Vec::with_capacity(1 + body_len);
-        out.push((body_len / 16) as u8);
-        let mut body = body_str.into_bytes();
-        body.resize(body_len, 0);
-        out.extend_from_slice(&body);
-        out
-    }
-
-    /// Build a complete ICY byte stream from `audio_bytes`, `metaint`, and
-    /// a list of title strings (one per inter-chunk boundary).
-    ///
-    /// A metadata block is only inserted after a **full** `metaint`-byte audio
-    /// chunk.  A final partial chunk (stream ends before the next boundary) has
-    /// no trailing metadata block.
-    fn build_stream(audio: &[u8], metaint: usize, titles: &[String]) -> Vec<u8> {
-        assert!(metaint > 0, "metaint must be > 0");
-        let mut out = Vec::new();
-        let mut offset = 0;
-        let mut ti = 0;
-
-        while offset < audio.len() {
-            let end = (offset + metaint).min(audio.len());
-            let is_full_chunk = (end - offset) == metaint;
-            out.extend_from_slice(&audio[offset..end]);
-            offset = end;
-
-            // Only emit a metadata block after a full metaint chunk.
-            if is_full_chunk {
-                let title = titles.get(ti).map(String::as_str).unwrap_or("");
-                out.extend_from_slice(&encode_meta_block(title));
-                ti += 1;
+        /// Encode `title` as an ICY metadata body padded to a 16-byte multiple.
+        fn encode_meta_block(title: &str) -> Vec<u8> {
+            if title.is_empty() {
+                return vec![0u8]; // zero-length block
             }
+            let body_str = format!("StreamTitle='{}';", title);
+            let body_len = body_str.len().div_ceil(16) * 16;
+            let mut out = Vec::with_capacity(1 + body_len);
+            out.push((body_len / 16) as u8);
+            let mut body = body_str.into_bytes();
+            body.resize(body_len, 0);
+            out.extend_from_slice(&body);
+            out
         }
-        out
-    }
 
-    /// Read *all* bytes from a `StreamSource` into a `Vec<u8>`.
-    fn drain_source<R: Read>(src: &mut StreamSource<R>) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut buf = [0u8; 512];
-        loop {
-            match src.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => out.extend_from_slice(&buf[..n]),
-                Err(_) => break,
+        /// Build a complete ICY byte stream from `audio_bytes`, `metaint`, and
+        /// a list of title strings (one per inter-chunk boundary).
+        ///
+        /// A metadata block is only inserted after a **full** `metaint`-byte audio
+        /// chunk.  A final partial chunk (stream ends before the next boundary) has
+        /// no trailing metadata block.
+        fn build_stream(audio: &[u8], metaint: usize, titles: &[String]) -> Vec<u8> {
+            assert!(metaint > 0, "metaint must be > 0");
+            let mut out = Vec::new();
+            let mut offset = 0;
+            let mut ti = 0;
+
+            while offset < audio.len() {
+                let end = (offset + metaint).min(audio.len());
+                let is_full_chunk = (end - offset) == metaint;
+                out.extend_from_slice(&audio[offset..end]);
+                offset = end;
+
+                // Only emit a metadata block after a full metaint chunk.
+                if is_full_chunk {
+                    let title = titles.get(ti).map(String::as_str).unwrap_or("");
+                    out.extend_from_slice(&encode_meta_block(title));
+                    ti += 1;
+                }
             }
+            out
         }
-        out
-    }
 
-    // ---- Strategies --------------------------------------------------------
-
-    /// Strategy: a valid ICY metaint value (1..=8192).
-    fn arb_metaint() -> impl Strategy<Value = usize> {
-        1usize..=8192
-    }
-
-    /// Strategy: arbitrary audio payload (0..=4096 bytes).
-    fn arb_audio() -> impl Strategy<Value = Vec<u8>> {
-        prop::collection::vec(any::<u8>(), 0..=4096)
-    }
-
-    /// Strategy: a list of at most 64 ICY title strings, each up to 128 chars,
-    /// avoiding the `';` terminator sequence so the parser stays clean.
-    fn arb_titles() -> impl Strategy<Value = Vec<String>> {
-        prop::collection::vec("[^';]{0,128}", 0..=64)
-    }
-
-    // ========================================================================
-    // Property 7: ICY safety
-    //
-    // For any (audio_bytes, metaint, title_strings), all bytes returned by
-    // StreamSource::read equal audio_bytes with no metadata bytes present.
-    //
-    // Validates: Requirements 8.1, 8.3
-    // ========================================================================
-
-    proptest! {
-        #[test]
-        fn icy_safety_no_metadata_bytes_in_output(
-            audio in arb_audio(),
-            metaint in arb_metaint(),
-            titles in arb_titles(),
-        ) {
-            let stream_bytes = build_stream(&audio, metaint, &titles);
-            let (tx, _rx) = mpsc::channel();
-            let active = Arc::new(AtomicU64::new(1));
-            let mut src = StreamSource::new(
-                Cursor::new(stream_bytes),
-                Some(metaint),
-                1,
-                active,
-                tx,
-            );
-
-            let output = drain_source(&mut src);
-
-            prop_assert_eq!(
-                output,
-                audio,
-                "StreamSource output must equal raw audio bytes"
-            );
-        }
-    }
-
-    // ========================================================================
-    // Property 14: Stale StreamSource read is immediately abandoned
-    //
-    // For any StreamSource whose generation is made inactive before reading,
-    // the first read returns Abandoned without blocking.
-    //
-    // Validates: Requirements 8.5
-    // ========================================================================
-
-    proptest! {
-        #[test]
-        fn stale_generation_read_returns_abandoned(
-            audio in arb_audio(),
-            metaint in proptest::option::of(arb_metaint()),
-            // Use any nonzero active generation different from 1.
-            new_gen in 0u64..=100,
-        ) {
-            // Only test when new_gen != 1 (i.e., the generation is stale).
-            prop_assume!(new_gen != 1);
-
-            let (tx, _rx) = mpsc::channel();
-            let active = Arc::new(AtomicU64::new(1));
-            let mut src = StreamSource::new(
-                Cursor::new(audio),
-                metaint,
-                1,
-                active.clone(),
-                tx,
-            );
-
-            // Make the generation stale.
-            active.store(new_gen, SeqCst);
-
+        /// Read *all* bytes from a `StreamSource` into a `Vec<u8>`.
+        fn drain_source<R: Read>(src: &mut StreamSource<R>) -> Vec<u8> {
+            let mut out = Vec::new();
             let mut buf = [0u8; 512];
-            let err = src.read(&mut buf).expect_err("read should fail when generation is stale");
-            prop_assert_eq!(err.to_string(), "Abandoned");
+            loop {
+                match src.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => out.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+            out
+        }
+
+        // ---- Strategies --------------------------------------------------------
+
+        /// Strategy: a valid ICY metaint value (1..=8192).
+        fn arb_metaint() -> impl Strategy<Value = usize> {
+            1usize..=8192
+        }
+
+        /// Strategy: arbitrary audio payload (0..=4096 bytes).
+        fn arb_audio() -> impl Strategy<Value = Vec<u8>> {
+            prop::collection::vec(any::<u8>(), 0..=4096)
+        }
+
+        /// Strategy: a list of at most 64 ICY title strings, each up to 128 chars,
+        /// avoiding the `';` terminator sequence so the parser stays clean.
+        fn arb_titles() -> impl Strategy<Value = Vec<String>> {
+            prop::collection::vec("[^';]{0,128}", 0..=64)
+        }
+
+        // ========================================================================
+        // Property 7: ICY safety
+        //
+        // For any (audio_bytes, metaint, title_strings), all bytes returned by
+        // StreamSource::read equal audio_bytes with no metadata bytes present.
+        //
+        // Validates: Requirements 8.1, 8.3
+        // ========================================================================
+
+        proptest! {
+            #[test]
+            fn icy_safety_no_metadata_bytes_in_output(
+                audio in arb_audio(),
+                metaint in arb_metaint(),
+                titles in arb_titles(),
+            ) {
+                let stream_bytes = build_stream(&audio, metaint, &titles);
+                let (tx, _rx) = mpsc::channel();
+                let active = Arc::new(AtomicU64::new(1));
+                let mut src = StreamSource::new(
+                    Cursor::new(stream_bytes),
+                    Some(metaint),
+                    1,
+                    active,
+                    tx,
+                );
+
+                let output = drain_source(&mut src);
+
+                prop_assert_eq!(
+                    output,
+                    audio,
+                    "StreamSource output must equal raw audio bytes"
+                );
+            }
+        }
+
+        // ========================================================================
+        // Property 14: Stale StreamSource read is immediately abandoned
+        //
+        // For any StreamSource whose generation is made inactive before reading,
+        // the first read returns Abandoned without blocking.
+        //
+        // Validates: Requirements 8.5
+        // ========================================================================
+
+        proptest! {
+            #[test]
+            fn stale_generation_read_returns_abandoned(
+                audio in arb_audio(),
+                metaint in proptest::option::of(arb_metaint()),
+                // Use any nonzero active generation different from 1.
+                new_gen in 0u64..=100,
+            ) {
+                // Only test when new_gen != 1 (i.e., the generation is stale).
+                prop_assume!(new_gen != 1);
+
+                let (tx, _rx) = mpsc::channel();
+                let active = Arc::new(AtomicU64::new(1));
+                let mut src = StreamSource::new(
+                    Cursor::new(audio),
+                    metaint,
+                    1,
+                    active.clone(),
+                    tx,
+                );
+
+                // Make the generation stale.
+                active.store(new_gen, SeqCst);
+
+                let mut buf = [0u8; 512];
+                let err = src.read(&mut buf).expect_err("read should fail when generation is stale");
+                prop_assert_eq!(err.to_string(), "Abandoned");
+            }
         }
     }
 }

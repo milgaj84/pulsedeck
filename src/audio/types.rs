@@ -360,9 +360,9 @@ mod tests {
         let s = EngineError::Output(msg.into()).to_status_string();
         let expected_prefix = super::super::HARDWARE_OUTPUT_ERROR_PREFIX;
         assert!(
-            s.starts_with(expected_prefix),
-            "Output to_status_string `{s}` must start with HARDWARE_OUTPUT_ERROR_PREFIX `{expected_prefix}`"
-        );
+                s.starts_with(expected_prefix),
+                "Output to_status_string `{s}` must start with HARDWARE_OUTPUT_ERROR_PREFIX `{expected_prefix}`"
+            );
     }
 
     /// All non-Abandoned variants must produce a non-Unknown classification.
@@ -421,51 +421,51 @@ mod tests {
         assert_eq!(req.url, "http://example.com");
         assert_eq!(req.prebuffer.min_bytes, 1024);
     }
-}
 
-// ---------------------------------------------------------------------------
-// Property-based tests — Task 2.1
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Property-based tests — Task 2.1
+    // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-mod pbt {
-    use super::*;
-    use crate::app::{classify_playback_error, PlaybackErrorKind};
-    use proptest::prelude::*;
+    #[cfg(test)]
+    mod pbt {
+        use super::*;
+        use crate::app::{classify_playback_error, PlaybackErrorKind};
+        use proptest::prelude::*;
 
-    /// Arbitrary strategy for non-Abandoned `EngineError` variants.
-    ///
-    /// We cover:
-    ///   - `Connect` with arbitrary message strings
-    ///   - `Http` with arbitrary u16 status codes (full range)
-    ///   - `Decode` with arbitrary message strings
-    ///   - `Output` with arbitrary message strings
-    fn arb_engine_error() -> impl Strategy<Value = EngineError> {
-        prop_oneof![
-            any::<String>().prop_map(EngineError::Connect),
-            any::<u16>().prop_map(EngineError::Http),
-            any::<String>().prop_map(EngineError::Decode),
-            any::<String>().prop_map(EngineError::Output),
-        ]
-    }
-
-    proptest! {
-        /// **Property 10: Status classifiability**
+        /// Arbitrary strategy for non-Abandoned `EngineError` variants.
         ///
-        /// For any `EngineError` variant (excluding `Abandoned`),
-        /// `classify_playback_error(err.to_status_string())` returns a non-`Unknown` kind.
-        ///
-        /// **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5, 12.7**
-        #[test]
-        fn prop_error_string_always_classifiable(err in arb_engine_error()) {
-            let s = err.to_status_string();
-            let kind = classify_playback_error(&s);
-            prop_assert_ne!(
-                kind,
-                PlaybackErrorKind::Unknown,
-                "EngineError produced Unknown classification for status string: `{}`",
-                s
-            );
+        /// We cover:
+        ///   - `Connect` with arbitrary message strings
+        ///   - `Http` with arbitrary u16 status codes (full range)
+        ///   - `Decode` with arbitrary message strings
+        ///   - `Output` with arbitrary message strings
+        fn arb_engine_error() -> impl Strategy<Value = EngineError> {
+            prop_oneof![
+                any::<String>().prop_map(EngineError::Connect),
+                any::<u16>().prop_map(EngineError::Http),
+                any::<String>().prop_map(EngineError::Decode),
+                any::<String>().prop_map(EngineError::Output),
+            ]
+        }
+
+        proptest! {
+            /// **Property 10: Status classifiability**
+            ///
+            /// For any `EngineError` variant (excluding `Abandoned`),
+            /// `classify_playback_error(err.to_status_string())` returns a non-`Unknown` kind.
+            ///
+            /// **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5, 12.7**
+            #[test]
+            fn prop_error_string_always_classifiable(err in arb_engine_error()) {
+                let s = err.to_status_string();
+                let kind = classify_playback_error(&s);
+                prop_assert_ne!(
+                    kind,
+                    PlaybackErrorKind::Unknown,
+                    "EngineError produced Unknown classification for status string: `{}`",
+                    s
+                );
+            }
         }
     }
 }

@@ -74,6 +74,9 @@ pub enum Action {
     RefreshLibraryMetadata,
     ToggleVisualizerMode,
 
+    /// Display mode
+    ToggleMiniMode,
+
     /// App lifecycle
     Tick,
     Quit,

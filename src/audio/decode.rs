@@ -540,122 +540,122 @@ mod tests {
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Property-based tests
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // Property-based tests
+    // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-mod prop_tests {
-    use super::*;
-    use proptest::prelude::*;
+    #[cfg(test)]
+    mod prop_tests {
+        use super::*;
+        use proptest::prelude::*;
 
-    // ========================================================================
-    // Property 7.1: Prebuffer memory bound
-    //
-    // For any byte sequence and max_bytes, the prebuffer Vec len never exceeds max_bytes.
-    //
-    // Validates: Requirements 6.4
-    // ========================================================================
+        // ========================================================================
+        // Property 7.1: Prebuffer memory bound
+        //
+        // For any byte sequence and max_bytes, the prebuffer Vec len never exceeds max_bytes.
+        //
+        // Validates: Requirements 6.4
+        // ========================================================================
 
-    proptest! {
-        /// **Validates: Requirements 6.4**
-        #[test]
-        fn prop_prebuffer_memory_bounded(
-            data in prop::collection::vec(any::<u8>(), 0..=8192usize),
-            max_bytes in 1usize..=4096usize,
-        ) {
-            let min_bytes = max_bytes;
-            let fill_timeout = Duration::from_secs(60); // won't trigger
+        proptest! {
+            /// **Validates: Requirements 6.4**
+            #[test]
+            fn prop_prebuffer_memory_bounded(
+                data in prop::collection::vec(any::<u8>(), 0..=8192usize),
+                max_bytes in 1usize..=4096usize,
+            ) {
+                let min_bytes = max_bytes;
+                let fill_timeout = Duration::from_secs(60); // won't trigger
 
-            let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
+                let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
 
-            let mut stream = Cursor::new(data);
-            let mut pre: Vec<u8> = Vec::new();
-            let start = Instant::now();
-            let mut chunk = vec![0u8; 1024];
+                let mut stream = Cursor::new(data);
+                let mut pre: Vec<u8> = Vec::new();
+                let start = Instant::now();
+                let mut chunk = vec![0u8; 1024];
 
-            loop {
-                if pre.len() >= min_bytes {
-                    break;
-                }
-                if start.elapsed() > fill_timeout {
-                    break;
-                }
-                let remaining_cap = max_bytes.saturating_sub(pre.len());
-                if remaining_cap == 0 {
-                    break;
-                }
-                let read_len = chunk.len().min(remaining_cap);
-                match stream.read(&mut chunk[..read_len]) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        pre.extend_from_slice(&chunk[..n]);
-                        let percent = (pre.len() * 100)
-                            .checked_div(min_bytes)
-                            .unwrap_or(99)
-                            .min(99) as u8;
-                        let _ = event_tx.send(EngineEvent::Buffering {
-                            generation: 1,
-                            percent,
-                        });
+                loop {
+                    if pre.len() >= min_bytes {
+                        break;
                     }
-                    Err(_) => break,
+                    if start.elapsed() > fill_timeout {
+                        break;
+                    }
+                    let remaining_cap = max_bytes.saturating_sub(pre.len());
+                    if remaining_cap == 0 {
+                        break;
+                    }
+                    let read_len = chunk.len().min(remaining_cap);
+                    match stream.read(&mut chunk[..read_len]) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            pre.extend_from_slice(&chunk[..n]);
+                            let percent = (pre.len() * 100)
+                                .checked_div(min_bytes)
+                                .unwrap_or(99)
+                                .min(99) as u8;
+                            let _ = event_tx.send(EngineEvent::Buffering {
+                                generation: 1,
+                                percent,
+                            });
+                        }
+                        Err(_) => break,
+                    }
                 }
+
+                // Core invariant: prebuffer never exceeds max_bytes.
+                prop_assert!(
+                    pre.len() <= max_bytes,
+                    "prebuffer len {} exceeds max_bytes {}",
+                    pre.len(),
+                    max_bytes
+                );
             }
-
-            // Core invariant: prebuffer never exceeds max_bytes.
-            prop_assert!(
-                pre.len() <= max_bytes,
-                "prebuffer len {} exceeds max_bytes {}",
-                pre.len(),
-                max_bytes
-            );
         }
-    }
 
-    // ========================================================================
-    // Property 7.2: Visualizer passivity (non-blocking with contended mutex)
-    //
-    // For any scenario with contended mutex, the decode function completes
-    // without blocking.
-    //
-    // Validates: Requirements 13.2
-    // ========================================================================
+        // ========================================================================
+        // Property 7.2: Visualizer passivity (non-blocking with contended mutex)
+        //
+        // For any scenario with contended mutex, the decode function completes
+        // without blocking.
+        //
+        // Validates: Requirements 13.2
+        // ========================================================================
 
-    proptest! {
-        /// **Validates: Requirements 13.2**
-        #[test]
-        fn prop_visualizer_passivity_contended_mutex(
-            data in prop::collection::vec(any::<u8>(), 0..=256usize),
-            is_mp3_hint in any::<bool>(),
-        ) {
-            let sample_buffer: Arc<Mutex<VecDeque<f32>>> =
-                Arc::new(Mutex::new(VecDeque::new()));
+        proptest! {
+            /// **Validates: Requirements 13.2**
+            #[test]
+            fn prop_visualizer_passivity_contended_mutex(
+                data in prop::collection::vec(any::<u8>(), 0..=256usize),
+                is_mp3_hint in any::<bool>(),
+            ) {
+                let sample_buffer: Arc<Mutex<VecDeque<f32>>> =
+                    Arc::new(Mutex::new(VecDeque::new()));
 
-            // Hold the mutex lock to simulate contention.
-            let _guard = sample_buffer.lock().unwrap();
-            let sample_buffer_clone = Arc::clone(&sample_buffer);
-            let data_clone = data.clone();
+                // Hold the mutex lock to simulate contention.
+                let _guard = sample_buffer.lock().unwrap();
+                let sample_buffer_clone = Arc::clone(&sample_buffer);
+                let data_clone = data.clone();
 
-            // Spawn a thread to call DecodePipeline::build with the contended mutex.
-            let handle = std::thread::spawn(move || {
-                DecodePipeline::build(
-                    Cursor::new(data_clone),
-                    sample_buffer_clone,
-                    is_mp3_hint,
-                )
-            });
+                // Spawn a thread to call DecodePipeline::build with the contended mutex.
+                let handle = std::thread::spawn(move || {
+                    DecodePipeline::build(
+                        Cursor::new(data_clone),
+                        sample_buffer_clone,
+                        is_mp3_hint,
+                    )
+                });
 
-            // build must complete without blocking.
-            let result = handle.join();
-            prop_assert!(result.is_ok(), "DecodePipeline::build panicked or deadlocked");
+                // build must complete without blocking.
+                let result = handle.join();
+                prop_assert!(result.is_ok(), "DecodePipeline::build panicked or deadlocked");
 
-            // Result is either Ok or a Decode error.
-            match result.unwrap() {
-                Ok(_) | Err(EngineError::Decode(_)) => {}
-                Err(e) => prop_assert!(false, "Unexpected error variant: {:?}", e),
+                // Result is either Ok or a Decode error.
+                match result.unwrap() {
+                    Ok(_) | Err(EngineError::Decode(_)) => {}
+                    Err(e) => prop_assert!(false, "Unexpected error variant: {:?}", e),
+                }
             }
         }
     }

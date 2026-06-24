@@ -3,6 +3,8 @@ mod app;
 mod audio;
 mod cli;
 mod config;
+pub(crate) mod elapsed_format;
+pub(crate) mod elapsed_timer;
 mod event;
 mod favorites;
 mod favorites_set;
@@ -55,7 +57,7 @@ async fn main() -> Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
-        if let Some(action) = event::poll_action(TICK_RATE, app.input_mode()) {
+        if let Some(action) = event::poll_action(TICK_RATE, app.input_mode(), app.display_mode()) {
             app.update(action);
         } else {
             app.update(action::Action::Tick);

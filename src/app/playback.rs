@@ -63,6 +63,10 @@ impl App {
             self.playback.view.playing_url = Some(station.url.clone());
             self.playback.view.state = next_playback;
 
+            // Reset and start the elapsed timer for new playback.
+            self.playback.elapsed_timer.reset();
+            self.playback.elapsed_timer.start();
+
             // Persist last played station URL only after capability is confirmed.
             self.library.settings.last_played_url = Some(station.url.clone());
             self.mark_library_dirty();
@@ -122,6 +126,8 @@ impl App {
         self.playback.reconnect.disarm();
         self.playback.view.reset_transient_status();
         self.playback.view.state = PlaybackState::Connecting;
+        self.playback.elapsed_timer.reset();
+        self.playback.elapsed_timer.start();
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();
             self.set_info_notice("Retrying stream");
@@ -131,9 +137,11 @@ impl App {
     pub(super) fn toggle_pause(&mut self) {
         match self.playback.view.state.clone() {
             PlaybackState::Playing => {
+                self.playback.elapsed_timer.pause();
                 self.send_audio_command(AudioCommand::Pause);
             }
             PlaybackState::Paused => {
+                self.playback.elapsed_timer.start();
                 self.send_audio_command(AudioCommand::Resume);
             }
             PlaybackState::Stopped | PlaybackState::Error(_) => {
@@ -147,6 +155,7 @@ impl App {
 
     pub(super) fn stop_playback(&mut self) {
         self.playback.view.intentional_stop = true;
+        self.playback.elapsed_timer.reset();
         if !self.send_audio_command(AudioCommand::Stop) {
             self.playback.view.playing_url = None;
             return;
@@ -167,6 +176,7 @@ impl App {
 
     pub(super) fn stop_audio_before_quit(&mut self) {
         self.playback.view.intentional_stop = true;
+        self.playback.elapsed_timer.reset();
         self.force_flush_persistence();
         self.playback.audio.send(AudioCommand::Stop);
     }
@@ -175,6 +185,9 @@ impl App {
         let step = progressive_volume_step(self.playback.volume);
         self.playback.volume = self.playback.volume.saturating_add(step).min(100);
         self.playback.muted = false;
+        if self.ui.display_mode == DisplayMode::Mini {
+            self.ui.volume_flash_remaining = std::time::Duration::from_millis(1500);
+        }
         self.sync_volume();
         self.mark_ui_state_dirty();
     }
@@ -182,6 +195,9 @@ impl App {
     pub(super) fn volume_down(&mut self) {
         let step = progressive_volume_step(self.playback.volume);
         self.playback.volume = self.playback.volume.saturating_sub(step);
+        if self.ui.display_mode == DisplayMode::Mini {
+            self.ui.volume_flash_remaining = std::time::Duration::from_millis(1500);
+        }
         self.sync_volume();
         self.mark_ui_state_dirty();
     }
@@ -498,14 +514,12 @@ mod tests {
 
     #[test]
     fn aac_codec_now_starts_playback() {
-        // AAC is now supported via Symphonia; the codec gate should allow it through.
         let mut st = station("AAC Radio", "http://aac");
         st.codec = "AAC".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
 
         app.play_selected();
 
-        // playing_url and last_played_url should be set (gate was not tripped).
         assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://aac"));
         assert_eq!(
             app.library.settings.last_played_url.as_deref(),
@@ -516,7 +530,6 @@ mod tests {
 
     #[test]
     fn hls_codec_is_blocked_before_audio_command() {
-        // HLS remains unsupported; it should be blocked.
         let mut st = station("HLS Radio", "http://hls");
         st.codec = "HLS".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
@@ -536,7 +549,6 @@ mod tests {
 
     #[test]
     fn hls_codec_does_not_set_playing_url_or_last_played_url() {
-        // HLS remains unsupported; playing_url should never be set.
         let mut st = station("HLS Radio", "http://hls");
         st.codec = "HLS".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
@@ -550,14 +562,12 @@ mod tests {
 
     #[test]
     fn ogg_codec_now_starts_playback() {
-        // OGG is now supported via Symphonia; it should not be blocked.
         let mut st = station("OGG Radio", "http://ogg");
         st.codec = "OGG".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
 
         app.play_selected();
 
-        // playing_url is set since the codec gate does not block OGG.
         assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://ogg"));
         assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }

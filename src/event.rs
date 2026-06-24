@@ -1,24 +1,33 @@
 use crate::action::Action;
-use crate::app::InputMode;
+use crate::app::{DisplayMode, InputMode};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 
 /// Poll for terminal events and map them to Actions.
-/// Key mapping depends on the current input mode.
-pub fn poll_action(timeout: Duration, mode: &InputMode) -> Option<Action> {
+/// Key mapping depends on the current input mode and display mode.
+pub fn poll_action(
+    timeout: Duration,
+    mode: &InputMode,
+    display_mode: &DisplayMode,
+) -> Option<Action> {
     if event::poll(timeout).ok()? {
         if let Event::Key(key) = event::read().ok()? {
-            return map_key(key, mode);
+            return map_key(key, mode, display_mode);
         }
     }
     None
 }
 
-/// Map a key event to an Action based on current input mode.
-fn map_key(key: KeyEvent, mode: &InputMode) -> Option<Action> {
+/// Map a key event to an Action based on current input mode and display mode.
+fn map_key(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Option<Action> {
     // Ignore key release events (crossterm sends both press and release)
     if key.kind != crossterm::event::KeyEventKind::Press {
         return None;
+    }
+
+    // In Mini display mode with Normal input mode, use restricted key set.
+    if *display_mode == DisplayMode::Mini && *mode == InputMode::Normal {
+        return crate::app::mini_mode::map_mini_mode_key(key);
     }
 
     match mode {
@@ -140,6 +149,9 @@ fn map_normal(key: KeyEvent) -> Option<Action> {
         // Export library
         (_, KeyCode::Char('e')) => Some(Action::ExportLibrary),
 
+        // Mini mode toggle
+        (_, KeyCode::F(6)) => Some(Action::ToggleMiniMode),
+
         _ => None,
     }
 }
@@ -220,6 +232,9 @@ fn map_library_filter(key: KeyEvent) -> Option<Action> {
         // Exit filter mode, restore previous state.
         (_, KeyCode::Esc) => Some(Action::ExitLibraryFilter),
 
+        // F6: exit filter and toggle mini mode.
+        (_, KeyCode::F(6)) => Some(Action::ToggleMiniMode),
+
         // Confirm: play selected station and exit filter mode.
         (_, KeyCode::Enter) => Some(Action::LibraryFilterConfirm),
 
@@ -281,6 +296,8 @@ fn map_sleep_timer(key: KeyEvent) -> Option<Action> {
 mod tests {
     use super::*;
 
+    const NORMAL_DISPLAY: DisplayMode = DisplayMode::Normal;
+
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
@@ -292,40 +309,64 @@ mod tests {
     #[test]
     fn sleep_timer_mode_maps_adjust_presets_and_close() {
         assert_eq!(
-            map_key(key(KeyCode::Up), &InputMode::SleepTimer),
-            Some(Action::SleepTimerIncrease),
+            map_key(key(KeyCode::Up), &InputMode::SleepTimer, &NORMAL_DISPLAY),
+            Some(Action::SleepTimerIncrease)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('+')), &InputMode::SleepTimer),
-            Some(Action::SleepTimerIncrease),
+            map_key(
+                key(KeyCode::Char('+')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::SleepTimerIncrease)
         );
         assert_eq!(
-            map_key(key(KeyCode::Down), &InputMode::SleepTimer),
-            Some(Action::SleepTimerDecrease),
+            map_key(key(KeyCode::Down), &InputMode::SleepTimer, &NORMAL_DISPLAY),
+            Some(Action::SleepTimerDecrease)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('-')), &InputMode::SleepTimer),
-            Some(Action::SleepTimerDecrease),
+            map_key(
+                key(KeyCode::Char('-')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::SleepTimerDecrease)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('2')), &InputMode::SleepTimer),
-            Some(Action::SleepTimerPreset(30)),
+            map_key(
+                key(KeyCode::Char('2')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::SleepTimerPreset(30))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('0')), &InputMode::SleepTimer),
-            Some(Action::SleepTimerClear),
+            map_key(
+                key(KeyCode::Char('0')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::SleepTimerClear)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('c')), &InputMode::SleepTimer),
-            Some(Action::SleepTimerClear),
+            map_key(
+                key(KeyCode::Char('c')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::SleepTimerClear)
         );
         assert_eq!(
-            map_key(key(KeyCode::Esc), &InputMode::SleepTimer),
-            Some(Action::ToggleSleepTimer),
+            map_key(key(KeyCode::Esc), &InputMode::SleepTimer, &NORMAL_DISPLAY),
+            Some(Action::ToggleSleepTimer)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('t')), &InputMode::SleepTimer),
-            Some(Action::ToggleSleepTimer),
+            map_key(
+                key(KeyCode::Char('t')),
+                &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::ToggleSleepTimer)
         );
     }
 
@@ -335,78 +376,85 @@ mod tests {
             map_key(
                 modified_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 &InputMode::SleepTimer,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::Quit),
+            Some(Action::Quit)
         );
     }
 
     #[test]
     fn search_mode_treats_plain_f_as_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('f')), &InputMode::Search),
-            Some(Action::SearchInput('f')),
+            map_key(key(KeyCode::Char('f')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('f'))
         );
     }
 
     #[test]
     fn search_mode_treats_plain_a_as_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('a')), &InputMode::Search),
-            Some(Action::SearchInput('a')),
+            map_key(key(KeyCode::Char('a')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('a'))
         );
     }
 
     #[test]
     fn search_mode_treats_plain_u_as_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('u')), &InputMode::Search),
-            Some(Action::SearchInput('u')),
+            map_key(key(KeyCode::Char('u')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('u'))
         );
     }
 
     #[test]
     fn search_mode_treats_context_overlay_keys_as_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('i')), &InputMode::Search),
-            Some(Action::SearchInput('i')),
+            map_key(key(KeyCode::Char('i')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('i'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('g')), &InputMode::Search),
-            Some(Action::SearchInput('g')),
+            map_key(key(KeyCode::Char('g')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('g'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('r')), &InputMode::Search),
-            Some(Action::SearchInput('r')),
+            map_key(key(KeyCode::Char('r')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('r'))
         );
     }
 
     #[test]
     fn search_mode_f2_does_not_add_selected_result() {
-        assert_eq!(map_key(key(KeyCode::F(2)), &InputMode::Search), None,);
+        assert_eq!(
+            map_key(key(KeyCode::F(2)), &InputMode::Search, &NORMAL_DISPLAY),
+            None
+        );
     }
 
     #[test]
     fn search_mode_insert_does_not_add_selected_result() {
-        assert_eq!(map_key(key(KeyCode::Insert), &InputMode::Search), None,);
+        assert_eq!(
+            map_key(key(KeyCode::Insert), &InputMode::Search, &NORMAL_DISPLAY),
+            None
+        );
     }
 
     #[test]
     fn search_mode_plain_audio_keys_remain_text_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('m')), &InputMode::Search),
-            Some(Action::SearchInput('m')),
+            map_key(key(KeyCode::Char('m')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('m'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('-')), &InputMode::Search),
-            Some(Action::SearchInput('-')),
+            map_key(key(KeyCode::Char('-')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('-'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('=')), &InputMode::Search),
-            Some(Action::SearchInput('=')),
+            map_key(key(KeyCode::Char('=')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('='))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('+')), &InputMode::Search),
-            Some(Action::SearchInput('+')),
+            map_key(key(KeyCode::Char('+')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput('+'))
         );
     }
 
@@ -415,30 +463,34 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('-'), KeyModifiers::CONTROL),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::VolumeDown),
+            Some(Action::VolumeDown)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('='), KeyModifiers::CONTROL),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::VolumeUp),
+            Some(Action::VolumeUp)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('+'), KeyModifiers::CONTROL),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::VolumeUp),
+            Some(Action::VolumeUp)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('m'), KeyModifiers::CONTROL),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::ToggleMute),
+            Some(Action::ToggleMute)
         );
     }
 
@@ -447,145 +499,161 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('-'), KeyModifiers::ALT),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::VolumeDown),
+            Some(Action::VolumeDown)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('='), KeyModifiers::ALT),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::VolumeUp),
+            Some(Action::VolumeUp)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('m'), KeyModifiers::ALT),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::ToggleMute),
+            Some(Action::ToggleMute)
         );
     }
 
     #[test]
     fn normal_mode_search_shortcuts_enter_search() {
         assert_eq!(
-            map_key(key(KeyCode::Char('/')), &InputMode::Normal),
-            Some(Action::EnterSearch),
+            map_key(key(KeyCode::Char('/')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::EnterSearch)
         );
         assert_eq!(
-            map_key(key(KeyCode::F(3)), &InputMode::Normal),
-            Some(Action::EnterSearch),
+            map_key(key(KeyCode::F(3)), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::EnterSearch)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('f'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::EnterSearch),
+            Some(Action::EnterSearch)
         );
     }
 
     #[test]
     fn normal_mode_command_palette_shortcuts_open_palette() {
         assert_eq!(
-            map_key(key(KeyCode::Char(':')), &InputMode::Normal),
-            Some(Action::OpenCommandPalette),
+            map_key(key(KeyCode::Char(':')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::OpenCommandPalette)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('p'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::OpenCommandPalette),
+            Some(Action::OpenCommandPalette)
         );
     }
 
     #[test]
     fn command_palette_mode_maps_text_navigation_and_close() {
         assert_eq!(
-            map_key(key(KeyCode::Char('s')), &InputMode::CommandPalette),
-            Some(Action::CommandPaletteInput('s')),
+            map_key(
+                key(KeyCode::Char('s')),
+                &InputMode::CommandPalette,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::CommandPaletteInput('s'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Down), &InputMode::CommandPalette),
-            Some(Action::CommandPaletteNext),
+            map_key(
+                key(KeyCode::Down),
+                &InputMode::CommandPalette,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::CommandPaletteNext)
         );
         assert_eq!(
-            map_key(key(KeyCode::Up), &InputMode::CommandPalette),
-            Some(Action::CommandPalettePrev),
+            map_key(
+                key(KeyCode::Up),
+                &InputMode::CommandPalette,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::CommandPalettePrev)
         );
         assert_eq!(
-            map_key(key(KeyCode::Esc), &InputMode::CommandPalette),
-            Some(Action::CommandPaletteClose),
+            map_key(
+                key(KeyCode::Esc),
+                &InputMode::CommandPalette,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::CommandPaletteClose)
         );
     }
 
     #[test]
     fn normal_mode_right_steps_setting_forward() {
         assert_eq!(
-            map_key(key(KeyCode::Right), &InputMode::Normal),
-            Some(Action::StepSettingForward),
+            map_key(key(KeyCode::Right), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::StepSettingForward)
         );
     }
-
     #[test]
     fn normal_mode_left_steps_setting_backward() {
         assert_eq!(
-            map_key(key(KeyCode::Left), &InputMode::Normal),
-            Some(Action::StepSettingBackward),
+            map_key(key(KeyCode::Left), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::StepSettingBackward)
         );
     }
-
     #[test]
     fn normal_mode_l_steps_setting_forward() {
         assert_eq!(
-            map_key(key(KeyCode::Char('l')), &InputMode::Normal),
-            Some(Action::StepSettingForward),
+            map_key(key(KeyCode::Char('l')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::StepSettingForward)
         );
     }
-
     #[test]
     fn normal_mode_a_steps_setting_backward() {
         assert_eq!(
-            map_key(key(KeyCode::Char('a')), &InputMode::Normal),
-            Some(Action::StepSettingBackward),
+            map_key(key(KeyCode::Char('a')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::StepSettingBackward)
         );
     }
-
     #[test]
     fn normal_mode_f_removes_library_selection() {
         assert_eq!(
-            map_key(key(KeyCode::Char('f')), &InputMode::Normal),
-            Some(Action::RemoveLibrarySelection),
+            map_key(key(KeyCode::Char('f')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::RemoveLibrarySelection)
         );
     }
-
     #[test]
     fn normal_mode_u_undoes_library_removal() {
         assert_eq!(
-            map_key(key(KeyCode::Char('u')), &InputMode::Normal),
-            Some(Action::UndoRemoveLibrarySelection),
+            map_key(key(KeyCode::Char('u')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::UndoRemoveLibrarySelection)
         );
     }
 
     #[test]
     fn normal_mode_context_shortcuts_open_overlays_and_retry() {
         assert_eq!(
-            map_key(key(KeyCode::Char('i')), &InputMode::Normal),
-            Some(Action::ToggleStationDetails),
+            map_key(key(KeyCode::Char('i')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::ToggleStationDetails)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
-            Some(Action::ToggleRecentTracks),
+            map_key(key(KeyCode::Char('g')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::ToggleRecentTracks)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('r')), &InputMode::Normal),
-            Some(Action::RetryStream),
+            map_key(key(KeyCode::Char('r')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::RetryStream)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('d')), &InputMode::Normal),
-            Some(Action::TogglePlaybackDoctor),
+            map_key(key(KeyCode::Char('d')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::TogglePlaybackDoctor)
         );
     }
 
@@ -594,23 +662,26 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('I'), KeyModifiers::SHIFT),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::ToggleStationDetails),
+            Some(Action::ToggleStationDetails)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::ALT),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::RetryStream),
+            Some(Action::RetryStream)
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('D'), KeyModifiers::SHIFT),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::TogglePlaybackDoctor),
+            Some(Action::TogglePlaybackDoctor)
         );
     }
 
@@ -619,57 +690,60 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('i'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            None,
+            None
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('g'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            None,
+            None
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            None,
+            None
         );
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('d'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            None,
+            None
         );
     }
 
     #[test]
     fn search_mode_space_auditions_selected_result() {
         assert_eq!(
-            map_key(key(KeyCode::Char(' ')), &InputMode::Search),
-            Some(Action::SearchAudition),
+            map_key(key(KeyCode::Char(' ')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchAudition)
         );
     }
-
     #[test]
     fn search_mode_ctrl_enter_auditions_selected_result_when_supported() {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Enter, KeyModifiers::CONTROL),
-                &InputMode::Search
+                &InputMode::Search,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::SearchAudition),
+            Some(Action::SearchAudition)
         );
     }
-
     #[test]
     fn search_mode_enter_adds_and_plays_selected_result() {
         assert_eq!(
-            map_key(key(KeyCode::Enter), &InputMode::Search),
-            Some(Action::SearchConfirm),
+            map_key(key(KeyCode::Enter), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchConfirm)
         );
     }
 
@@ -686,145 +760,201 @@ mod tests {
             KeyCode::Char('T'),
             KeyCode::Delete,
         ];
-
         for code in removed_plain_keys {
-            assert_eq!(map_key(key(code), &InputMode::Normal), None);
+            assert_eq!(
+                map_key(key(code), &InputMode::Normal, &NORMAL_DISPLAY),
+                None
+            );
         }
-
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('r'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            None,
+            None
         );
     }
 
     #[test]
     fn test_normal_mode_t_and_e_bindings() {
         assert_eq!(
-            map_key(key(KeyCode::Char('t')), &InputMode::Normal),
+            map_key(key(KeyCode::Char('t')), &InputMode::Normal, &NORMAL_DISPLAY),
             Some(Action::ToggleSleepTimer)
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('e')), &InputMode::Normal),
+            map_key(key(KeyCode::Char('e')), &InputMode::Normal, &NORMAL_DISPLAY),
             Some(Action::ExportLibrary)
         );
     }
 
-    // --- LibraryFilter mode tests ---
-
     #[test]
     fn library_filter_mode_esc_exits() {
         assert_eq!(
-            map_key(key(KeyCode::Esc), &InputMode::LibraryFilter),
-            Some(Action::ExitLibraryFilter),
+            map_key(
+                key(KeyCode::Esc),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::ExitLibraryFilter)
         );
     }
-
     #[test]
     fn library_filter_mode_enter_confirms() {
         assert_eq!(
-            map_key(key(KeyCode::Enter), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterConfirm),
+            map_key(
+                key(KeyCode::Enter),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterConfirm)
         );
     }
-
     #[test]
     fn library_filter_mode_backspace_deletes() {
         assert_eq!(
-            map_key(key(KeyCode::Backspace), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterBackspace),
+            map_key(
+                key(KeyCode::Backspace),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterBackspace)
         );
     }
 
     #[test]
     fn library_filter_mode_printable_chars_are_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('a')), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterInput('a')),
+            map_key(
+                key(KeyCode::Char('a')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterInput('a'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('z')), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterInput('z')),
+            map_key(
+                key(KeyCode::Char('z')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterInput('z'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('5')), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterInput('5')),
+            map_key(
+                key(KeyCode::Char('5')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterInput('5'))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char(' ')), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterInput(' ')),
+            map_key(
+                key(KeyCode::Char(' ')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterInput(' '))
         );
         assert_eq!(
-            map_key(key(KeyCode::Char('-')), &InputMode::LibraryFilter),
-            Some(Action::LibraryFilterInput('-')),
+            map_key(
+                key(KeyCode::Char('-')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::LibraryFilterInput('-'))
         );
     }
 
     #[test]
     fn library_filter_mode_j_navigates_next() {
         assert_eq!(
-            map_key(key(KeyCode::Char('j')), &InputMode::LibraryFilter),
-            Some(Action::NextStation),
+            map_key(
+                key(KeyCode::Char('j')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::NextStation)
         );
     }
-
     #[test]
     fn library_filter_mode_k_navigates_prev() {
         assert_eq!(
-            map_key(key(KeyCode::Char('k')), &InputMode::LibraryFilter),
-            Some(Action::PrevStation),
+            map_key(
+                key(KeyCode::Char('k')),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::PrevStation)
         );
     }
-
     #[test]
     fn library_filter_mode_up_navigates_prev() {
         assert_eq!(
-            map_key(key(KeyCode::Up), &InputMode::LibraryFilter),
-            Some(Action::PrevStation),
+            map_key(key(KeyCode::Up), &InputMode::LibraryFilter, &NORMAL_DISPLAY),
+            Some(Action::PrevStation)
         );
     }
-
     #[test]
     fn library_filter_mode_down_navigates_next() {
         assert_eq!(
-            map_key(key(KeyCode::Down), &InputMode::LibraryFilter),
-            Some(Action::NextStation),
+            map_key(
+                key(KeyCode::Down),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::NextStation)
         );
     }
-
     #[test]
     fn library_filter_mode_ctrl_c_quits() {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::Quit),
+            Some(Action::Quit)
         );
     }
 
     #[test]
     fn library_filter_mode_unbound_keys_are_none() {
-        assert_eq!(map_key(key(KeyCode::Tab), &InputMode::LibraryFilter), None,);
-        assert_eq!(map_key(key(KeyCode::F(1)), &InputMode::LibraryFilter), None,);
         assert_eq!(
-            map_key(key(KeyCode::Delete), &InputMode::LibraryFilter),
-            None,
+            map_key(
+                key(KeyCode::Tab),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            None
+        );
+        assert_eq!(
+            map_key(
+                key(KeyCode::F(1)),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            None
+        );
+        assert_eq!(
+            map_key(
+                key(KeyCode::Delete),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            None
         );
     }
-
-    // --- New Normal mode bindings for library-ux-improvements ---
 
     #[test]
     fn normal_mode_ctrl_l_enters_library_filter() {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('l'), KeyModifiers::CONTROL),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::EnterLibraryFilter),
+            Some(Action::EnterLibraryFilter)
         );
     }
 
@@ -835,9 +965,10 @@ mod tests {
             assert_eq!(
                 map_key(
                     modified_key(KeyCode::Char(c), KeyModifiers::ALT),
-                    &InputMode::Normal
+                    &InputMode::Normal,
+                    &NORMAL_DISPLAY
                 ),
-                Some(Action::PlaySlot(digit)),
+                Some(Action::PlaySlot(digit))
             );
         }
     }
@@ -845,8 +976,8 @@ mod tests {
     #[test]
     fn normal_mode_star_toggles_favorite() {
         assert_eq!(
-            map_key(key(KeyCode::Char('*')), &InputMode::Normal),
-            Some(Action::ToggleFavorite),
+            map_key(key(KeyCode::Char('*')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::ToggleFavorite)
         );
     }
 
@@ -854,8 +985,8 @@ mod tests {
     fn normal_mode_digit_keys_produce_number_jump_digit() {
         for c in '0'..='9' {
             assert_eq!(
-                map_key(key(KeyCode::Char(c)), &InputMode::Normal),
-                Some(Action::NumberJumpDigit(c)),
+                map_key(key(KeyCode::Char(c)), &InputMode::Normal, &NORMAL_DISPLAY),
+                Some(Action::NumberJumpDigit(c))
             );
         }
     }
@@ -865,22 +996,23 @@ mod tests {
         assert_eq!(
             map_key(
                 modified_key(KeyCode::Char('G'), KeyModifiers::SHIFT),
-                &InputMode::Normal
+                &InputMode::Normal,
+                &NORMAL_DISPLAY
             ),
-            Some(Action::NumberJumpConfirm),
+            Some(Action::NumberJumpConfirm)
         );
     }
 
     #[test]
     fn normal_mode_digit_keys_with_ctrl_are_not_number_jump() {
-        // Ctrl+1–5 are now AssignSlot, Ctrl+0 and Ctrl+6–9 are unmapped
         for c in ['0', '6', '7', '8', '9'] {
             assert_eq!(
                 map_key(
                     modified_key(KeyCode::Char(c), KeyModifiers::CONTROL),
-                    &InputMode::Normal
+                    &InputMode::Normal,
+                    &NORMAL_DISPLAY
                 ),
-                None,
+                None
             );
         }
     }
@@ -892,9 +1024,10 @@ mod tests {
             assert_eq!(
                 map_key(
                     modified_key(KeyCode::Char(c), KeyModifiers::CONTROL),
-                    &InputMode::Normal
+                    &InputMode::Normal,
+                    &NORMAL_DISPLAY
                 ),
-                Some(Action::AssignSlot(digit)),
+                Some(Action::AssignSlot(digit))
             );
         }
     }
@@ -905,9 +1038,10 @@ mod tests {
             assert_eq!(
                 map_key(
                     modified_key(KeyCode::Char(c), KeyModifiers::ALT),
-                    &InputMode::Normal
+                    &InputMode::Normal,
+                    &NORMAL_DISPLAY
                 ),
-                None,
+                None
             );
         }
     }
@@ -915,8 +1049,26 @@ mod tests {
     #[test]
     fn normal_mode_lowercase_g_still_toggles_recent_tracks() {
         assert_eq!(
-            map_key(key(KeyCode::Char('g')), &InputMode::Normal),
-            Some(Action::ToggleRecentTracks),
+            map_key(key(KeyCode::Char('g')), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::ToggleRecentTracks)
+        );
+    }
+    #[test]
+    fn normal_mode_f6_toggles_mini_mode() {
+        assert_eq!(
+            map_key(key(KeyCode::F(6)), &InputMode::Normal, &NORMAL_DISPLAY),
+            Some(Action::ToggleMiniMode)
+        );
+    }
+    #[test]
+    fn library_filter_mode_f6_toggles_mini_mode() {
+        assert_eq!(
+            map_key(
+                key(KeyCode::F(6)),
+                &InputMode::LibraryFilter,
+                &NORMAL_DISPLAY
+            ),
+            Some(Action::ToggleMiniMode)
         );
     }
 }

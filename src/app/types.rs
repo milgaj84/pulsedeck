@@ -91,6 +91,13 @@ pub enum DecoderState {
     Failed,
 }
 
+/// Display mode: Normal (full TUI) or Mini (compact 1-2 line output).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DisplayMode {
+    Normal,
+    Mini,
+}
+
 /// TUI Dashboard layout configurations.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LayoutMode {

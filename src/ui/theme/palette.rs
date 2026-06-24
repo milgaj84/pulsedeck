@@ -26,6 +26,11 @@ pub struct ThemePalette {
     pub success: Color,
     pub error: Color,
 
+    // Health dot colors (dedicated, not aliases of success/warm/error)
+    pub health_healthy: Color,
+    pub health_flaky: Color,
+    pub health_failed: Color,
+
     // Volume bar
     pub vol_filled: Color,
     pub vol_empty: Color,
@@ -50,6 +55,10 @@ pub(super) fn palette_retrowave() -> ThemePalette {
         success: Color::Rgb(57, 255, 20), // Neon green
         error: Color::Rgb(255, 60, 60),
 
+        health_healthy: Color::Rgb(57, 255, 20), // Neon green
+        health_flaky: Color::Rgb(255, 140, 66),  // Sunset orange
+        health_failed: Color::Rgb(255, 60, 60),  // Red
+
         vol_filled: Color::Rgb(0, 240, 255),
         vol_empty: Color::Rgb(40, 30, 60),
     }
@@ -71,6 +80,10 @@ pub(super) fn palette_mocha() -> ThemePalette {
 
         success: Color::Rgb(166, 227, 161), // Green
         error: Color::Rgb(243, 139, 168),   // Red
+
+        health_healthy: Color::Rgb(166, 227, 161), // Green
+        health_flaky: Color::Rgb(250, 179, 135),   // Peach
+        health_failed: Color::Rgb(243, 139, 168),  // Red
 
         vol_filled: Color::Rgb(137, 180, 250), // Blue
         vol_empty: Color::Rgb(88, 91, 112),    // Surface 2
@@ -94,6 +107,10 @@ pub(super) fn palette_macchiato() -> ThemePalette {
         success: Color::Rgb(166, 218, 149), // Green
         error: Color::Rgb(237, 135, 150),   // Red
 
+        health_healthy: Color::Rgb(166, 218, 149), // Green
+        health_flaky: Color::Rgb(245, 169, 127),   // Peach
+        health_failed: Color::Rgb(237, 135, 150),  // Red
+
         vol_filled: Color::Rgb(138, 173, 244), // Blue
         vol_empty: Color::Rgb(91, 96, 120),    // Surface 2
     }
@@ -115,6 +132,10 @@ pub(super) fn palette_frappe() -> ThemePalette {
 
         success: Color::Rgb(166, 209, 137), // Green
         error: Color::Rgb(231, 130, 132),   // Red
+
+        health_healthy: Color::Rgb(166, 209, 137), // Green
+        health_flaky: Color::Rgb(239, 159, 118),   // Peach
+        health_failed: Color::Rgb(231, 130, 132),  // Red
 
         vol_filled: Color::Rgb(140, 170, 238), // Blue
         vol_empty: Color::Rgb(98, 104, 128),   // Surface 2
@@ -138,6 +159,10 @@ pub(super) fn palette_latte() -> ThemePalette {
         success: Color::Rgb(64, 160, 43), // Green
         error: Color::Rgb(210, 15, 57),   // Red
 
+        health_healthy: Color::Rgb(30, 130, 30), // Dark green (WCAG AA)
+        health_flaky: Color::Rgb(180, 120, 0),   // Dark amber (WCAG AA)
+        health_failed: Color::Rgb(190, 20, 40),  // Dark red (WCAG AA)
+
         vol_filled: Color::Rgb(30, 102, 245), // Blue
         vol_empty: Color::Rgb(172, 176, 190), // Surface 2
     }
@@ -159,6 +184,10 @@ pub(super) fn palette_terminal() -> ThemePalette {
 
         success: Color::Green, // ANSI 2
         error: Color::Red,     // ANSI 1
+
+        health_healthy: Color::Green, // ANSI 2
+        health_flaky: Color::Yellow,  // ANSI 3
+        health_failed: Color::Red,    // ANSI 1
 
         vol_filled: Color::Cyan,    // ANSI 6
         vol_empty: Color::DarkGray, // ANSI 8

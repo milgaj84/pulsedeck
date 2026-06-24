@@ -90,6 +90,8 @@ impl App {
             | Action::SleepTimerClear => {}
             Action::ExportLibrary => self.export_library(),
 
+            Action::ToggleMiniMode => self.toggle_mini_mode(),
+
             Action::Tick => self.tick(),
             Action::Quit => self.quit(),
         }
@@ -97,7 +99,12 @@ impl App {
 
     pub(super) fn tick(&mut self) {
         let now = std::time::Instant::now();
+        let delta = now.duration_since(self.ui.last_tick_instant);
+        self.ui.last_tick_instant = now;
+
         self.ui.tick_count += 1;
+        self.playback.elapsed_timer.tick(delta);
+        self.ui.volume_flash_remaining = self.ui.volume_flash_remaining.saturating_sub(delta);
         self.tick_notice();
         self.poll_audio_status();
         self.update_visualizer();
@@ -288,5 +295,200 @@ mod tests {
         app.update(Action::Tick);
 
         assert_eq!(app.ui.tick_count, before + 1);
+    }
+
+    // ---- ToggleMiniMode --------------------------------------------------
+
+    #[test]
+    fn f6_toggles_normal_to_mini() {
+        let mut app = test_app();
+        assert_eq!(app.ui.display_mode, DisplayMode::Normal);
+
+        app.update(Action::ToggleMiniMode);
+
+        assert_eq!(app.ui.display_mode, DisplayMode::Mini);
+    }
+
+    #[test]
+    fn f6_toggles_mini_to_normal() {
+        let mut app = test_app();
+        app.ui.display_mode = DisplayMode::Mini;
+
+        app.update(Action::ToggleMiniMode);
+
+        assert_eq!(app.ui.display_mode, DisplayMode::Normal);
+    }
+
+    #[test]
+    fn f6_ignored_during_search_input_mode() {
+        let mut app = test_app();
+        app.ui.input_mode = InputMode::Search;
+
+        app.update(Action::ToggleMiniMode);
+
+        assert_eq!(app.ui.display_mode, DisplayMode::Normal);
+    }
+
+    #[test]
+    fn f6_ignored_during_command_palette_input_mode() {
+        let mut app = test_app();
+        app.ui.input_mode = InputMode::CommandPalette;
+
+        app.update(Action::ToggleMiniMode);
+
+        assert_eq!(app.ui.display_mode, DisplayMode::Normal);
+    }
+
+    // ---- Elapsed timer lifecycle integration -----------------------------
+
+    #[test]
+    fn elapsed_timer_resets_and_starts_on_play() {
+        let mut app = test_app();
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(30));
+
+        app.play_selected();
+
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            std::time::Duration::ZERO
+        );
+        assert!(app.playback.elapsed_timer.is_running());
+    }
+
+    #[test]
+    fn elapsed_timer_pauses_on_pause() {
+        let mut app = test_app();
+        app.playback.view.state = PlaybackState::Playing;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(10));
+
+        app.toggle_pause();
+
+        assert!(!app.playback.elapsed_timer.is_running());
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            std::time::Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn elapsed_timer_ticks_during_playing() {
+        let mut app = test_app();
+        app.playback.elapsed_timer.start();
+
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(5));
+
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            std::time::Duration::from_secs(5)
+        );
+    }
+
+    #[test]
+    fn elapsed_timer_resets_on_stop() {
+        let mut app = test_app();
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.view.state = PlaybackState::Connecting;
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(20));
+
+        app.stop_playback();
+
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            std::time::Duration::ZERO
+        );
+        assert!(!app.playback.elapsed_timer.is_running());
+    }
+
+    // ---- Mini mode Ctrl+C during Connecting state -----------------------
+
+    #[test]
+    fn quit_in_mini_mode_connecting_resets_timer_and_quits() {
+        let mut app = test_app();
+        app.ui.display_mode = DisplayMode::Mini;
+        app.playback.view.state = PlaybackState::Connecting;
+        app.playback.view.playing_url = Some("http://a".to_string());
+        app.playback.elapsed_timer.start();
+        app.playback
+            .elapsed_timer
+            .tick(std::time::Duration::from_secs(15));
+
+        app.update(Action::Quit);
+
+        assert!(app.ui.should_quit);
+        assert_eq!(
+            app.playback.elapsed_timer.elapsed(),
+            std::time::Duration::ZERO
+        );
+        assert!(!app.playback.elapsed_timer.is_running());
+    }
+
+    // ---- Volume flash in mini mode ----------------------------------------
+
+    #[test]
+    fn volume_up_in_mini_mode_sets_flash_timer() {
+        let mut app = test_app();
+        app.ui.display_mode = DisplayMode::Mini;
+
+        app.update(Action::VolumeUp);
+
+        assert_eq!(
+            app.ui.volume_flash_remaining,
+            std::time::Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
+    fn volume_down_in_mini_mode_sets_flash_timer() {
+        let mut app = test_app();
+        app.ui.display_mode = DisplayMode::Mini;
+        app.playback.volume = 50;
+
+        app.update(Action::VolumeDown);
+
+        assert_eq!(
+            app.ui.volume_flash_remaining,
+            std::time::Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
+    fn volume_up_in_normal_mode_does_not_set_flash_timer() {
+        let mut app = test_app();
+        app.ui.display_mode = DisplayMode::Normal;
+
+        app.update(Action::VolumeUp);
+
+        assert_eq!(app.ui.volume_flash_remaining, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn tick_decrements_volume_flash_remaining() {
+        let mut app = test_app();
+        app.ui.volume_flash_remaining = std::time::Duration::from_millis(1500);
+
+        app.update(Action::Tick);
+
+        assert!(app.ui.volume_flash_remaining < std::time::Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn tick_does_not_underflow_volume_flash_remaining() {
+        let mut app = test_app();
+        app.ui.volume_flash_remaining = std::time::Duration::ZERO;
+
+        app.update(Action::Tick);
+
+        assert_eq!(app.ui.volume_flash_remaining, std::time::Duration::ZERO);
     }
 }

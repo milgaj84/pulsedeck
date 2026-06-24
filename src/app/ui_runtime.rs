@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 pub struct UiRuntimeState {
     pub nav: Navigation,
@@ -11,6 +12,9 @@ pub struct UiRuntimeState {
     pub overlays: Overlays,
     pub visualizer_mode: VisualizerMode,
     pub visualizer_peaks: Vec<f32>,
+    pub display_mode: DisplayMode,
+    pub last_tick_instant: std::time::Instant,
+    pub volume_flash_remaining: Duration,
 }
 
 impl UiRuntimeState {
@@ -26,6 +30,9 @@ impl UiRuntimeState {
             overlays: Overlays::default(),
             visualizer_mode: VisualizerMode::from_index(ui_state.visualizer_mode()),
             visualizer_peaks: Vec::new(),
+            display_mode: ui_state.display_mode(),
+            last_tick_instant: std::time::Instant::now(),
+            volume_flash_remaining: Duration::ZERO,
         }
     }
 }
@@ -41,6 +48,7 @@ mod tests {
             true,
             LayoutMode::RightOnly,
             VisualizerMode::SimOscilloscope,
+            DisplayMode::Mini,
         );
 
         let runtime = UiRuntimeState::from_ui_state(&ui_state);
@@ -48,6 +56,7 @@ mod tests {
         assert_eq!(runtime.layout_mode, LayoutMode::RightOnly);
         assert_eq!(runtime.visualizer_mode, VisualizerMode::SimOscilloscope);
         assert_eq!(runtime.input_mode, InputMode::Normal);
+        assert_eq!(runtime.display_mode, DisplayMode::Mini);
         assert!(!runtime.should_quit);
     }
 }

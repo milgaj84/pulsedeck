@@ -163,6 +163,7 @@ impl App {
                 self.playback.muted,
                 self.ui.layout_mode,
                 self.ui.visualizer_mode,
+                self.ui.display_mode,
             );
 
             match state.save() {

@@ -4,6 +4,7 @@ pub mod critical;
 pub mod deck;
 pub mod header;
 pub mod help;
+pub mod mini;
 pub mod model;
 pub mod playback_doctor;
 pub mod recent_tracks;
@@ -17,7 +18,7 @@ pub mod theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::{ActiveOverlay, App, InputMode, LayoutMode};
+use crate::app::{ActiveOverlay, App, DisplayMode, InputMode, LayoutMode};
 use model::UiModel;
 
 const MIN_REQUIRED_WIDTH: u16 = 80;
@@ -35,6 +36,11 @@ fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
     // Fill background with the active theme before any layout work.
     let bg = Block::default().style(theme::clear());
     frame.render_widget(bg, size);
+
+    if app.display_mode == DisplayMode::Mini {
+        mini::render(frame, size, app);
+        return;
+    }
 
     if is_compact_terminal(size) {
         render_compact_terminal_warning(frame, size);

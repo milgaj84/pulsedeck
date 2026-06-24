@@ -1,4 +1,5 @@
 mod client;
+pub mod health_classifier;
 mod map;
 mod query;
 mod rank;

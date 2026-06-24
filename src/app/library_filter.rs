@@ -233,4 +233,19 @@ mod tests {
         assert!(!app.number_jump.is_active());
         assert_eq!(app.ui.input_mode, InputMode::LibraryFilter);
     }
+
+    #[test]
+    fn f6_exits_library_filter_and_toggles_mini_mode() {
+        let mut app = test_app();
+        app.ui.nav.selected = 1;
+        app.update(Action::EnterLibraryFilter);
+        assert_eq!(app.ui.input_mode, InputMode::LibraryFilter);
+        assert_eq!(app.ui.display_mode, DisplayMode::Normal);
+
+        app.update(Action::ToggleMiniMode);
+
+        assert_eq!(app.ui.input_mode, InputMode::Normal);
+        assert_eq!(app.ui.nav.selected, 1); // restored from snapshot
+        assert_eq!(app.ui.display_mode, DisplayMode::Mini);
+    }
 }
