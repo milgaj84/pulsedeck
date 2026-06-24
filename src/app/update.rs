@@ -90,6 +90,8 @@ impl App {
             | Action::SleepTimerClear => {}
             Action::ExportLibrary => self.export_library(),
 
+            Action::Discover => self.handle_discover(),
+
             Action::ToggleMiniMode => self.toggle_mini_mode(),
 
             Action::Tick => self.tick(),
@@ -112,6 +114,7 @@ impl App {
         self.check_sleep_timer(now);
         self.check_number_jump_timeout(now);
         self.flush_persistence();
+        self.tick_scrobble_tracker();
     }
 
     pub(super) fn quit(&mut self) {

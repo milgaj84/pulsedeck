@@ -266,6 +266,10 @@ mod tests {
             history_warning: None,
             audio: AudioEngine::disconnected_for_test(),
             sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            config: crate::config_toml::AppConfig::default(),
+            config_preserved: toml::Value::Table(toml::map::Map::new()),
+            config_warnings: Vec::new(),
+            config_loaded_from_file: false,
         };
         let mut app = App::from_parts(parts);
 

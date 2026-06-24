@@ -3,19 +3,24 @@ mod app;
 mod audio;
 mod cli;
 mod config;
+mod config_toml;
 pub(crate) mod elapsed_format;
 pub(crate) mod elapsed_timer;
 mod event;
 mod favorites;
 mod favorites_set;
 mod history;
+mod keybindings;
 mod library_filter;
 mod number_jump;
 mod playlist;
 mod playlist_export;
 mod radio;
 mod recent_ring;
+mod recommend;
+
 mod runtime;
+mod scrobble;
 mod text;
 mod theme_name;
 mod ui;
@@ -57,7 +62,9 @@ async fn main() -> Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
-        if let Some(action) = event::poll_action(TICK_RATE, app.input_mode(), app.display_mode()) {
+        if let Some(action) =
+            event::poll_action_with_registry(TICK_RATE, app.input_mode(), app.display_mode(), &app.keybinding_registry)
+        {
             app.update(action);
         } else {
             app.update(action::Action::Tick);

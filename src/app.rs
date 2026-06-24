@@ -1,4 +1,5 @@
 mod command_palette;
+mod discover;
 mod favorites_actions;
 mod idle;
 mod library;
@@ -15,6 +16,7 @@ mod playback_error;
 mod playback_runtime;
 mod recent;
 mod reconnect;
+mod scrobble;
 mod search;
 mod selectors;
 mod settings;
@@ -27,8 +29,10 @@ mod visualizer;
 pub mod visualizer_mode;
 
 use crate::favorites::Library;
+use crate::keybindings::KeybindingRegistry;
 use crate::number_jump::NumberJump;
 use crate::radio::Station;
+use crate::scrobble::tracker::ScrobbleTracker;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -74,8 +78,23 @@ pub struct App {
     metadata_refresh_running: bool,
     persist: persist::PersistFlags,
 
+    /// Custom keybinding registry (loaded from keybindings.json).
+    pub keybinding_registry: KeybindingRegistry,
+
     /// Cooldown state for notification rate-limiting.
     pub(crate) notification_cooldown: lifecycle::NotificationCooldown,
+
+    /// Discovery results from the recommendation engine.
+    pub discover_results: Vec<Station>,
+
+    /// Scrobble state machine — ticked each app tick, receives track changes.
+    pub scrobble_tracker: ScrobbleTracker,
+
+    /// Unified TOML configuration loaded at startup.
+    pub config: crate::config_toml::AppConfig,
+
+    /// Preserved unknown TOML keys for round-trip save operations.
+    pub config_preserved: toml::Value,
 
     /// Test-only counter for how many notifications were dispatched.
     #[cfg(test)]

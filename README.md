@@ -60,6 +60,10 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📐 **Mini mode**: press `F6` to toggle a compact 1-2 line display showing station, track, volume, and play state — designed for small tmux panes and tiling WM corners
 - 🟢 **Station health dots**: color-coded indicators (green/yellow/red) next to stations in the library based on local connection history — spot unreliable stations at a glance; old failures decay after 7 days
 - ⏱️ **Elapsed listening time**: shows how long you've been tuned to the current station in the footer and mini mode
+- 🔍 **Station recommendations**: "Discover stations" in the command palette scores candidates against your favorites' genres, tags, and country — expand your listening without manual search
+- 🎵 **Scrobble integration**: opt-in Last.fm or ListenBrainz now-playing and scrobble submissions for track metadata, with a 30-second threshold, retry queue, and trait-abstracted client
+- ⌨️ **Keybinding customization**: drop a `keybindings.json` in your config directory to remap any key to any action, with mode-specific bindings and graceful fallback to defaults
+- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, scrobble, and keybindings path — with backward-compatible migration from `library.json`
 
 ---
 
@@ -275,6 +279,60 @@ The old `~/.config/driftfm` directory is left untouched as a backup. Future save
 
 ---
 
+## Configuration File (`pulsedeck.toml`)
+
+PulseDeck supports a unified TOML configuration file at `~/.config/pulsedeck/pulsedeck.toml` (Linux), `~/Library/Application Support/pulsedeck/pulsedeck.toml` (macOS), or `%APPDATA%\pulsedeck\pulsedeck.toml` (Windows).
+
+If no TOML file exists, settings are read from `library.json` for backward compatibility. Once you change a setting through the app, `pulsedeck.toml` is created automatically.
+
+```toml
+[audio]
+output_device = "Built-in Speakers"  # optional, omit for default
+default_volume = 80                   # 0–100
+
+[ui]
+theme = "Retrowave"                   # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal
+notifications_enabled = true
+stream_metadata_enabled = true
+
+[playback]
+autoplay_last = false
+save_history = false
+
+[scrobble]
+enabled = false
+service = "lastfm"                    # "lastfm" or "listenbrainz"
+api_key = ""
+
+[keybindings]
+path = "keybindings.json"             # optional, relative to config dir
+```
+
+Unknown keys and sections are preserved when PulseDeck writes back — you can add custom fields for scripts without losing them.
+
+---
+
+## Custom Keybindings
+
+Place a `keybindings.json` in your config directory to override default key mappings:
+
+```json
+[
+  {"key": "char(k)", "modifiers": ["ctrl"], "action": "prev_station", "mode": "Normal"},
+  {"key": "char(j)", "modifiers": ["ctrl"], "action": "next_station", "mode": "Normal"},
+  {"key": "f5", "modifiers": [], "action": "toggle_mute"}
+]
+```
+
+- **key**: `"char(x)"`, `"enter"`, `"esc"`, `"up"`, `"down"`, `"f1"`–`"f12"`, `"tab"`, `"backspace"`, `"home"`, `"end"`, `"pageup"`, `"pagedown"`, `"delete"`, `"insert"`
+- **modifiers**: `[]`, `["ctrl"]`, `["alt"]`, `["shift"]`, or combinations
+- **action**: any action in snake_case (e.g., `"play_selected"`, `"volume_up"`, `"quit"`, `"toggle_mute"`)
+- **mode** (optional): `"Normal"`, `"Search"`, `"CommandPalette"`, `"SleepTimer"`, `"LibraryFilter"` — defaults to `"Normal"`
+
+Invalid entries are skipped with a warning; a malformed file falls back to built-in defaults. Custom bindings override defaults; last entry wins for duplicates.
+
+---
+
 ## Platform Support
 
 | Platform | Status |
@@ -298,7 +356,7 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
-**693 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, and number jump clamping.
+**979 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, scrobble state machine invariants, keybinding serialization round-trips, and TOML configuration round-trips.
 
 ---
 

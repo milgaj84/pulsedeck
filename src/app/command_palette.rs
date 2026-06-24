@@ -18,6 +18,7 @@ pub enum PaletteCommand {
     RefreshMetadata,
     OpenPlaybackDoctor,
     ExportLibrary,
+    Discover,
     OpenHelp,
 }
 
@@ -29,6 +30,7 @@ const ALWAYS_AVAILABLE_COMMANDS: &[PaletteCommand] = &[
     PaletteCommand::RefreshMetadata,
     PaletteCommand::OpenPlaybackDoctor,
     PaletteCommand::ExportLibrary,
+    PaletteCommand::Discover,
     PaletteCommand::OpenHelp,
 ];
 
@@ -43,6 +45,7 @@ pub fn command_label(command: PaletteCommand) -> &'static str {
         PaletteCommand::RefreshMetadata => "Refresh library metadata",
         PaletteCommand::OpenPlaybackDoctor => "Open playback doctor",
         PaletteCommand::ExportLibrary => "Export library",
+        PaletteCommand::Discover => "Discover stations",
         PaletteCommand::OpenHelp => "Open help",
     }
 }
@@ -58,6 +61,7 @@ pub fn command_action(command: PaletteCommand) -> Action {
         PaletteCommand::RefreshMetadata => Action::RefreshLibraryMetadata,
         PaletteCommand::OpenPlaybackDoctor => Action::TogglePlaybackDoctor,
         PaletteCommand::ExportLibrary => Action::ExportLibrary,
+        PaletteCommand::Discover => Action::Discover,
         PaletteCommand::OpenHelp => Action::ToggleHelp,
     }
 }

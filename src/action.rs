@@ -1,6 +1,6 @@
 /// All possible actions in PulseDeck.
 /// These flow from event handlers → app.update() to drive state changes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Navigation
     NextStation,
@@ -76,6 +76,9 @@ pub enum Action {
 
     /// Display mode
     ToggleMiniMode,
+
+    /// Discovery
+    Discover,
 
     /// App lifecycle
     Tick,

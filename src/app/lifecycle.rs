@@ -1,12 +1,16 @@
 use super::*;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
+use crate::config_toml::AppConfig;
+use crate::keybindings::KeybindingRegistry;
 use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
+use crate::scrobble::parse_track_metadata;
 use std::time::{Duration, Instant};
 
 const NOTICE_INFO_TICKS: u16 = 90;
 const NOTICE_ERROR_TICKS: u16 = 150;
 const SONG_HISTORY_CAP: usize = 100;
 const NOTIFY_IDLE_MS: u64 = 120_000;
+const KEYBINDINGS_FILE: &str = "keybindings.json";
 
 pub(super) const NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(5);
 
@@ -58,6 +62,11 @@ pub(super) struct AppParts {
     pub history_warning: Option<String>,
     pub audio: AudioEngine,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+    pub config: AppConfig,
+    pub config_preserved: toml::Value,
+    pub config_warnings: Vec<String>,
+    /// True when config was loaded from a file (TOML or migrated JSON).
+    pub config_loaded_from_file: bool,
 }
 
 impl AppParts {
@@ -66,6 +75,8 @@ impl AppParts {
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let audio = AudioEngine::spawn(sample_buffer.clone());
         let (history, history_warning) = crate::history::History::load_with_warning();
+        let (config, config_preserved, config_warnings, config_loaded_from_file) =
+            load_toml_config();
 
         Self {
             library,
@@ -75,8 +86,62 @@ impl AppParts {
             history_warning,
             audio,
             sample_buffer,
+            config,
+            config_preserved,
+            config_warnings,
+            config_loaded_from_file,
         }
     }
+}
+
+/// Load keybinding registry from `keybindings.json` in the config directory.
+/// Returns an empty registry (defaults only) if the file is missing or invalid.
+fn load_keybinding_registry() -> KeybindingRegistry {
+    let Some(path) = crate::config::config_path(KEYBINDINGS_FILE) else {
+        return KeybindingRegistry::new_with_defaults(Vec::new());
+    };
+
+    if !path.exists() {
+        return KeybindingRegistry::new_with_defaults(Vec::new());
+    }
+
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let mut warnings = Vec::new();
+            let registry = KeybindingRegistry::from_json(&bytes, &mut warnings);
+            for warning in &warnings {
+                eprintln!("[keybindings] {warning}");
+            }
+            registry
+        }
+        Err(err) => {
+            eprintln!("[keybindings] Could not read {}: {err}", path.display());
+            KeybindingRegistry::new_with_defaults(Vec::new())
+        }
+    }
+}
+
+/// Load TOML config from the config directory with library.json fallback.
+/// Returns defaults if no config directory is available.
+fn load_toml_config() -> (AppConfig, toml::Value, Vec<String>, bool) {
+    let Some(config_dir) = crate::config::config_dir() else {
+        return (
+            AppConfig::default(),
+            toml::Value::Table(toml::map::Map::new()),
+            Vec::new(),
+            false,
+        );
+    };
+
+    let toml_path = config_dir.join("pulsedeck.toml");
+    let json_path = config_dir.join("library.json");
+    let loaded_from_file = toml_path.exists() || json_path.exists();
+
+    let result = crate::config_toml::io::load_config(&config_dir);
+    for warning in &result.warnings {
+        eprintln!("[config] {warning}");
+    }
+    (result.config, result.preserved, result.warnings, loaded_from_file)
 }
 
 impl App {
@@ -85,10 +150,15 @@ impl App {
     }
 
     pub(super) fn from_parts(parts: AppParts) -> Self {
-        let diagnostics_output_device = crate::audio::output_device_display_name(
-            parts.library.settings.output_device_name.as_deref(),
-        );
-        let diagnostics_metadata_enabled = parts.library.settings.stream_metadata_enabled;
+        let config = parts.config;
+        let config_preserved = parts.config_preserved;
+        let config_loaded_from_file = parts.config_loaded_from_file;
+
+        let output_device = config.audio.output_device.as_deref()
+            .or(parts.library.settings.output_device_name.as_deref());
+        let diagnostics_output_device =
+            crate::audio::output_device_display_name(output_device);
+        let diagnostics_metadata_enabled = config.ui.stream_metadata_enabled;
         let ui = UiRuntimeState::from_ui_state(&parts.ui_state);
         let playback = PlaybackRuntime::new(
             &parts.ui_state,
@@ -97,6 +167,9 @@ impl App {
             parts.audio,
             parts.sample_buffer,
         );
+
+        let keybinding_registry = load_keybinding_registry();
+        let scrobble_enabled = config.scrobble.enabled;
 
         let mut app = Self {
             library: parts.library,
@@ -111,13 +184,22 @@ impl App {
             metadata_refresh_pending: false,
             metadata_refresh_running: false,
             persist: persist::PersistFlags::default(),
+            keybinding_registry,
             notification_cooldown: NotificationCooldown::new(),
+            discover_results: Vec::new(),
+            scrobble_tracker: ScrobbleTracker::new(scrobble_enabled),
+            config,
+            config_preserved,
             #[cfg(test)]
             notification_count: 0,
         };
 
+        if config_loaded_from_file {
+            app.apply_config_to_settings();
+        }
         app.sync_startup_audio_settings();
         app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
+        app.apply_config_warnings(parts.config_warnings);
         app.apply_startup_autoplay();
         app
     }
@@ -189,6 +271,26 @@ impl App {
         self.playback.elapsed_timer.start();
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();
+        }
+    }
+
+    /// Apply loaded TOML config values to library settings for backward compat.
+    fn apply_config_to_settings(&mut self) {
+        self.library.settings.theme = self.config.ui.theme.clone();
+        self.library.settings.notifications_enabled = self.config.ui.notifications_enabled;
+        self.library.settings.stream_metadata_enabled = self.config.ui.stream_metadata_enabled;
+        self.library.settings.autoplay_last = self.config.playback.autoplay_last;
+        self.library.settings.save_history = self.config.playback.save_history;
+        if self.config.audio.output_device.is_some() {
+            self.library.settings.output_device_name = self.config.audio.output_device.clone();
+        }
+        let theme = crate::theme_name::ThemeName::from_key(&self.config.ui.theme);
+        crate::ui::theme::set_active(theme);
+    }
+
+    fn apply_config_warnings(&mut self, warnings: Vec<String>) {
+        for warning in warnings {
+            self.library.load_warnings.push(warning);
         }
     }
 
@@ -269,7 +371,7 @@ impl App {
         }
     }
 
-    fn handle_track_changed(&mut self, url: String, title: String) {
+    pub(super) fn handle_track_changed(&mut self, url: String, title: String) {
         if !self
             .playback
             .view
@@ -282,6 +384,11 @@ impl App {
 
         let is_new = !title.is_empty() && self.playback.view.current_track.as_ref() != Some(&title);
         self.playback.view.current_track = Some(title.clone());
+
+        if is_new {
+            let meta = parse_track_metadata(&title);
+            self.scrobble_tracker.on_track_change(meta);
+        }
 
         if !title.is_empty() && self.song_history.back() != Some(&title) {
             self.song_history.push_back(title.clone());
@@ -382,6 +489,10 @@ mod tests {
             history_warning: None,
             audio: AudioEngine::disconnected_for_test(),
             sample_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(4096))),
+            config: AppConfig::default(),
+            config_preserved: toml::Value::Table(toml::map::Map::new()),
+            config_warnings: Vec::new(),
+            config_loaded_from_file: false,
         }
     }
 
@@ -857,6 +968,94 @@ mod tests {
 
         let t3 = t1 + Duration::from_secs(5);
         assert!(cooldown.may_notify(t3));
+    }
+
+    #[test]
+    fn from_parts_applies_config_when_loaded_from_file() {
+        let library = Library::in_memory(vec![]);
+        let mut parts = test_parts(library);
+        parts.config_loaded_from_file = true;
+        parts.config.ui.theme = "Terminal".to_string();
+        parts.config.ui.notifications_enabled = false;
+        parts.config.ui.stream_metadata_enabled = false;
+        parts.config.playback.autoplay_last = true;
+        parts.config.playback.save_history = true;
+        parts.config.audio.output_device = Some("USB DAC".to_string());
+
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.library.settings.theme, "Terminal");
+        assert!(!app.library.settings.notifications_enabled);
+        assert!(!app.library.settings.stream_metadata_enabled);
+        assert!(app.library.settings.autoplay_last);
+        assert!(app.library.settings.save_history);
+        assert_eq!(
+            app.library.settings.output_device_name.as_deref(),
+            Some("USB DAC")
+        );
+    }
+
+    #[test]
+    fn from_parts_does_not_override_settings_without_config_file() {
+        let mut library = Library::in_memory(vec![]);
+        library.settings.theme = "Terminal".to_string();
+        library.settings.notifications_enabled = false;
+        library.settings.autoplay_last = true;
+
+        let parts = test_parts(library);
+        // config_loaded_from_file is false in test_parts
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.library.settings.theme, "Terminal");
+        assert!(!app.library.settings.notifications_enabled);
+        assert!(app.library.settings.autoplay_last);
+    }
+
+    #[test]
+    fn from_parts_scrobble_config_enables_tracker() {
+        let library = Library::in_memory(vec![]);
+        let mut parts = test_parts(library);
+        parts.config.scrobble.enabled = true;
+
+        let app = App::from_parts(parts);
+
+        assert!(app.scrobble_tracker.is_enabled());
+    }
+
+    #[test]
+    fn from_parts_scrobble_config_disabled_by_default() {
+        let library = Library::in_memory(vec![]);
+        let parts = test_parts(library);
+
+        let app = App::from_parts(parts);
+
+        assert!(!app.scrobble_tracker.is_enabled());
+    }
+
+    #[test]
+    fn from_parts_stores_config_and_preserved() {
+        let library = Library::in_memory(vec![]);
+        let mut parts = test_parts(library);
+        parts.config.audio.default_volume = 42;
+
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.config.audio.default_volume, 42);
+        assert_eq!(
+            app.config_preserved,
+            toml::Value::Table(toml::map::Map::new())
+        );
+    }
+
+    #[test]
+    fn from_parts_config_warnings_appear_in_load_warnings() {
+        let library = Library::in_memory(vec![]);
+        let mut parts = test_parts(library);
+        parts.config_warnings = vec!["bad config value".to_string()];
+
+        let app = App::from_parts(parts);
+
+        assert!(app.library.load_warnings.contains(&"bad config value".to_string()));
     }
 }
 

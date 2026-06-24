@@ -4,6 +4,27 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.8.0] - Unreleased
+
+### Added
+- **Station recommendations ("Discover")**: A new "Discover stations" command in the command palette builds a favorites profile from your starred stations' genres, tags, and country, then scores candidate stations with a weighted similarity formula. Results are ranked by relevance with tie-breaking by votes and popularity.
+- **Scrobble integration**: Now-playing notifications and 30-second scrobble submissions to Last.fm or ListenBrainz. Opt-in via `[scrobble]` section in `pulsedeck.toml`. Includes a retry queue (max 50) for transient failures, ICY StreamTitle parsing into artist/title fields, and trait-abstracted client for testability.
+- **Keybinding customization**: Place a `keybindings.json` file in your config directory to remap any key combination to any action. Supports all input modes (Normal, Search, CommandPalette, SleepTimer, LibraryFilter), parameterized actions, and mode-specific bindings. Invalid entries are skipped with warnings; malformed files fall back to defaults.
+- **Unified configuration file (`pulsedeck.toml`)**: Centralizes settings previously scattered across `library.json` and `ui-state.json`. Sections: `[audio]` (output_device, default_volume), `[ui]` (theme, notifications, stream_metadata), `[playback]` (autoplay_last, save_history), `[scrobble]` (enabled, service, api_key), `[keybindings]` (path). Backward-compatible migration from `library.json` on first load. Unknown keys/sections are preserved across saves.
+
+### Changed
+- **Config loading at startup**: App now loads `pulsedeck.toml` first (with `library.json` fallback for migration), applying volume, theme, notifications, scrobble enablement, and audio output from the unified config.
+- **Event dispatch**: Key events are now resolved through the keybinding registry first, falling through to hardcoded tables only when no custom match exists.
+
+### Internal
+- 979 tests pass, zero failures.
+- 4 new domain modules: `src/recommend.rs`, `src/scrobble/` (mod, tracker), `src/keybindings/` (mod, registry), `src/config_toml/` (mod, parse, serialize, io).
+- 16 property-based tests (proptest, 100 cases each) covering: scoring formula, recommendation output invariants, profile aggregation, TrackMetadata round-trip, now-playing transitions, 30-second threshold, retry queue bounds, disabled scrobbler, keybinding serialization round-trip, custom binding precedence, mode isolation, TOML round-trip, unknown key preservation, volume clamping, theme validation, missing-field defaults.
+- Strict domain/UI separation maintained: all new modules compile and test without UI dependencies.
+- `toml = "0.8"` added as a runtime dependency for TOML parsing/serialization.
+
+---
+
 ## [0.7.1] - Unreleased
 
 ### Fixed
@@ -44,7 +65,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.6.1] - Unreleased
+## [0.6.1]
 
 ### Fixed
 - **Unicode library filter matching**: Library filter now uses proper Unicode case folding (`to_lowercase()`) instead of ASCII-only. International station names with accented characters, Cyrillic, etc. now match correctly.
@@ -61,7 +82,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.6.0] - Unreleased
+## [0.6.0]
 
 ### Added
 - **Fuzzy library search**: Press `Ctrl+l` to activate an in-library substring filter. Type to instantly narrow your saved stations by name, genre, or tag — no network calls, purely in-memory. Navigate filtered results with j/k and press Enter to play. Press Esc to restore the previous view.
@@ -87,7 +108,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.5.1] - Unreleased
+## [0.5.1]
 
 ### Added
 - **Comprehensive test coverage**: Added 60+ new tests across 11 modules covering previously untested public functions, error paths, state transitions, and data transformations.
@@ -139,7 +160,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.5.0] - Unreleased
+## [0.5.0]
 
 ### Added
 - **Multi-codec playback**: AAC, OGG/Vorbis, Opus, FLAC, and WAV streams are now playable alongside MP3 via Symphonia probe-based decoding.
@@ -170,7 +191,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.7] - Unreleased
+## [0.4.7]
 
 ### Added
 - Added a shared audio codec capability policy in `src/audio/capability.rs`.
@@ -190,7 +211,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.6] - Unreleased
+## [0.4.6]
 
 ### Changed
 *   **App state split**: Added `src/app/ui_runtime.rs::UiRuntimeState` for navigation, overlays, notices, input mode, layout, tick count, and visualizer display state.
@@ -205,7 +226,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.5] - Unreleased
+## [0.4.5]
 
 ### Fixed
 *   **Persistence retry storms**: Failed UI state, history, or library saves now keep their dirty flags but retry after a cooldown instead of hammering the filesystem every UI tick.
@@ -220,7 +241,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.4] - Unreleased
+## [0.4.4]
 
 ### Changed
 *   **UI read model**: Added `src/ui/model.rs::UiModel` as the read-only rendering snapshot derived from `App`, so TUI modules render from display-facing state instead of depending directly on the full app controller.
@@ -237,7 +258,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.3] - Unreleased
+## [0.4.3]
 
 ### Changed
 *   **App construction**: Split production runtime loading from pure app state assembly with internal `AppParts` and `App::from_parts`, keeping `App::new(library)` as the public convenience constructor.
@@ -251,7 +272,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.2] - Unreleased
+## [0.4.2]
 
 ### Changed
 *   **Station persistence model**: Removed the duplicate `SavedStation` mirror type and now serialize `Station` directly while preserving load-time normalization for bitrate, UUID, country code, tags, language, codec, and homepage.
@@ -268,7 +289,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.1] - Unreleased
+## [0.4.1]
 
 ### Fixed
 *   **Silent audio-engine command failures**: Audio commands now report when the engine command channel is closed, and user-triggered playback actions surface a visible error instead of pretending playback changed.
@@ -287,7 +308,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.4.0] - Unreleased
+## [0.4.0]
 
 ### Added
 *   **Command palette**: Added `:` / `Ctrl+p` command search for common actions including station search, retry, stop, settings, theme changes, song-info metadata toggle, Playback Doctor, library metadata refresh, export, and help.

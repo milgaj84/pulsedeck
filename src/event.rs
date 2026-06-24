@@ -1,30 +1,56 @@
 use crate::action::Action;
 use crate::app::{DisplayMode, InputMode};
+use crate::keybindings::{self, KeySpec, KeybindingRegistry, Modifier, NamedKey};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 
-/// Poll for terminal events and map them to Actions.
-/// Key mapping depends on the current input mode and display mode.
-pub fn poll_action(
+/// Poll for terminal events, checking the keybinding registry first.
+/// Custom bindings override defaults; falls through to hardcoded tables if no match.
+pub fn poll_action_with_registry(
     timeout: Duration,
     mode: &InputMode,
     display_mode: &DisplayMode,
+    registry: &KeybindingRegistry,
 ) -> Option<Action> {
     if event::poll(timeout).ok()? {
         if let Event::Key(key) = event::read().ok()? {
-            return map_key(key, mode, display_mode);
+            return map_key_with_registry(key, mode, display_mode, registry);
         }
     }
     None
 }
 
+/// Map a key event using the registry first, then fall through to hardcoded tables.
+fn map_key_with_registry(
+    key: KeyEvent,
+    mode: &InputMode,
+    display_mode: &DisplayMode,
+    registry: &KeybindingRegistry,
+) -> Option<Action> {
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return None;
+    }
+
+    if let Some(action) = resolve_from_registry(key, mode, registry) {
+        return Some(action);
+    }
+
+    map_key_inner(key, mode, display_mode)
+}
+
 /// Map a key event to an Action based on current input mode and display mode.
+#[cfg(test)]
 fn map_key(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Option<Action> {
     // Ignore key release events (crossterm sends both press and release)
     if key.kind != crossterm::event::KeyEventKind::Press {
         return None;
     }
 
+    map_key_inner(key, mode, display_mode)
+}
+
+/// Core key mapping logic shared by both paths (with and without registry).
+fn map_key_inner(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Option<Action> {
     // In Mini display mode with Normal input mode, use restricted key set.
     if *display_mode == DisplayMode::Mini && *mode == InputMode::Normal {
         return crate::app::mini_mode::map_mini_mode_key(key);
@@ -36,6 +62,68 @@ fn map_key(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Optio
         InputMode::CommandPalette => map_command_palette(key),
         InputMode::SleepTimer => map_sleep_timer(key),
         InputMode::LibraryFilter => map_library_filter(key),
+    }
+}
+
+/// Attempt to resolve a key event via the keybinding registry.
+fn resolve_from_registry(
+    key: KeyEvent,
+    mode: &InputMode,
+    registry: &KeybindingRegistry,
+) -> Option<Action> {
+    let key_spec = key_code_to_spec(key.code)?;
+    let modifiers = key_modifiers_to_vec(key.modifiers);
+    let kb_mode = input_mode_to_keybinding(mode);
+    registry.resolve(&key_spec, &modifiers, &kb_mode)
+}
+
+/// Convert crossterm KeyCode to keybinding KeySpec.
+fn key_code_to_spec(code: KeyCode) -> Option<KeySpec> {
+    match code {
+        KeyCode::Char(c) => Some(KeySpec::Char(c)),
+        KeyCode::F(n) => Some(KeySpec::Function(n)),
+        KeyCode::Enter => Some(KeySpec::Named(NamedKey::Enter)),
+        KeyCode::Esc => Some(KeySpec::Named(NamedKey::Esc)),
+        KeyCode::Up => Some(KeySpec::Named(NamedKey::Up)),
+        KeyCode::Down => Some(KeySpec::Named(NamedKey::Down)),
+        KeyCode::Left => Some(KeySpec::Named(NamedKey::Left)),
+        KeyCode::Right => Some(KeySpec::Named(NamedKey::Right)),
+        KeyCode::Tab => Some(KeySpec::Named(NamedKey::Tab)),
+        KeyCode::Backspace => Some(KeySpec::Named(NamedKey::Backspace)),
+        KeyCode::Home => Some(KeySpec::Named(NamedKey::Home)),
+        KeyCode::End => Some(KeySpec::Named(NamedKey::End)),
+        KeyCode::PageUp => Some(KeySpec::Named(NamedKey::PageUp)),
+        KeyCode::PageDown => Some(KeySpec::Named(NamedKey::PageDown)),
+        KeyCode::Delete => Some(KeySpec::Named(NamedKey::Delete)),
+        KeyCode::Insert => Some(KeySpec::Named(NamedKey::Insert)),
+        KeyCode::BackTab => Some(KeySpec::Named(NamedKey::Tab)),
+        _ => None,
+    }
+}
+
+/// Convert crossterm KeyModifiers bitflags to a Vec<Modifier>.
+fn key_modifiers_to_vec(modifiers: KeyModifiers) -> Vec<Modifier> {
+    let mut result = Vec::new();
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        result.push(Modifier::Ctrl);
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        result.push(Modifier::Alt);
+    }
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        result.push(Modifier::Shift);
+    }
+    result
+}
+
+/// Convert app-layer InputMode to keybindings-layer InputMode.
+fn input_mode_to_keybinding(mode: &InputMode) -> keybindings::InputMode {
+    match mode {
+        InputMode::Normal => keybindings::InputMode::Normal,
+        InputMode::Search => keybindings::InputMode::Search,
+        InputMode::CommandPalette => keybindings::InputMode::CommandPalette,
+        InputMode::SleepTimer => keybindings::InputMode::SleepTimer,
+        InputMode::LibraryFilter => keybindings::InputMode::LibraryFilter,
     }
 }
 
@@ -1070,5 +1158,212 @@ mod tests {
             ),
             Some(Action::ToggleMiniMode)
         );
+    }
+}
+
+#[cfg(test)]
+mod registry_integration_tests {
+    use super::*;
+    use crate::keybindings::{InputMode as KbMode, KeyBinding, KeySpec, Modifier, NamedKey};
+
+    fn binding(key: KeySpec, mods: Vec<Modifier>, action: Action, mode: KbMode) -> KeyBinding {
+        KeyBinding { key, modifiers: mods, action, mode }
+    }
+
+    fn registry_with_customs(customs: Vec<KeyBinding>) -> KeybindingRegistry {
+        let mut reg = KeybindingRegistry::new_with_defaults(Vec::new());
+        for c in customs {
+            reg.customs.push(c);
+        }
+        reg
+    }
+
+    #[test]
+    fn custom_binding_overrides_hardcoded_table() {
+        // 'q' normally maps to Quit in Normal mode; override it to Stop.
+        let registry = registry_with_customs(vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            KbMode::Normal,
+        )]);
+
+        let key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, Some(Action::Stop));
+    }
+
+    #[test]
+    fn unmatched_registry_falls_through_to_hardcoded() {
+        // Empty registry → 'q' still maps to Quit from hardcoded table.
+        let registry = KeybindingRegistry::new_with_defaults(Vec::new());
+
+        let key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, Some(Action::Quit));
+    }
+
+    #[test]
+    fn missing_file_uses_defaults_only() {
+        // An empty registry (simulating missing file) → hardcoded defaults work.
+        let registry = KeybindingRegistry::new_with_defaults(Vec::new());
+
+        let key_event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, Some(Action::PlaySelected));
+    }
+
+    #[test]
+    fn invalid_file_uses_defaults_with_warning() {
+        // Malformed JSON produces an empty-customs registry with a warning.
+        let mut warnings = Vec::new();
+        let registry = KeybindingRegistry::from_json(b"not json{{", &mut warnings);
+
+        assert!(!warnings.is_empty());
+        assert!(warnings[0].contains("Malformed"));
+
+        // Hardcoded table still works:
+        let key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, Some(Action::Quit));
+    }
+
+    #[test]
+    fn custom_binding_with_modifiers_resolves() {
+        let registry = registry_with_customs(vec![binding(
+            KeySpec::Char('x'),
+            vec![Modifier::Ctrl],
+            Action::ExportLibrary,
+            KbMode::Normal,
+        )]);
+
+        let key_event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, Some(Action::ExportLibrary));
+    }
+
+    #[test]
+    fn custom_binding_mode_specific_does_not_leak() {
+        // Bind 'x' to VolumeUp only in Search mode.
+        let registry = registry_with_customs(vec![binding(
+            KeySpec::Char('x'),
+            vec![],
+            Action::VolumeUp,
+            KbMode::Search,
+        )]);
+
+        // In Normal mode, 'x' should be unmapped (no hardcoded default for 'x').
+        let key_event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn key_release_events_are_ignored() {
+        let registry = registry_with_customs(vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            KbMode::Normal,
+        )]);
+
+        let mut key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        key_event.kind = crossterm::event::KeyEventKind::Release;
+
+        let result = map_key_with_registry(
+            key_event,
+            &InputMode::Normal,
+            &DisplayMode::Normal,
+            &registry,
+        );
+
+        assert_eq!(result, None);
+    }
+
+    // --- Conversion helper tests ---
+
+    #[test]
+    fn key_code_to_spec_converts_char() {
+        assert_eq!(key_code_to_spec(KeyCode::Char('a')), Some(KeySpec::Char('a')));
+    }
+
+    #[test]
+    fn key_code_to_spec_converts_function_key() {
+        assert_eq!(key_code_to_spec(KeyCode::F(5)), Some(KeySpec::Function(5)));
+    }
+
+    #[test]
+    fn key_code_to_spec_converts_named_keys() {
+        assert_eq!(key_code_to_spec(KeyCode::Enter), Some(KeySpec::Named(NamedKey::Enter)));
+        assert_eq!(key_code_to_spec(KeyCode::Esc), Some(KeySpec::Named(NamedKey::Esc)));
+        assert_eq!(key_code_to_spec(KeyCode::Up), Some(KeySpec::Named(NamedKey::Up)));
+        assert_eq!(key_code_to_spec(KeyCode::Down), Some(KeySpec::Named(NamedKey::Down)));
+        assert_eq!(key_code_to_spec(KeyCode::Backspace), Some(KeySpec::Named(NamedKey::Backspace)));
+    }
+
+    #[test]
+    fn key_code_to_spec_returns_none_for_unsupported() {
+        assert_eq!(key_code_to_spec(KeyCode::Null), None);
+    }
+
+    #[test]
+    fn key_modifiers_to_vec_converts_all_modifiers() {
+        let mods = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT;
+        let result = key_modifiers_to_vec(mods);
+        assert!(result.contains(&Modifier::Ctrl));
+        assert!(result.contains(&Modifier::Alt));
+        assert!(result.contains(&Modifier::Shift));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn key_modifiers_to_vec_returns_empty_for_none() {
+        let result = key_modifiers_to_vec(KeyModifiers::NONE);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn input_mode_to_keybinding_maps_all_modes() {
+        assert_eq!(input_mode_to_keybinding(&InputMode::Normal), KbMode::Normal);
+        assert_eq!(input_mode_to_keybinding(&InputMode::Search), KbMode::Search);
+        assert_eq!(input_mode_to_keybinding(&InputMode::CommandPalette), KbMode::CommandPalette);
+        assert_eq!(input_mode_to_keybinding(&InputMode::SleepTimer), KbMode::SleepTimer);
+        assert_eq!(input_mode_to_keybinding(&InputMode::LibraryFilter), KbMode::LibraryFilter);
     }
 }
