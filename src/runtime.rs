@@ -6,12 +6,15 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
 type SearchWorkerResponse = (String, Result<Vec<radio::Station>, String>);
 type MetadataRefreshWorkerResponse = Result<(usize, Vec<radio::Station>, usize), String>;
+type DiscoverWorkerResponse = Result<Vec<radio::Station>, String>;
 
 pub struct AppDriver {
     search_tx: tokio::sync::mpsc::UnboundedSender<SearchWorkerResponse>,
     search_rx: tokio::sync::mpsc::UnboundedReceiver<SearchWorkerResponse>,
     metadata_tx: tokio::sync::mpsc::UnboundedSender<MetadataRefreshWorkerResponse>,
     metadata_rx: tokio::sync::mpsc::UnboundedReceiver<MetadataRefreshWorkerResponse>,
+    discover_tx: tokio::sync::mpsc::UnboundedSender<DiscoverWorkerResponse>,
+    discover_rx: tokio::sync::mpsc::UnboundedReceiver<DiscoverWorkerResponse>,
     search_debounce: Option<(String, Instant)>,
 }
 
@@ -19,11 +22,14 @@ impl AppDriver {
     pub fn new() -> Self {
         let (search_tx, search_rx) = tokio::sync::mpsc::unbounded_channel();
         let (metadata_tx, metadata_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (discover_tx, discover_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             search_tx,
             search_rx,
             metadata_tx,
             metadata_rx,
+            discover_tx,
+            discover_rx,
             search_debounce: None,
         }
     }
@@ -34,6 +40,8 @@ impl AppDriver {
         self.drain_search_responses(app);
         self.spawn_metadata_refresh_if_requested(app);
         self.drain_metadata_refresh_responses(app);
+        self.spawn_discover_fetch_if_requested(app);
+        self.drain_discover_responses(app);
     }
 
     fn update_search_debounce(&mut self, app: &App) {
@@ -104,6 +112,26 @@ impl AppDriver {
     fn drain_metadata_refresh_responses(&mut self, app: &mut App) {
         while let Ok(result) = self.metadata_rx.try_recv() {
             app.apply_metadata_refresh_response(result);
+        }
+    }
+
+    fn spawn_discover_fetch_if_requested(&mut self, app: &mut App) {
+        let Some(tag_query) = app.take_discover_fetch_request() else {
+            return;
+        };
+
+        let tx = self.discover_tx.clone();
+        tokio::spawn(async move {
+            let result = radio::search_stations(&format!("tag:{tag_query}"))
+                .await
+                .map_err(|err| err.to_string());
+            let _ = tx.send(result);
+        });
+    }
+
+    fn drain_discover_responses(&mut self, app: &mut App) {
+        while let Ok(result) = self.discover_rx.try_recv() {
+            app.apply_discover_response(result);
         }
     }
 }

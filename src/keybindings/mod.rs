@@ -1,5 +1,6 @@
 // Keybinding customization — registry for loading and resolving key-to-action mappings.
 
+pub mod defaults;
 mod registry;
 
 use crate::action::Action;

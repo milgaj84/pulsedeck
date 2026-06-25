@@ -20,7 +20,6 @@ mod recent_ring;
 mod recommend;
 
 mod runtime;
-mod scrobble;
 mod text;
 mod theme_name;
 mod ui;
@@ -62,9 +61,12 @@ async fn main() -> Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
-        if let Some(action) =
-            event::poll_action_with_registry(TICK_RATE, app.input_mode(), app.display_mode(), &app.keybinding_registry)
-        {
+        if let Some(action) = event::poll_action_with_registry(
+            TICK_RATE,
+            app.input_mode(),
+            app.display_mode(),
+            &app.keybinding_registry,
+        ) {
             app.update(action);
         } else {
             app.update(action::Action::Tick);

@@ -16,7 +16,6 @@ mod playback_error;
 mod playback_runtime;
 mod recent;
 mod reconnect;
-mod scrobble;
 mod search;
 mod selectors;
 mod settings;
@@ -28,11 +27,11 @@ mod update;
 mod visualizer;
 pub mod visualizer_mode;
 
+use crate::config_toml::hot_reload::ConfigWatcher;
 use crate::favorites::Library;
 use crate::keybindings::KeybindingRegistry;
 use crate::number_jump::NumberJump;
 use crate::radio::Station;
-use crate::scrobble::tracker::ScrobbleTracker;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -90,17 +89,17 @@ pub struct App {
     /// Selection cursor index into `discover_results`.
     pub discover_cursor: usize,
 
-    /// Scrobble state machine — ticked each app tick, receives track changes.
-    pub scrobble_tracker: ScrobbleTracker,
-
-    /// Counter for periodic retry drain (fires every 60 ticks).
-    pub retry_drain_counter: u32,
+    /// Pending discover fetch tag query (consumed by the runtime driver).
+    pub discover_fetch_pending: Option<String>,
 
     /// Unified TOML configuration loaded at startup.
     pub config: crate::config_toml::AppConfig,
 
     /// Preserved unknown TOML keys for round-trip save operations.
     pub config_preserved: toml::Value,
+
+    /// Watches config file mtime for hot-reload on tick.
+    pub config_watcher: ConfigWatcher,
 
     /// Test-only counter for how many notifications were dispatched.
     #[cfg(test)]

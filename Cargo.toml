@@ -36,9 +36,6 @@ serde_json = "1"
 # TOML configuration
 toml = "0.8"
 
-# Hashing
-md5 = "0.7"
-
 # Error handling
 anyhow = "1"
 

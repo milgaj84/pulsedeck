@@ -8,6 +8,7 @@ use super::serialize::serialize_toml;
 use super::{AppConfig, AudioConfig, PlaybackConfig, UiConfig};
 
 const TOML_FILENAME: &str = "pulsedeck.toml";
+const TEMP_FILENAME: &str = "pulsedeck.toml.tmp";
 const LEGACY_FILENAME: &str = "library.json";
 
 /// Result of loading configuration from disk.
@@ -37,7 +38,8 @@ pub fn load_config(config_dir: &Path) -> LoadResult {
     }
 }
 
-/// Save config to pulsedeck.toml, preserving unknown keys.
+/// Save config atomically: write to temp file, then rename.
+/// Falls back to direct write if rename fails.
 pub fn save_config(
     config_dir: &Path,
     config: &AppConfig,
@@ -48,8 +50,33 @@ pub fn save_config(
     }
     let content = serialize_toml(config, preserved);
     let toml_path = config_dir.join(TOML_FILENAME);
-    fs::write(&toml_path, content)
-        .map_err(|err| format!("Could not write {}: {err}", toml_path.display()))
+    let temp_path = config_dir.join(TEMP_FILENAME);
+
+    write_temp_then_rename(&temp_path, &toml_path, &content)
+}
+
+fn write_temp_then_rename(
+    temp_path: &Path,
+    final_path: &Path,
+    content: &str,
+) -> Result<(), String> {
+    if let Err(err) = fs::write(temp_path, content) {
+        return Err(format!("Could not write {}: {err}", temp_path.display()));
+    }
+
+    match fs::rename(temp_path, final_path) {
+        Ok(()) => Ok(()),
+        Err(_rename_err) => fallback_direct_write(final_path, content),
+    }
+}
+
+fn fallback_direct_write(path: &Path, content: &str) -> Result<(), String> {
+    fs::write(path, content).map_err(|err| {
+        format!(
+            "Warning: atomic rename failed, direct write to {}: {err}",
+            path.display()
+        )
+    })
 }
 
 fn load_from_toml(path: &Path) -> LoadResult {
@@ -66,9 +93,15 @@ fn load_from_toml(path: &Path) -> LoadResult {
     };
 
     match parse_toml(&content) {
-        Ok(ParseResult { config, preserved, warnings }) => {
-            LoadResult { config, preserved, warnings }
-        }
+        Ok(ParseResult {
+            config,
+            preserved,
+            warnings,
+        }) => LoadResult {
+            config,
+            preserved,
+            warnings,
+        },
         Err(err) => {
             let warning = format!("Could not parse {}: {err}", path.display());
             LoadResult {
@@ -150,7 +183,11 @@ fn extract_ui_from_json(settings: &serde_json::Value) -> UiConfig {
         .get("stream_metadata_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    UiConfig { theme, notifications_enabled, stream_metadata_enabled }
+    UiConfig {
+        theme,
+        notifications_enabled,
+        stream_metadata_enabled,
+    }
 }
 
 fn extract_playback_from_json(settings: &serde_json::Value) -> PlaybackConfig {
@@ -162,7 +199,10 @@ fn extract_playback_from_json(settings: &serde_json::Value) -> PlaybackConfig {
         .get("save_history")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    PlaybackConfig { autoplay_last, save_history }
+    PlaybackConfig {
+        autoplay_last,
+        save_history,
+    }
 }
 
 #[cfg(test)]
@@ -209,7 +249,10 @@ save_history = true
         let result = load_config(&dir);
 
         assert_eq!(result.config.audio.default_volume, 42);
-        assert_eq!(result.config.audio.output_device, Some("Headphones".to_string()));
+        assert_eq!(
+            result.config.audio.output_device,
+            Some("Headphones".to_string())
+        );
         assert_eq!(result.config.ui.theme, "Terminal");
         assert!(!result.config.ui.notifications_enabled);
         assert!(!result.config.ui.stream_metadata_enabled);
@@ -236,7 +279,10 @@ save_history = true
         fs::write(dir.join(LEGACY_FILENAME), json_content).unwrap();
         let result = load_config(&dir);
 
-        assert_eq!(result.config.audio.output_device, Some("Speakers".to_string()));
+        assert_eq!(
+            result.config.audio.output_device,
+            Some("Speakers".to_string())
+        );
         assert_eq!(result.config.ui.theme, "Terminal");
         assert!(!result.config.ui.notifications_enabled);
         assert!(!result.config.ui.stream_metadata_enabled);
@@ -287,7 +333,10 @@ save_history = true
         let dir = unique_temp_dir("save_creates");
         let subdir = dir.join("nested").join("config");
         let config = AppConfig {
-            audio: AudioConfig { output_device: Some("USB".to_string()), default_volume: 65 },
+            audio: AudioConfig {
+                output_device: Some("USB".to_string()),
+                default_volume: 65,
+            },
             ..AppConfig::default()
         };
         let preserved = toml::Value::Table(toml::map::Map::new());
@@ -304,13 +353,19 @@ save_history = true
     fn test_save_config_round_trips_with_load() {
         let dir = unique_temp_dir("save_round_trip");
         let config = AppConfig {
-            audio: AudioConfig { output_device: Some("DAC".to_string()), default_volume: 30 },
+            audio: AudioConfig {
+                output_device: Some("DAC".to_string()),
+                default_volume: 30,
+            },
             ui: UiConfig {
                 theme: "Terminal".to_string(),
                 notifications_enabled: false,
                 stream_metadata_enabled: false,
             },
-            playback: PlaybackConfig { autoplay_last: true, save_history: true },
+            playback: PlaybackConfig {
+                autoplay_last: true,
+                save_history: true,
+            },
             ..AppConfig::default()
         };
         let preserved = toml::Value::Table(toml::map::Map::new());
@@ -334,7 +389,68 @@ save_history = true
         let result = save_config(&impossible_dir, &config, &preserved);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Could not create config directory"));
+        assert!(result
+            .unwrap_err()
+            .contains("Could not create config directory"));
+    }
+
+    #[test]
+    fn test_save_config_atomic_no_temp_file_left_after_success() {
+        let dir = unique_temp_dir("atomic_no_temp");
+        let config = AppConfig::default();
+        let preserved = toml::Value::Table(toml::map::Map::new());
+
+        save_config(&dir, &config, &preserved).unwrap();
+
+        // Temp file should not remain after successful save
+        let temp_path = dir.join(TEMP_FILENAME);
+        assert!(
+            !temp_path.exists(),
+            "temp file should be cleaned up after rename"
+        );
+        // Final file should exist
+        assert!(dir.join(TOML_FILENAME).exists());
+    }
+
+    #[test]
+    fn test_save_config_atomic_rename_produces_correct_content() {
+        let dir = unique_temp_dir("atomic_rename_content");
+        let config = AppConfig {
+            audio: AudioConfig {
+                output_device: Some("Atomic".to_string()),
+                default_volume: 77,
+            },
+            ..AppConfig::default()
+        };
+        let preserved = toml::Value::Table(toml::map::Map::new());
+
+        save_config(&dir, &config, &preserved).unwrap();
+
+        let content = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
+        assert!(content.contains("default_volume = 77"));
+        assert!(content.contains("output_device = \"Atomic\""));
+    }
+
+    #[test]
+    fn test_save_config_atomic_overwrites_existing_file() {
+        let dir = unique_temp_dir("atomic_overwrite");
+        // Write initial config
+        fs::write(dir.join(TOML_FILENAME), "old content").unwrap();
+
+        let config = AppConfig {
+            audio: AudioConfig {
+                default_volume: 50,
+                ..AudioConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        let preserved = toml::Value::Table(toml::map::Map::new());
+
+        save_config(&dir, &config, &preserved).unwrap();
+
+        let content = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
+        assert!(content.contains("default_volume = 50"));
+        assert!(!content.contains("old content"));
     }
 
     #[test]

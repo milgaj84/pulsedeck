@@ -2,10 +2,7 @@
 
 use crate::theme_name::ThemeName;
 
-use super::{
-    AppConfig, AudioConfig, KeybindingsConfig, PlaybackConfig, ScrobbleConfig, ScrobbleService,
-    UiConfig,
-};
+use super::{AppConfig, AudioConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
 
 /// Error wrapper for TOML parse failures.
 #[derive(Debug)]
@@ -55,14 +52,12 @@ pub fn parse_toml(input: &str) -> Result<ParseResult, ParseError> {
     let audio = parse_audio_section(&table, &mut warnings);
     let ui = parse_ui_section(&table, &mut warnings);
     let playback = parse_playback_section(&table);
-    let scrobble = parse_scrobble_section(&table, &mut warnings);
     let keybindings = parse_keybindings_section(&table);
 
     let config = AppConfig {
         audio,
         ui,
         playback,
-        scrobble,
         keybindings,
     };
 
@@ -73,7 +68,10 @@ pub fn parse_toml(input: &str) -> Result<ParseResult, ParseError> {
     })
 }
 
-fn parse_audio_section(table: &toml::map::Map<String, toml::Value>, warnings: &mut Vec<String>) -> AudioConfig {
+fn parse_audio_section(
+    table: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> AudioConfig {
     let section = table.get("audio").and_then(|v| v.as_table());
     let Some(sec) = section else {
         return AudioConfig::default();
@@ -98,23 +96,35 @@ fn parse_audio_section(table: &toml::map::Map<String, toml::Value>, warnings: &m
 
 fn clamp_volume(raw: i64, warnings: &mut Vec<String>) -> u8 {
     if raw < 0 {
-        warnings.push(format!("audio.default_volume: '{}' is invalid, clamped to 0", raw));
+        warnings.push(format!(
+            "audio.default_volume: '{}' is invalid, clamped to 0",
+            raw
+        ));
         0
     } else if raw > 100 {
-        warnings.push(format!("audio.default_volume: '{}' is invalid, clamped to 100", raw));
+        warnings.push(format!(
+            "audio.default_volume: '{}' is invalid, clamped to 100",
+            raw
+        ));
         100
     } else {
         raw as u8
     }
 }
 
-fn parse_ui_section(table: &toml::map::Map<String, toml::Value>, warnings: &mut Vec<String>) -> UiConfig {
+fn parse_ui_section(
+    table: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> UiConfig {
     let section = table.get("ui").and_then(|v| v.as_table());
     let Some(sec) = section else {
         return UiConfig::default();
     };
 
-    let theme_str = sec.get("theme").and_then(|v| v.as_str()).unwrap_or("Retrowave");
+    let theme_str = sec
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Retrowave");
     let theme = validate_theme(theme_str, warnings);
 
     let notifications_enabled = sec
@@ -139,7 +149,10 @@ fn validate_theme(raw: &str, warnings: &mut Vec<String>) -> String {
     if is_known {
         raw.to_string()
     } else {
-        warnings.push(format!("ui.theme: '{}' is invalid, using default 'Retrowave'", raw));
+        warnings.push(format!(
+            "ui.theme: '{}' is invalid, using default 'Retrowave'",
+            raw
+        ));
         "Retrowave".to_string()
     }
 }
@@ -150,56 +163,18 @@ fn parse_playback_section(table: &toml::map::Map<String, toml::Value>) -> Playba
         return PlaybackConfig::default();
     };
 
-    let autoplay_last = sec.get("autoplay_last").and_then(|v| v.as_bool()).unwrap_or(false);
-    let save_history = sec.get("save_history").and_then(|v| v.as_bool()).unwrap_or(false);
+    let autoplay_last = sec
+        .get("autoplay_last")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let save_history = sec
+        .get("save_history")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     PlaybackConfig {
         autoplay_last,
         save_history,
-    }
-}
-
-fn parse_scrobble_section(
-    table: &toml::map::Map<String, toml::Value>,
-    warnings: &mut Vec<String>,
-) -> ScrobbleConfig {
-    let section = table.get("scrobble").and_then(|v| v.as_table());
-    let Some(sec) = section else {
-        return ScrobbleConfig::default();
-    };
-
-    let enabled = sec.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-    let api_key = sec
-        .get("api_key")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let service_str = sec.get("service").and_then(|v| v.as_str()).unwrap_or("lastfm");
-    let (service, svc_enabled) = resolve_scrobble_service(service_str, enabled, warnings);
-
-    ScrobbleConfig {
-        enabled: svc_enabled,
-        service,
-        api_key,
-    }
-}
-
-fn resolve_scrobble_service(
-    raw: &str,
-    enabled: bool,
-    warnings: &mut Vec<String>,
-) -> (ScrobbleService, bool) {
-    match raw {
-        "lastfm" => (ScrobbleService::LastFm, enabled),
-        "listenbrainz" => (ScrobbleService::ListenBrainz, enabled),
-        _ => {
-            warnings.push(format!(
-                "scrobble.service: '{}' is invalid, disabling scrobble",
-                raw
-            ));
-            (ScrobbleService::LastFm, false)
-        }
     }
 }
 
@@ -209,7 +184,10 @@ fn parse_keybindings_section(table: &toml::map::Map<String, toml::Value>) -> Key
         return KeybindingsConfig::default();
     };
 
-    let path = sec.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let path = sec
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     KeybindingsConfig { path }
 }
@@ -240,11 +218,6 @@ stream_metadata_enabled = true
 autoplay_last = false
 save_history = false
 
-[scrobble]
-enabled = false
-service = "lastfm"
-api_key = ""
-
 [keybindings]
 path = "keybindings.json"
 "#;
@@ -253,17 +226,20 @@ path = "keybindings.json"
     fn test_parse_toml_full_config_parses_correctly() {
         let result = parse_toml(FULL_CONFIG).unwrap();
 
-        assert_eq!(result.config.audio.output_device, Some("Built-in Speakers".to_string()));
+        assert_eq!(
+            result.config.audio.output_device,
+            Some("Built-in Speakers".to_string())
+        );
         assert_eq!(result.config.audio.default_volume, 80);
         assert_eq!(result.config.ui.theme, "Retrowave");
         assert!(result.config.ui.notifications_enabled);
         assert!(result.config.ui.stream_metadata_enabled);
         assert!(!result.config.playback.autoplay_last);
         assert!(!result.config.playback.save_history);
-        assert!(!result.config.scrobble.enabled);
-        assert_eq!(result.config.scrobble.service, ScrobbleService::LastFm);
-        assert_eq!(result.config.scrobble.api_key, "");
-        assert_eq!(result.config.keybindings.path, Some("keybindings.json".to_string()));
+        assert_eq!(
+            result.config.keybindings.path,
+            Some("keybindings.json".to_string())
+        );
         assert!(result.warnings.is_empty());
     }
 
@@ -277,7 +253,6 @@ path = "keybindings.json"
         // Other sections use defaults
         assert_eq!(result.config.ui, UiConfig::default());
         assert_eq!(result.config.playback, PlaybackConfig::default());
-        assert_eq!(result.config.scrobble, ScrobbleConfig::default());
         assert_eq!(result.config.keybindings, KeybindingsConfig::default());
         assert!(result.warnings.is_empty());
     }
@@ -331,35 +306,23 @@ path = "keybindings.json"
 
     #[test]
     fn test_parse_toml_valid_themes_accepted() {
-        for theme in ["Retrowave", "Catppuccin Mocha", "Catppuccin Macchiato",
-                      "Catppuccin Frappé", "Catppuccin Latte", "Terminal"] {
+        for theme in [
+            "Retrowave",
+            "Catppuccin Mocha",
+            "Catppuccin Macchiato",
+            "Catppuccin Frappé",
+            "Catppuccin Latte",
+            "Terminal",
+        ] {
             let input = format!("[ui]\ntheme = \"{}\"\n", theme);
             let result = parse_toml(&input).unwrap();
             assert_eq!(result.config.ui.theme, theme);
-            assert!(result.warnings.is_empty(), "unexpected warning for theme '{}'", theme);
+            assert!(
+                result.warnings.is_empty(),
+                "unexpected warning for theme '{}'",
+                theme
+            );
         }
-    }
-
-    #[test]
-    fn test_parse_toml_unknown_scrobble_service_disables() {
-        let input = "[scrobble]\nenabled = true\nservice = \"spotify\"\napi_key = \"abc\"\n";
-        let result = parse_toml(input).unwrap();
-
-        assert!(!result.config.scrobble.enabled);
-        assert_eq!(result.warnings.len(), 1);
-        assert_eq!(
-            result.warnings[0],
-            "scrobble.service: 'spotify' is invalid, disabling scrobble"
-        );
-    }
-
-    #[test]
-    fn test_parse_toml_listenbrainz_service_parses() {
-        let input = "[scrobble]\nenabled = true\nservice = \"listenbrainz\"\napi_key = \"key\"\n";
-        let result = parse_toml(input).unwrap();
-
-        assert!(result.config.scrobble.enabled);
-        assert_eq!(result.config.scrobble.service, ScrobbleService::ListenBrainz);
     }
 
     #[test]
@@ -428,18 +391,6 @@ foo = "bar"
     }
 
     #[test]
-    fn test_warning_format_scrobble_service_uses_dotted_path_pattern() {
-        let input = "[scrobble]\nenabled = true\nservice = \"pandora\"\napi_key = \"k\"\n";
-        let result = parse_toml(input).unwrap();
-
-        let warning = &result.warnings[0];
-        // Format: "{field_path}: '{value}' is invalid, {action_taken}"
-        assert!(warning.starts_with("scrobble.service: '"));
-        assert!(warning.contains("' is invalid, "));
-        assert!(warning.ends_with("disabling scrobble"));
-    }
-
-    #[test]
     fn test_warning_format_volume_negative_includes_value() {
         let input = "[audio]\ndefault_volume = -999\n";
         let result = parse_toml(input).unwrap();
@@ -486,7 +437,7 @@ mod property_tests {
     /// Generate a valid TOML section name (alphabetic, no conflicts with known sections).
     fn arb_unknown_section_name() -> impl Strategy<Value = String> {
         "[a-z]{3,8}".prop_filter("must not collide with known sections", |s| {
-            !matches!(s.as_str(), "audio" | "ui" | "playback" | "scrobble" | "keybindings")
+            !matches!(s.as_str(), "audio" | "ui" | "playback" | "keybindings")
         })
     }
 
@@ -508,8 +459,8 @@ mod property_tests {
         #[test]
         fn prop_unknown_key_preservation(
             section_name in arb_unknown_section_name(),
-            keys in proptest::collection::vec(
-                (arb_key_name(), arb_string_value()),
+            keys in proptest::collection::hash_map(
+                arb_key_name(), arb_string_value(),
                 1..=3
             ),
         ) {
@@ -550,16 +501,16 @@ mod property_tests {
     /// Pick from the valid theme labels.
     fn arb_valid_theme() -> impl Strategy<Value = String> {
         prop::sample::select(
-            ThemeName::ALL.iter().map(|t| t.label().to_string()).collect::<Vec<_>>()
+            ThemeName::ALL
+                .iter()
+                .map(|t| t.label().to_string())
+                .collect::<Vec<_>>(),
         )
     }
 
     /// Generate a random string that may or may not be a valid theme.
     fn arb_theme_string() -> impl Strategy<Value = String> {
-        prop_oneof![
-            arb_valid_theme(),
-            "[a-zA-Z0-9 ]{1,20}",
-        ]
+        prop_oneof![arb_valid_theme(), "[a-zA-Z0-9 ]{1,20}",]
     }
 
     // Feature: v080-features, Property 15: Theme validation invariant
@@ -590,17 +541,17 @@ mod property_tests {
     }
 
     /// Generate a random subset of config fields to include in the TOML.
-    fn arb_partial_config() -> impl Strategy<Value = (
-        Option<u8>,         // default_volume
-        Option<String>,     // output_device
-        Option<bool>,       // notifications_enabled
-        Option<bool>,       // stream_metadata_enabled
-        Option<bool>,       // autoplay_last
-        Option<bool>,       // save_history
-        Option<bool>,       // scrobble enabled
-        Option<String>,     // api_key
-        Option<String>,     // keybindings path
-    )> {
+    fn arb_partial_config() -> impl Strategy<
+        Value = (
+            Option<u8>,     // default_volume
+            Option<String>, // output_device
+            Option<bool>,   // notifications_enabled
+            Option<bool>,   // stream_metadata_enabled
+            Option<bool>,   // autoplay_last
+            Option<bool>,   // save_history
+            Option<String>, // keybindings path
+        ),
+    > {
         (
             proptest::option::of(0..=100u8),
             proptest::option::of("[a-zA-Z ]{3,15}"),
@@ -608,8 +559,6 @@ mod property_tests {
             proptest::option::of(proptest::bool::ANY),
             proptest::option::of(proptest::bool::ANY),
             proptest::option::of(proptest::bool::ANY),
-            proptest::option::of(proptest::bool::ANY),
-            proptest::option::of("[a-zA-Z0-9]{5,20}"),
             proptest::option::of("[a-zA-Z0-9./]{3,15}"),
         )
     }
@@ -623,7 +572,7 @@ mod property_tests {
         fn prop_missing_fields_produce_defaults(
             partial in arb_partial_config()
         ) {
-            let (volume, device, notif, meta, autoplay, history, scr_enabled, api_key, kb_path) = partial;
+            let (volume, device, notif, meta, autoplay, history, kb_path) = partial;
 
             let mut toml_str = String::new();
 
@@ -657,17 +606,6 @@ mod property_tests {
                 }
                 if let Some(h) = history {
                     toml_str.push_str(&format!("save_history = {}\n", h));
-                }
-            }
-
-            // Build scrobble section
-            if scr_enabled.is_some() || api_key.is_some() {
-                toml_str.push_str("[scrobble]\n");
-                if let Some(e) = scr_enabled {
-                    toml_str.push_str(&format!("enabled = {}\n", e));
-                }
-                if let Some(ref k) = api_key {
-                    toml_str.push_str(&format!("api_key = \"{}\"\n", k));
                 }
             }
 
@@ -715,18 +653,6 @@ mod property_tests {
                 prop_assert_eq!(result.config.playback.save_history, h);
             } else {
                 prop_assert_eq!(result.config.playback.save_history, defaults.playback.save_history);
-            }
-
-            if let Some(e) = scr_enabled {
-                prop_assert_eq!(result.config.scrobble.enabled, e);
-            } else {
-                prop_assert_eq!(result.config.scrobble.enabled, defaults.scrobble.enabled);
-            }
-
-            if let Some(ref k) = api_key {
-                prop_assert_eq!(&result.config.scrobble.api_key, k);
-            } else {
-                prop_assert_eq!(result.config.scrobble.api_key, defaults.scrobble.api_key);
             }
 
             if kb_path.is_some() {

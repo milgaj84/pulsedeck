@@ -1,26 +1,9 @@
 // Unified TOML configuration — loader, parser, and writer for pulsedeck.toml.
 
+pub mod hot_reload;
 pub mod io;
 pub mod parse;
 pub mod serialize;
-
-/// Scrobble service backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScrobbleService {
-    LastFm,
-    ListenBrainz,
-}
-
-impl ScrobbleService {
-    /// Human-readable display name for the service.
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::LastFm => "Last.fm",
-            Self::ListenBrainz => "ListenBrainz",
-        }
-    }
-}
-
 
 /// Audio output settings.
 #[derive(Debug, Clone, PartialEq)]
@@ -73,24 +56,6 @@ impl Default for PlaybackConfig {
     }
 }
 
-/// Scrobble integration settings.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ScrobbleConfig {
-    pub enabled: bool,
-    pub service: ScrobbleService,
-    pub api_key: String,
-}
-
-impl Default for ScrobbleConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            service: ScrobbleService::LastFm,
-            api_key: String::new(),
-        }
-    }
-}
-
 /// Keybinding file path override.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeybindingsConfig {
@@ -109,7 +74,6 @@ pub struct AppConfig {
     pub audio: AudioConfig,
     pub ui: UiConfig,
     pub playback: PlaybackConfig,
-    pub scrobble: ScrobbleConfig,
     pub keybindings: KeybindingsConfig,
 }
 
@@ -119,7 +83,6 @@ impl Default for AppConfig {
             audio: AudioConfig::default(),
             ui: UiConfig::default(),
             playback: PlaybackConfig::default(),
-            scrobble: ScrobbleConfig::default(),
             keybindings: KeybindingsConfig::default(),
         }
     }
@@ -155,21 +118,6 @@ mod tests {
     }
 
     #[test]
-    fn test_scrobble_config_default_values() {
-        let config = ScrobbleConfig::default();
-
-        assert!(!config.enabled);
-        assert_eq!(config.service, ScrobbleService::LastFm);
-        assert_eq!(config.api_key, "");
-    }
-
-    #[test]
-    fn test_scrobble_service_display_name() {
-        assert_eq!(ScrobbleService::LastFm.display_name(), "Last.fm");
-        assert_eq!(ScrobbleService::ListenBrainz.display_name(), "ListenBrainz");
-    }
-
-    #[test]
     fn test_keybindings_config_default_values() {
         let config = KeybindingsConfig::default();
 
@@ -183,7 +131,6 @@ mod tests {
         assert_eq!(config.audio, AudioConfig::default());
         assert_eq!(config.ui, UiConfig::default());
         assert_eq!(config.playback, PlaybackConfig::default());
-        assert_eq!(config.scrobble, ScrobbleConfig::default());
         assert_eq!(config.keybindings, KeybindingsConfig::default());
     }
 }

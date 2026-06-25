@@ -12,13 +12,6 @@ use crate::favorites_set::FavoritesSet;
 use crate::history::History;
 use crate::radio::Station;
 
-/// Scrobble status info exposed to the UI layer for help display.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ScrobbleStatus {
-    pub enabled: bool,
-    pub service_name: &'static str,
-}
-
 pub struct UiModel<'a> {
     pub library: &'a Library,
     pub nav: &'a Navigation,
@@ -48,7 +41,8 @@ pub struct UiModel<'a> {
     pub display_mode: DisplayMode,
     pub elapsed_display: Option<String>,
     pub volume_flash_active: bool,
-    pub scrobble_status: ScrobbleStatus,
+    pub discover_results: &'a [Station],
+    pub discover_cursor: usize,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -134,10 +128,8 @@ impl<'a> From<&'a App> for UiModel<'a> {
             display_mode: app.ui.display_mode,
             elapsed_display,
             volume_flash_active: app.ui.volume_flash_remaining > Duration::ZERO,
-            scrobble_status: ScrobbleStatus {
-                enabled: app.config.scrobble.enabled,
-                service_name: app.config.scrobble.service.display_name(),
-            },
+            discover_results: &app.discover_results,
+            discover_cursor: app.discover_cursor,
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }

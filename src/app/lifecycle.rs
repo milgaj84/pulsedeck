@@ -3,7 +3,6 @@ use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 use crate::config_toml::AppConfig;
 use crate::keybindings::KeybindingRegistry;
 use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
-use crate::scrobble::parse_track_metadata;
 use std::time::{Duration, Instant};
 
 const NOTICE_INFO_TICKS: u16 = 90;
@@ -95,30 +94,33 @@ impl AppParts {
 }
 
 /// Load keybinding registry from `keybindings.json` in the config directory.
-/// Returns an empty registry (defaults only) if the file is missing or invalid.
+/// Returns a registry with defaults populated; custom bindings are merged on top.
 fn load_keybinding_registry() -> KeybindingRegistry {
+    let mut registry = KeybindingRegistry::defaults();
+
     let Some(path) = crate::config::config_path(KEYBINDINGS_FILE) else {
-        return KeybindingRegistry::new_with_defaults(Vec::new());
+        return registry;
     };
 
     if !path.exists() {
-        return KeybindingRegistry::new_with_defaults(Vec::new());
+        return registry;
     }
 
     match std::fs::read(&path) {
         Ok(bytes) => {
             let mut warnings = Vec::new();
-            let registry = KeybindingRegistry::from_json(&bytes, &mut warnings);
+            let custom = KeybindingRegistry::from_json(&bytes, &mut warnings);
             for warning in &warnings {
                 eprintln!("[keybindings] {warning}");
             }
-            registry
+            registry.customs = custom.customs;
         }
         Err(err) => {
             eprintln!("[keybindings] Could not read {}: {err}", path.display());
-            KeybindingRegistry::new_with_defaults(Vec::new())
         }
     }
+
+    registry
 }
 
 /// Load TOML config from the config directory with library.json fallback.
@@ -141,7 +143,21 @@ fn load_toml_config() -> (AppConfig, toml::Value, Vec<String>, bool) {
     for warning in &result.warnings {
         eprintln!("[config] {warning}");
     }
-    (result.config, result.preserved, result.warnings, loaded_from_file)
+    (
+        result.config,
+        result.preserved,
+        result.warnings,
+        loaded_from_file,
+    )
+}
+
+/// Build a ConfigWatcher pointed at the config directory's pulsedeck.toml.
+/// Returns a watcher on a dummy path if no config directory is available.
+fn build_config_watcher() -> ConfigWatcher {
+    let path = crate::config::config_dir()
+        .map(|dir| dir.join("pulsedeck.toml"))
+        .unwrap_or_default();
+    ConfigWatcher::new(path)
 }
 
 impl App {
@@ -154,10 +170,12 @@ impl App {
         let config_preserved = parts.config_preserved;
         let config_loaded_from_file = parts.config_loaded_from_file;
 
-        let output_device = config.audio.output_device.as_deref()
-            .or(parts.library.settings.output_device_name.as_deref());
-        let diagnostics_output_device =
-            crate::audio::output_device_display_name(output_device);
+        let output_device = config.audio.output_device.as_deref().or(parts
+            .library
+            .settings
+            .output_device_name
+            .as_deref());
+        let diagnostics_output_device = crate::audio::output_device_display_name(output_device);
         let diagnostics_metadata_enabled = config.ui.stream_metadata_enabled;
         let ui = UiRuntimeState::from_ui_state(&parts.ui_state);
         let playback = PlaybackRuntime::new(
@@ -169,7 +187,8 @@ impl App {
         );
 
         let keybinding_registry = load_keybinding_registry();
-        let scrobble_enabled = config.scrobble.enabled;
+
+        let config_watcher = build_config_watcher();
 
         let mut app = Self {
             library: parts.library,
@@ -188,10 +207,10 @@ impl App {
             notification_cooldown: NotificationCooldown::new(),
             discover_results: Vec::new(),
             discover_cursor: 0,
-            scrobble_tracker: ScrobbleTracker::new(scrobble_enabled),
-            retry_drain_counter: 0,
+            discover_fetch_pending: None,
             config,
             config_preserved,
+            config_watcher,
             #[cfg(test)]
             notification_count: 0,
         };
@@ -274,6 +293,41 @@ impl App {
         if self.send_audio_command(AudioCommand::Play(url)) {
             self.sync_volume();
         }
+    }
+
+    /// Check config file for changes and apply hot-reloadable settings.
+    pub(super) fn check_config_reload(&mut self) {
+        use crate::config_toml::hot_reload::ReloadResult;
+
+        match self.config_watcher.check_reload() {
+            ReloadResult::Unchanged => {}
+            ReloadResult::Reloaded(new_config, new_preserved) => {
+                self.apply_hot_reload(new_config, new_preserved);
+                self.set_info_notice("Config reloaded");
+            }
+            ReloadResult::Error(msg) => {
+                self.set_error_notice(format!("Config reload failed: {msg}"));
+            }
+        }
+    }
+
+    /// Apply hot-reloadable config fields (ui, audio.default_volume, playback).
+    /// Does NOT apply keybindings (requires restart).
+    fn apply_hot_reload(&mut self, new_config: AppConfig, new_preserved: toml::Value) {
+        self.config.ui = new_config.ui.clone();
+        self.config.audio.default_volume = new_config.audio.default_volume;
+        self.config.playback = new_config.playback.clone();
+        self.config_preserved = new_preserved;
+
+        self.library.settings.theme = new_config.ui.theme.clone();
+        self.library.settings.notifications_enabled = new_config.ui.notifications_enabled;
+        self.library.settings.stream_metadata_enabled = new_config.ui.stream_metadata_enabled;
+        self.library.settings.autoplay_last = new_config.playback.autoplay_last;
+        self.library.settings.save_history = new_config.playback.save_history;
+
+        let theme = crate::theme_name::ThemeName::from_key(&new_config.ui.theme);
+        crate::ui::theme::set_active(theme);
+        self.sync_stream_metadata();
     }
 
     /// Apply loaded TOML config values to library settings for backward compat.
@@ -386,11 +440,6 @@ impl App {
 
         let is_new = !title.is_empty() && self.playback.view.current_track.as_ref() != Some(&title);
         self.playback.view.current_track = Some(title.clone());
-
-        if is_new {
-            let meta = parse_track_metadata(&title);
-            self.scrobble_tracker.on_track_change(meta);
-        }
 
         if !title.is_empty() && self.song_history.back() != Some(&title) {
             self.song_history.push_back(title.clone());
@@ -1014,27 +1063,6 @@ mod tests {
     }
 
     #[test]
-    fn from_parts_scrobble_config_enables_tracker() {
-        let library = Library::in_memory(vec![]);
-        let mut parts = test_parts(library);
-        parts.config.scrobble.enabled = true;
-
-        let app = App::from_parts(parts);
-
-        assert!(app.scrobble_tracker.is_enabled());
-    }
-
-    #[test]
-    fn from_parts_scrobble_config_disabled_by_default() {
-        let library = Library::in_memory(vec![]);
-        let parts = test_parts(library);
-
-        let app = App::from_parts(parts);
-
-        assert!(!app.scrobble_tracker.is_enabled());
-    }
-
-    #[test]
     fn from_parts_stores_config_and_preserved() {
         let library = Library::in_memory(vec![]);
         let mut parts = test_parts(library);
@@ -1057,7 +1085,129 @@ mod tests {
 
         let app = App::from_parts(parts);
 
-        assert!(app.library.load_warnings.contains(&"bad config value".to_string()));
+        assert!(app
+            .library
+            .load_warnings
+            .contains(&"bad config value".to_string()));
+    }
+
+    #[test]
+    fn check_config_reload_unchanged_does_nothing() {
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        // ConfigWatcher points to nonexistent path → always Unchanged
+        app.check_config_reload();
+
+        assert!(app.ui.notice.current.is_none());
+    }
+
+    #[test]
+    fn check_config_reload_reloaded_applies_ui_settings() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_hot_reload_integration")
+            .join("ui_settings");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pulsedeck.toml");
+        std::fs::write(
+            &path,
+            "[ui]\ntheme = \"Terminal\"\nnotifications_enabled = false\nstream_metadata_enabled = false\n\n[playback]\nautoplay_last = true\nsave_history = true\n",
+        ).unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
+
+        app.check_config_reload();
+
+        assert_eq!(app.library.settings.theme, "Terminal");
+        assert!(!app.library.settings.notifications_enabled);
+        assert!(!app.library.settings.stream_metadata_enabled);
+        assert!(app.library.settings.autoplay_last);
+        assert!(app.library.settings.save_history);
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg == "Config reloaded"
+        ));
+    }
+
+    #[test]
+    fn check_config_reload_applies_audio_default_volume() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_hot_reload_integration")
+            .join("audio_vol");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pulsedeck.toml");
+        std::fs::write(&path, "[audio]\ndefault_volume = 42\n").unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
+
+        app.check_config_reload();
+
+        assert_eq!(app.config.audio.default_volume, 42);
+    }
+
+    #[test]
+    fn check_config_reload_does_not_apply_keybindings() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_hot_reload_integration")
+            .join("no_keybindings");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pulsedeck.toml");
+        std::fs::write(&path, "[keybindings]\npath = \"/custom/path.json\"\n").unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        let original_keybindings = app.config.keybindings.clone();
+        app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
+
+        app.check_config_reload();
+
+        assert_eq!(app.config.keybindings, original_keybindings);
+    }
+
+    #[test]
+    fn check_config_reload_error_retains_previous_config() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_hot_reload_integration")
+            .join("error_retain");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pulsedeck.toml");
+        std::fs::write(&path, "this is [[[not valid toml").unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        let original_theme = app.library.settings.theme.clone();
+        app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
+
+        app.check_config_reload();
+
+        assert_eq!(app.library.settings.theme, original_theme);
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Error(ref msg)) if msg.contains("Config reload failed")
+        ));
+    }
+
+    #[test]
+    fn check_config_reload_shows_info_notice_on_success() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_hot_reload_integration")
+            .join("info_notice");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pulsedeck.toml");
+        std::fs::write(&path, "[audio]\ndefault_volume = 55\n").unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
+
+        app.check_config_reload();
+
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg == "Config reloaded"
+        ));
     }
 }
 

@@ -21,6 +21,15 @@ pub struct KeybindingRegistry {
 }
 
 impl KeybindingRegistry {
+    /// Create a registry populated with all default key bindings.
+    /// Equivalent to the current hardcoded match tables in event.rs.
+    pub fn defaults() -> Self {
+        Self {
+            defaults: super::defaults::default_bindings(),
+            customs: Vec::new(),
+        }
+    }
+
     /// Create a registry with pre-built default bindings (for testing).
     pub fn new_with_defaults(defaults: Vec<KeyBinding>) -> Self {
         Self {
@@ -115,12 +124,20 @@ fn parse_json_entries(json: &[u8]) -> Result<Vec<RawEntry>, String> {
 }
 
 fn parse_entry(entry: &RawEntry, index: usize) -> Result<KeyBinding, String> {
-    let key = parse_key_spec(&entry.key)
-        .ok_or_else(|| format!("keybindings.json entry {index}: invalid key '{}'", entry.key))?;
+    let key = parse_key_spec(&entry.key).ok_or_else(|| {
+        format!(
+            "keybindings.json entry {index}: invalid key '{}'",
+            entry.key
+        )
+    })?;
 
     let modifiers = parse_modifiers(&entry.modifiers, index)?;
-    let action = parse_action_name(&entry.action)
-        .ok_or_else(|| format!("keybindings.json entry {index}: invalid action '{}'", entry.action))?;
+    let action = parse_action_name(&entry.action).ok_or_else(|| {
+        format!(
+            "keybindings.json entry {index}: invalid action '{}'",
+            entry.action
+        )
+    })?;
     let mode = parse_input_mode(entry.mode.as_deref(), index)?;
 
     Ok(KeyBinding {
@@ -147,7 +164,9 @@ fn parse_input_mode(raw: Option<&str>, index: usize) -> Result<InputMode, String
         Some("CommandPalette") => Ok(InputMode::CommandPalette),
         Some("SleepTimer") => Ok(InputMode::SleepTimer),
         Some("LibraryFilter") => Ok(InputMode::LibraryFilter),
-        Some(other) => Err(format!("keybindings.json entry {index}: invalid mode '{other}'")),
+        Some(other) => Err(format!(
+            "keybindings.json entry {index}: invalid mode '{other}'"
+        )),
     }
 }
 
@@ -342,9 +361,7 @@ mod tests {
     #[test]
     fn test_from_json_truncates_at_max_bindings() {
         let entries: Vec<serde_json::Value> = (0..600)
-            .map(|_| {
-                serde_json::json!({"key": "enter", "modifiers": [], "action": "quit"})
-            })
+            .map(|_| serde_json::json!({"key": "enter", "modifiers": [], "action": "quit"}))
             .collect();
         let json = serde_json::to_vec(&entries).unwrap();
 
@@ -385,7 +402,10 @@ mod tests {
 
     #[test]
     fn test_parse_action_name_simple() {
-        assert_eq!(parse_action_name("play_selected"), Some(Action::PlaySelected));
+        assert_eq!(
+            parse_action_name("play_selected"),
+            Some(Action::PlaySelected)
+        );
         assert_eq!(parse_action_name("volume_up"), Some(Action::VolumeUp));
         assert_eq!(parse_action_name("quit"), Some(Action::Quit));
     }
@@ -417,8 +437,18 @@ mod tests {
 
     // --- resolve tests ---
 
-    fn binding(key: KeySpec, modifiers: Vec<Modifier>, action: Action, mode: InputMode) -> KeyBinding {
-        KeyBinding { key, modifiers, action, mode }
+    fn binding(
+        key: KeySpec,
+        modifiers: Vec<Modifier>,
+        action: Action,
+        mode: InputMode,
+    ) -> KeyBinding {
+        KeyBinding {
+            key,
+            modifiers,
+            action,
+            mode,
+        }
     }
 
     #[test]
@@ -770,16 +800,19 @@ mod property_tests {
     }
 
     fn arb_modifier() -> impl Strategy<Value = Modifier> {
-        prop_oneof![Just(Modifier::Ctrl), Just(Modifier::Alt), Just(Modifier::Shift),]
+        prop_oneof![
+            Just(Modifier::Ctrl),
+            Just(Modifier::Alt),
+            Just(Modifier::Shift),
+        ]
     }
 
     fn arb_modifiers() -> impl Strategy<Value = Vec<Modifier>> {
-        proptest::collection::vec(arb_modifier(), 0..=3)
-            .prop_map(|mods| {
-                // Deduplicate to avoid repeated modifiers
-                let mut seen = std::collections::HashSet::new();
-                mods.into_iter().filter(|m| seen.insert(*m)).collect()
-            })
+        proptest::collection::vec(arb_modifier(), 0..=3).prop_map(|mods| {
+            // Deduplicate to avoid repeated modifiers
+            let mut seen = std::collections::HashSet::new();
+            mods.into_iter().filter(|m| seen.insert(*m)).collect()
+        })
     }
 
     fn arb_simple_action() -> impl Strategy<Value = Action> {
@@ -859,14 +892,18 @@ mod property_tests {
     }
 
     fn arb_keybinding() -> impl Strategy<Value = KeyBinding> {
-        (arb_key_spec(), arb_modifiers(), arb_action(), arb_input_mode()).prop_map(
-            |(key, modifiers, action, mode)| KeyBinding {
+        (
+            arb_key_spec(),
+            arb_modifiers(),
+            arb_action(),
+            arb_input_mode(),
+        )
+            .prop_map(|(key, modifiers, action, mode)| KeyBinding {
                 key,
                 modifiers,
                 action,
                 mode,
-            },
-        )
+            })
     }
 
     proptest! {
@@ -943,9 +980,7 @@ mod property_tests {
         let len = actions.len();
         (0..len, 0..len, 0..len)
             .prop_filter("all distinct", |(a, b, c)| a != b && b != c && a != c)
-            .prop_map(move |(a, b, c)| {
-                (actions[a].clone(), actions[b].clone(), actions[c].clone())
-            })
+            .prop_map(move |(a, b, c)| (actions[a].clone(), actions[b].clone(), actions[c].clone()))
     }
 
     // Feature: v080-features, Property 10: Custom binding precedence and last-wins

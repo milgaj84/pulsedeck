@@ -2,6 +2,7 @@ pub mod command_palette;
 pub mod controls;
 pub mod critical;
 pub mod deck;
+pub mod discover_widget;
 pub mod header;
 pub mod help;
 pub mod mini;
@@ -125,6 +126,15 @@ fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
 
     if app.input_mode == InputMode::CommandPalette {
         command_palette::render(frame, size, app);
+    }
+
+    if !app.discover_results.is_empty() {
+        discover_widget::render_discover_overlay(
+            frame,
+            size,
+            app.discover_results,
+            app.discover_cursor,
+        );
     }
 }
 

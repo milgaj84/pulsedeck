@@ -61,9 +61,8 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 🟢 **Station health dots**: color-coded indicators (green/yellow/red) next to stations in the library based on local connection history — spot unreliable stations at a glance; old failures decay after 7 days
 - ⏱️ **Elapsed listening time**: shows how long you've been tuned to the current station in the footer and mini mode
 - 🔍 **Station recommendations**: "Discover stations" in the command palette scores candidates against your favorites' genres, tags, and country — expand your listening without manual search
-- 🎵 **Scrobble integration**: opt-in Last.fm or ListenBrainz now-playing and scrobble submissions for track metadata, with a 30-second threshold, retry queue, and trait-abstracted client
 - ⌨️ **Keybinding customization**: drop a `keybindings.json` in your config directory to remap any key to any action, with mode-specific bindings and graceful fallback to defaults
-- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, scrobble, and keybindings path — with backward-compatible migration from `library.json`
+- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, and keybindings path — with backward-compatible migration from `library.json`
 
 ---
 
@@ -243,6 +242,19 @@ PulseDeck features a headless CLI mode to backup or migrate your library of stat
   ```
   This parses the input file and merges all unique stations into your library, deduplicated by Radio Browser UUID when available and normalized stream URL otherwise. `--preview` shows new, duplicate, enrichment, and skipped counts without saving. `--enrich-only` refreshes matching saved stations without adding new stations.
 
+- **Config Init**:
+  ```bash
+  pulsedeck config init
+  ```
+  Generates a commented default `pulsedeck.toml` in your config directory. Skips if the file already exists.
+
+- **Keybindings Validate**:
+  ```bash
+  pulsedeck keybindings validate
+  pulsedeck keybindings validate ~/my-keys.json
+  ```
+  Checks a keybindings file for errors. Prints all warnings; exits 0 if valid, 1 if any warnings.
+
 - **Help / Version**:
   ```bash
   pulsedeck --help
@@ -299,11 +311,6 @@ stream_metadata_enabled = true
 autoplay_last = false
 save_history = false
 
-[scrobble]
-enabled = false
-service = "lastfm"                    # "lastfm" or "listenbrainz"
-api_key = ""
-
 [keybindings]
 path = "keybindings.json"             # optional, relative to config dir
 ```
@@ -356,7 +363,7 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
-**1059 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, scrobble state machine invariants, keybinding serialization round-trips, and TOML configuration round-trips.
+**1037 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, and discover cursor bounds.
 
 ---
 

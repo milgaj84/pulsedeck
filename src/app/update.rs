@@ -9,6 +9,14 @@ impl App {
             return;
         }
 
+        // Discover overlay intercepts navigation when visible.
+        if !self.discover_results.is_empty() {
+            if let Some(discover_action) = self.remap_discover_action(&action) {
+                self.update_inner(discover_action);
+                return;
+            }
+        }
+
         match self.ui.overlays.active {
             ActiveOverlay::Settings if self.show_settings() => {
                 self.handle_settings_action(action);
@@ -21,6 +29,21 @@ impl App {
             _ => {}
         }
 
+        self.update_inner(action);
+    }
+
+    /// Remap normal-mode actions to discover actions when overlay is visible.
+    fn remap_discover_action(&self, action: &Action) -> Option<Action> {
+        match action {
+            Action::NextStation => Some(Action::DiscoverNext),
+            Action::PrevStation => Some(Action::DiscoverPrev),
+            Action::PlaySelected => Some(Action::DiscoverSelect),
+            Action::Quit => Some(Action::DiscoverDismiss),
+            _ => None,
+        }
+    }
+
+    fn update_inner(&mut self, action: Action) {
         match action {
             Action::NextStation => self.next_station(),
             Action::PrevStation => self.prev_station(),
@@ -117,8 +140,8 @@ impl App {
         self.drive_reconnect(now);
         self.check_sleep_timer(now);
         self.check_number_jump_timeout(now);
+        self.check_config_reload();
         self.flush_persistence();
-        self.tick_scrobble_tracker();
     }
 
     pub(super) fn quit(&mut self) {
@@ -497,5 +520,77 @@ mod tests {
         app.update(Action::Tick);
 
         assert_eq!(app.ui.volume_flash_remaining, std::time::Duration::ZERO);
+    }
+
+    // ---- Discover overlay key interception --------------------------------
+
+    fn test_app_with_discover() -> App {
+        let mut app = test_app();
+        app.discover_results = vec![
+            station("Disco A", "http://disco-a"),
+            station("Disco B", "http://disco-b"),
+            station("Disco C", "http://disco-c"),
+        ];
+        app.discover_cursor = 0;
+        app
+    }
+
+    #[test]
+    fn discover_visible_quit_triggers_dismiss() {
+        let mut app = test_app_with_discover();
+
+        app.update(Action::Quit);
+
+        assert!(app.discover_results.is_empty());
+        assert!(!app.ui.should_quit);
+    }
+
+    #[test]
+    fn discover_visible_play_selected_triggers_select() {
+        let mut app = test_app_with_discover();
+        app.discover_cursor = 1;
+
+        app.update(Action::PlaySelected);
+
+        assert!(app.discover_results.is_empty());
+        assert!(app.library.contains("http://disco-b"));
+    }
+
+    #[test]
+    fn discover_visible_next_station_triggers_discover_next() {
+        let mut app = test_app_with_discover();
+
+        app.update(Action::NextStation);
+
+        assert_eq!(app.discover_cursor, 1);
+    }
+
+    #[test]
+    fn discover_visible_prev_station_triggers_discover_prev() {
+        let mut app = test_app_with_discover();
+        app.discover_cursor = 2;
+
+        app.update(Action::PrevStation);
+
+        assert_eq!(app.discover_cursor, 1);
+    }
+
+    #[test]
+    fn discover_visible_non_intercepted_action_passes_through() {
+        let mut app = test_app_with_discover();
+
+        app.update(Action::VolumeUp);
+
+        // Volume changed, discover results unchanged
+        assert!(!app.discover_results.is_empty());
+    }
+
+    #[test]
+    fn discover_empty_quit_quits_normally() {
+        let mut app = test_app();
+
+        app.update(Action::Quit);
+
+        assert!(app.ui.should_quit);
     }
 }

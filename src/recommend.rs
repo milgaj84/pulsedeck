@@ -48,10 +48,7 @@ pub fn score_station(profile: &FavoritesProfile, candidate: &Station) -> u32 {
 }
 
 /// Compute a favorites profile from a slice of stations whose URLs are in the favorites set.
-pub fn build_favorites_profile(
-    stations: &[Station],
-    favorites: &FavoritesSet,
-) -> FavoritesProfile {
+pub fn build_favorites_profile(stations: &[Station], favorites: &FavoritesSet) -> FavoritesProfile {
     let mut genres: HashMap<String, u32> = HashMap::new();
     let mut tags: HashMap<String, u32> = HashMap::new();
     let mut country_codes: HashMap<String, u32> = HashMap::new();
@@ -88,12 +85,12 @@ const MAX_TOP_GENRES: usize = 5;
 const MAX_TOP_TAGS: usize = 10;
 
 /// Select top genres from profile by occurrence count (up to 5, ties at boundary included).
-fn select_top_genres(profile: &FavoritesProfile) -> HashSet<String> {
+pub fn select_top_genres(profile: &FavoritesProfile) -> HashSet<String> {
     select_top_n(&profile.genres, MAX_TOP_GENRES)
 }
 
 /// Select top tags from profile by occurrence count (up to 10, ties at boundary included).
-fn select_top_tags(profile: &FavoritesProfile) -> HashSet<String> {
+pub fn select_top_tags(profile: &FavoritesProfile) -> HashSet<String> {
     select_top_n(&profile.tags, MAX_TOP_TAGS)
 }
 
@@ -305,11 +302,7 @@ mod tests {
         }
     }
 
-    fn profile_with(
-        genres: &[&str],
-        tags: &[&str],
-        countries: &[&str],
-    ) -> FavoritesProfile {
+    fn profile_with(genres: &[&str], tags: &[&str], countries: &[&str]) -> FavoritesProfile {
         FavoritesProfile {
             genres: genres.iter().map(|g| (g.to_string(), 1)).collect(),
             tags: tags.iter().map(|t| (t.to_string(), 1)).collect(),
@@ -395,8 +388,7 @@ mod tests {
             make_station("http://a", "Rock", vec![], ""),
             make_station("http://b", "Rock", vec![], ""),
         ];
-        let library: HashSet<String> =
-            vec!["http://a".to_string()].into_iter().collect();
+        let library: HashSet<String> = vec!["http://a".to_string()].into_iter().collect();
 
         let result = recommend(&profile, &candidates, &library);
 
@@ -472,10 +464,16 @@ mod tests {
     #[test]
     fn select_top_genres_returns_up_to_5() {
         let profile = FavoritesProfile {
-            genres: [("rock", 10), ("jazz", 8), ("pop", 6), ("metal", 4), ("blues", 2)]
-                .iter()
-                .map(|(k, v)| (k.to_string(), *v))
-                .collect(),
+            genres: [
+                ("rock", 10),
+                ("jazz", 8),
+                ("pop", 6),
+                ("metal", 4),
+                ("blues", 2),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), *v))
+            .collect(),
             tags: HashMap::new(),
             country_codes: HashMap::new(),
         };
@@ -493,7 +491,7 @@ mod tests {
                 ("jazz", 8),
                 ("pop", 6),
                 ("metal", 4),
-                ("blues", 4), // tied at boundary
+                ("blues", 4),     // tied at boundary
                 ("classical", 4), // tied at boundary
                 ("ambient", 1),
             ]

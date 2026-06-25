@@ -1,5 +1,4 @@
 use crate::ui::model::UiModel;
-use crate::ui::model::ScrobbleStatus;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table, Tabs};
 
@@ -114,13 +113,13 @@ fn help_tab_index(app: &UiModel<'_>) -> usize {
     app.nav.help_tab_index
 }
 
-fn rows_for_tab(tab: usize, app: &UiModel<'_>) -> Vec<Row<'static>> {
+fn rows_for_tab(tab: usize, _app: &UiModel<'_>) -> Vec<Row<'static>> {
     match tab {
         0 => playback_rows(),
         1 => library_rows(),
         2 => search_rows(),
         3 => visuals_rows(),
-        4 => settings_rows(&app.scrobble_status),
+        4 => settings_rows(),
         5 => app_rows(),
         _ => playback_rows(),
     }
@@ -180,8 +179,7 @@ fn visuals_rows() -> Vec<Row<'static>> {
     ]
 }
 
-fn settings_rows(scrobble: &ScrobbleStatus) -> Vec<Row<'static>> {
-    let scrobble_label = scrobble_status_label(scrobble);
+fn settings_rows() -> Vec<Row<'static>> {
     vec![
         shortcut(",", "Open settings panel"),
         shortcut("Up/Down · j/k", "Move setting selection"),
@@ -196,18 +194,7 @@ fn settings_rows(scrobble: &ScrobbleStatus) -> Vec<Row<'static>> {
         shortcut("Metadata", "Toggle ICY now-playing metadata"),
         section("Customization"),
         note("Keybindings can be customized via keybindings.json"),
-        section("Status"),
-        note(&scrobble_label),
     ]
-}
-
-/// Format scrobble status label for help display.
-pub(crate) fn scrobble_status_label(scrobble: &ScrobbleStatus) -> String {
-    if scrobble.enabled {
-        format!("Scrobble: enabled ({})", scrobble.service_name)
-    } else {
-        format!("Scrobble: disabled ({})", scrobble.service_name)
-    }
 }
 
 fn note(text: &str) -> Row<'static> {
@@ -292,11 +279,7 @@ mod tests {
 
     #[test]
     fn settings_tab_rows_are_non_empty() {
-        let status = ScrobbleStatus {
-            enabled: false,
-            service_name: "Last.fm",
-        };
-        assert!(!settings_rows(&status).is_empty());
+        assert!(!settings_rows().is_empty());
     }
 
     #[test]
@@ -307,10 +290,7 @@ mod tests {
     #[test]
     fn library_tab_contains_discover_entry() {
         let rows = library_rows();
-        let text: Vec<String> = rows
-            .iter()
-            .map(|r| format!("{:?}", r))
-            .collect();
+        let text: Vec<String> = rows.iter().map(|r| format!("{:?}", r)).collect();
         let joined = text.join(" ");
         assert!(
             joined.contains("Discover"),
@@ -320,57 +300,12 @@ mod tests {
 
     #[test]
     fn settings_tab_contains_keybindings_customization_note() {
-        let status = ScrobbleStatus {
-            enabled: false,
-            service_name: "Last.fm",
-        };
-        let rows = settings_rows(&status);
-        let text: Vec<String> = rows
-            .iter()
-            .map(|r| format!("{:?}", r))
-            .collect();
+        let rows = settings_rows();
+        let text: Vec<String> = rows.iter().map(|r| format!("{:?}", r)).collect();
         let joined = text.join(" ");
         assert!(
             joined.contains("keybindings.json"),
             "Settings tab must mention keybindings.json customization"
-        );
-    }
-
-    #[test]
-    fn settings_tab_contains_scrobble_status_enabled() {
-        let status = ScrobbleStatus {
-            enabled: true,
-            service_name: "Last.fm",
-        };
-        let label = scrobble_status_label(&status);
-        assert_eq!(label, "Scrobble: enabled (Last.fm)");
-    }
-
-    #[test]
-    fn settings_tab_contains_scrobble_status_disabled() {
-        let status = ScrobbleStatus {
-            enabled: false,
-            service_name: "ListenBrainz",
-        };
-        let label = scrobble_status_label(&status);
-        assert_eq!(label, "Scrobble: disabled (ListenBrainz)");
-    }
-
-    #[test]
-    fn settings_tab_rows_contain_scrobble_status() {
-        let status = ScrobbleStatus {
-            enabled: true,
-            service_name: "ListenBrainz",
-        };
-        let rows = settings_rows(&status);
-        let text: Vec<String> = rows
-            .iter()
-            .map(|r| format!("{:?}", r))
-            .collect();
-        let joined = text.join(" ");
-        assert!(
-            joined.contains("Scrobble: enabled (ListenBrainz)"),
-            "Settings tab must show scrobble status with service name"
         );
     }
 }
