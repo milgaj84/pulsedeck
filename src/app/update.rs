@@ -26,6 +26,10 @@ impl App {
                 self.handle_sleep_timer_action(action);
                 return;
             }
+            ActiveOverlay::Keybindings => {
+                self.handle_keybindings_overlay_action(action);
+                return;
+            }
             _ => {}
         }
 
@@ -107,6 +111,7 @@ impl App {
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),
+            Action::ShowKeybindings => self.show_keybindings(),
             Action::SleepTimerIncrease
             | Action::SleepTimerDecrease
             | Action::SleepTimerPreset(_)
@@ -140,7 +145,7 @@ impl App {
         self.drive_reconnect(now);
         self.check_sleep_timer(now);
         self.check_number_jump_timeout(now);
-        self.check_config_reload();
+        self.check_config_reload(now);
         self.flush_persistence();
     }
 
@@ -186,6 +191,7 @@ mod tests {
     use crate::action::Action;
     use crate::favorites::Library;
     use crate::radio::Station;
+    use crate::recommend::ScoredStation;
 
     fn station(name: &str, url: &str) -> Station {
         Station::basic(name, url, "Synthwave", "US", 128)
@@ -527,9 +533,9 @@ mod tests {
     fn test_app_with_discover() -> App {
         let mut app = test_app();
         app.discover_results = vec![
-            station("Disco A", "http://disco-a"),
-            station("Disco B", "http://disco-b"),
-            station("Disco C", "http://disco-c"),
+            ScoredStation { station: station("Disco A", "http://disco-a"), score: 3 },
+            ScoredStation { station: station("Disco B", "http://disco-b"), score: 2 },
+            ScoredStation { station: station("Disco C", "http://disco-c"), score: 1 },
         ];
         app.discover_cursor = 0;
         app

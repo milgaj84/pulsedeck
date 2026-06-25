@@ -1,9 +1,17 @@
 use super::*;
 use crate::audio::AudioCommand;
 use crate::recommend::{
-    build_favorites_profile, recommend, select_top_genres, select_top_tags, FavoritesProfile,
+    build_favorites_profile, recommend, select_fallback_tag, select_top_genres, select_top_tags,
+    FavoritesProfile,
 };
 use std::collections::HashSet;
+
+/// Request for discover fetch, supporting multi-query fallback.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoverFetchRequest {
+    pub primary_tag: String,
+    pub fallback_tag: Option<String>,
+}
 
 /// Build a tag query string from the profile's single most popular genre or tag.
 /// Radio Browser's tag: parameter works best with a single value.
@@ -33,14 +41,18 @@ impl App {
             return;
         }
 
-        let tag_query = build_discover_tag_query(&profile);
-        self.discover_fetch_pending = Some(tag_query);
+        let primary_tag = build_discover_tag_query(&profile);
+        let fallback_tag = select_fallback_tag(&profile, &primary_tag);
+        self.discover_fetch_pending = Some(DiscoverFetchRequest {
+            primary_tag,
+            fallback_tag,
+        });
         self.discover_cursor = 0;
         self.set_info_notice("Loading recommendations...");
     }
 
-    /// Take the pending discover fetch query (consumed by the runtime driver).
-    pub fn take_discover_fetch_request(&mut self) -> Option<String> {
+    /// Take the pending discover fetch request (consumed by the runtime driver).
+    pub fn take_discover_fetch_request(&mut self) -> Option<DiscoverFetchRequest> {
         self.discover_fetch_pending.take()
     }
 
@@ -54,6 +66,11 @@ impl App {
                 );
                 let library_urls = self.library_url_set();
                 let results = recommend(&profile, &candidates, &library_urls);
+                if results.is_empty() {
+                    self.set_info_notice(
+                        "No matches found — try starring more stations",
+                    );
+                }
                 self.discover_results = results;
                 self.discover_cursor = 0;
             }
@@ -84,7 +101,7 @@ impl App {
         if self.discover_results.is_empty() {
             return;
         }
-        let station = self.discover_results[self.discover_cursor].clone();
+        let station = self.discover_results[self.discover_cursor].station.clone();
         self.library.stations.push(station.clone());
         self.library.rebuild_genres();
         self.mark_library_dirty();
@@ -151,9 +168,9 @@ mod tests {
             "Rock",
         )]));
         app.discover_results = vec![
-            station("Disco A", "http://disco-a", "Disco"),
-            station("Disco B", "http://disco-b", "Disco"),
-            station("Disco C", "http://disco-c", "Disco"),
+            ScoredStation { station: station("Disco A", "http://disco-a", "Disco"), score: 3 },
+            ScoredStation { station: station("Disco B", "http://disco-b", "Disco"), score: 2 },
+            ScoredStation { station: station("Disco C", "http://disco-c", "Disco"), score: 1 },
         ];
         app.discover_cursor = 0;
         app
@@ -356,9 +373,9 @@ mod tests {
 
         app.update(Action::Discover);
 
-        let query = app.discover_fetch_pending.as_ref().unwrap();
-        // Profile has jazz genre favored twice — should appear in tag query
-        assert!(query.contains("jazz"));
+        let request = app.discover_fetch_pending.as_ref().unwrap();
+        // Profile has jazz genre favored twice — should appear in primary tag
+        assert!(request.primary_tag.contains("jazz"));
     }
 
     #[test]
@@ -371,6 +388,47 @@ mod tests {
 
         assert!(taken.is_some());
         assert!(app.discover_fetch_pending.is_none());
+    }
+
+    #[test]
+    fn discover_sets_fallback_tag_when_profile_has_multiple_entries() {
+        let mut library = Library::in_memory(vec![
+            station("Jazz FM", "http://jazz", "Jazz"),
+            station("Rock Radio", "http://rock", "Rock"),
+            station("Jazz Cafe", "http://jazzcafe", "Jazz"),
+            station("Rock Live", "http://rocklive", "Rock"),
+        ]);
+        library.settings.favorites.toggle("http://jazz");
+        library.settings.favorites.toggle("http://jazzcafe");
+        library.settings.favorites.toggle("http://rock");
+        let mut app = App::new(library);
+
+        app.update(Action::Discover);
+
+        let request = app.discover_fetch_pending.as_ref().unwrap();
+        // Profile has jazz(2) and rock(1); primary is one, fallback is the other
+        assert!(!request.primary_tag.is_empty());
+        assert!(request.fallback_tag.is_some());
+        let fallback = request.fallback_tag.as_ref().unwrap();
+        assert_ne!(&request.primary_tag, fallback);
+    }
+
+    #[test]
+    fn discover_skips_fallback_when_single_entry_profile() {
+        // Only one genre/tag in the profile
+        let mut library = Library::in_memory(vec![
+            station("Jazz FM", "http://jazz", "Jazz"),
+            station("Jazz Cafe", "http://jazzcafe", "Jazz"),
+        ]);
+        library.settings.favorites.toggle("http://jazz");
+        library.settings.favorites.toggle("http://jazzcafe");
+        let mut app = App::new(library);
+
+        app.update(Action::Discover);
+
+        let request = app.discover_fetch_pending.as_ref().unwrap();
+        assert_eq!(request.primary_tag, "jazz");
+        assert_eq!(request.fallback_tag, None);
     }
 
     #[test]
@@ -400,6 +458,21 @@ mod tests {
     }
 
     #[test]
+    fn apply_discover_response_empty_results_sets_info_notice() {
+        let mut app = test_app_with_favorites();
+        // Candidates with no matching genre/tags → all score zero → empty results
+        let candidate = station("Unrelated FM", "http://unrelated", "Polka");
+
+        app.apply_discover_response(Ok(vec![candidate]));
+
+        assert!(app.discover_results.is_empty());
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg.contains("No matches found")
+        ));
+    }
+
+    #[test]
     fn apply_discover_response_excludes_library_stations() {
         let mut app = test_app_with_favorites();
         // "http://jazz" is already in library
@@ -411,7 +484,7 @@ mod tests {
 
         // Only the new station should appear (library URL excluded)
         for result in &app.discover_results {
-            assert_ne!(result.url, "http://jazz");
+            assert_ne!(result.station.url, "http://jazz");
         }
     }
 }

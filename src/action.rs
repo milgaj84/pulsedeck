@@ -77,6 +77,9 @@ pub enum Action {
     /// Display mode
     ToggleMiniMode,
 
+    /// Keybindings
+    ShowKeybindings,
+
     /// Discovery
     Discover,
     DiscoverNext,

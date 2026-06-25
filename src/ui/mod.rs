@@ -5,6 +5,7 @@ pub mod deck;
 pub mod discover_widget;
 pub mod header;
 pub mod help;
+pub mod keybindings_widget;
 pub mod mini;
 pub mod model;
 pub mod playback_doctor;
@@ -20,6 +21,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{ActiveOverlay, App, DisplayMode, InputMode, LayoutMode};
+use crate::recommend::{build_favorites_profile, explain_score};
 use model::UiModel;
 
 const MIN_REQUIRED_WIDTH: u16 = 80;
@@ -29,6 +31,17 @@ const MIN_REQUIRED_HEIGHT: u16 = 24;
 pub fn draw(frame: &mut Frame, app: &App) {
     let model = UiModel::from(app);
     draw_model(frame, &model);
+
+    // Keybindings overlay rendered here because it needs access to the registry on App.
+    if app.ui.overlays.active == ActiveOverlay::Keybindings {
+        let bindings = app.keybinding_registry.effective_bindings();
+        keybindings_widget::render_keybindings_overlay(
+            frame,
+            frame.area(),
+            &bindings,
+            app.ui.overlays.keybindings_scroll,
+        );
+    }
 }
 
 fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
@@ -121,6 +134,7 @@ fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
         ActiveOverlay::Settings => settings::render(frame, size, app),
         ActiveOverlay::PlaybackDoctor => playback_doctor::render(frame, size, app),
         ActiveOverlay::SleepTimer => sleep_timer::render(frame, size, app),
+        ActiveOverlay::Keybindings => {} // rendered in draw() with full App access
         ActiveOverlay::None => {}
     }
 
@@ -129,17 +143,33 @@ fn draw_model(frame: &mut Frame, app: &UiModel<'_>) {
     }
 
     if !app.discover_results.is_empty() {
+        let explanation = compute_discover_explanation(app);
         discover_widget::render_discover_overlay(
             frame,
             size,
             app.discover_results,
             app.discover_cursor,
+            &explanation,
         );
     }
 }
 
 pub fn is_compact_terminal(size: Rect) -> bool {
     size.width < MIN_REQUIRED_WIDTH || size.height < MIN_REQUIRED_HEIGHT
+}
+
+/// Compute the explanation hint for the currently highlighted discover station.
+fn compute_discover_explanation(model: &UiModel<'_>) -> String {
+    let station = match model.discover_results.get(model.discover_cursor) {
+        Some(scored) => &scored.station,
+        None => return String::new(),
+    };
+    let profile = build_favorites_profile(
+        &model.library.stations,
+        &model.library.settings.favorites,
+    );
+    let explanation = explain_score(&profile, station);
+    discover_widget::format_explanation(&explanation)
 }
 
 fn render_compact_terminal_warning(frame: &mut Frame, area: Rect) {

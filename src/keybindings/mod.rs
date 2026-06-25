@@ -6,6 +6,9 @@ mod registry;
 use crate::action::Action;
 
 pub use registry::KeybindingRegistry;
+pub use registry::detect_shadows;
+pub use registry::format_key_description;
+pub use registry::format_mode_name;
 
 /// Input mode for keybinding resolution.
 /// Mirrors app-layer InputMode but lives in the domain layer to avoid circular deps.

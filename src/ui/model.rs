@@ -11,6 +11,7 @@ use crate::favorites::Library;
 use crate::favorites_set::FavoritesSet;
 use crate::history::History;
 use crate::radio::Station;
+use crate::recommend::ScoredStation;
 
 pub struct UiModel<'a> {
     pub library: &'a Library,
@@ -41,7 +42,7 @@ pub struct UiModel<'a> {
     pub display_mode: DisplayMode,
     pub elapsed_display: Option<String>,
     pub volume_flash_active: bool,
-    pub discover_results: &'a [Station],
+    pub discover_results: &'a [ScoredStation],
     pub discover_cursor: usize,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,

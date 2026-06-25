@@ -5,6 +5,13 @@ use std::collections::{HashMap, HashSet};
 use crate::favorites_set::FavoritesSet;
 use crate::radio::{normalized_station_url, Station};
 
+/// A station paired with its recommendation score.
+#[derive(Debug, Clone)]
+pub struct ScoredStation {
+    pub station: Station,
+    pub score: u32,
+}
+
 /// A profile built from the user's favorited stations.
 #[derive(Debug)]
 pub struct FavoritesProfile {
@@ -45,6 +52,45 @@ pub fn score_station(profile: &FavoritesProfile, candidate: &Station) -> u32 {
     };
 
     genre_score + tag_score + country_score
+}
+
+/// Explanation of which factors contributed to a station's score.
+#[derive(Debug, PartialEq)]
+pub struct ScoreExplanation {
+    pub genres: Vec<String>,
+    pub tags: Vec<String>,
+    pub countries: Vec<String>,
+}
+
+/// Explain which factors contributed to a station's score.
+/// Returns lists of matching genres, tags, and countries.
+pub fn explain_score(profile: &FavoritesProfile, station: &Station) -> ScoreExplanation {
+    let genre = station.genre.trim().to_ascii_lowercase();
+    let genres = if profile.genres.contains_key(&genre) {
+        vec![genre]
+    } else {
+        vec![]
+    };
+
+    let tags: Vec<String> = station
+        .tags
+        .iter()
+        .map(|t| t.trim().to_ascii_lowercase())
+        .filter(|t| profile.tags.contains_key(t))
+        .collect();
+
+    let country = station.country_code.trim().to_ascii_uppercase();
+    let countries = if profile.country_codes.contains_key(&country) {
+        vec![country]
+    } else {
+        vec![]
+    };
+
+    ScoreExplanation {
+        genres,
+        tags,
+        countries,
+    }
 }
 
 /// Compute a favorites profile from a slice of stations whose URLs are in the favorites set.
@@ -143,7 +189,7 @@ pub fn recommend(
     profile: &FavoritesProfile,
     candidates: &[Station],
     library_urls: &HashSet<String>,
-) -> Vec<Station> {
+) -> Vec<ScoredStation> {
     let effective_candidates = maybe_prefilter(profile, candidates);
     let iter: Box<dyn Iterator<Item = &Station>> = match &effective_candidates {
         Some(filtered) => Box::new(filtered.iter().copied()),
@@ -165,7 +211,10 @@ pub fn recommend(
     scored
         .into_iter()
         .take(MAX_RECOMMENDATIONS)
-        .map(|(_, s)| s.clone())
+        .map(|(score, s)| ScoredStation {
+            station: s.clone(),
+            score,
+        })
         .collect()
 }
 
@@ -183,6 +232,32 @@ fn maybe_prefilter<'a>(
     let top_genres = select_top_genres(profile);
     let top_tags = select_top_tags(profile);
     Some(prefilter_candidates(candidates, &top_genres, &top_tags))
+}
+
+/// Select the next-best genre or tag from a profile, different from the primary.
+/// Combines genres and tags, sorts by count descending, returns the first entry
+/// that differs from `primary`. Returns None if no alternative exists.
+pub fn select_fallback_tag(profile: &FavoritesProfile, primary: &str) -> Option<String> {
+    let mut entries: Vec<(&String, &u32)> = profile
+        .genres
+        .iter()
+        .chain(profile.tags.iter())
+        .collect();
+    entries.sort_by(|a, b| b.1.cmp(a.1));
+    entries
+        .into_iter()
+        .find(|(name, _)| name.as_str() != primary)
+        .map(|(name, _)| name.clone())
+}
+
+/// Deduplicate stations by normalized URL, keeping first occurrence.
+pub fn deduplicate_stations(stations: &[Station]) -> Vec<Station> {
+    let mut seen = HashSet::new();
+    stations
+        .iter()
+        .filter(|s| seen.insert(normalized_station_url(&s.url)))
+        .cloned()
+        .collect()
 }
 
 fn votes_of(station: &Station) -> u32 {
@@ -393,7 +468,7 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].url, "http://b");
+        assert_eq!(result[0].station.url, "http://b");
     }
 
     #[test]
@@ -427,9 +502,9 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         // All have same score (3), so tie-break by votes desc, then clicks desc
-        assert_eq!(result[0].url, "http://c"); // votes=50
-        assert_eq!(result[1].url, "http://b"); // votes=10, clicks=20
-        assert_eq!(result[2].url, "http://a"); // votes=10, clicks=5
+        assert_eq!(result[0].station.url, "http://c"); // votes=50
+        assert_eq!(result[1].station.url, "http://b"); // votes=10, clicks=20
+        assert_eq!(result[2].station.url, "http://a"); // votes=10, clicks=5
     }
 
     #[test]
@@ -444,7 +519,7 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].url, "http://b");
+        assert_eq!(result[0].station.url, "http://b");
     }
 
     #[test]
@@ -457,6 +532,44 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         assert!(result.is_empty());
+    }
+
+    // --- explain_score tests ---
+
+    #[test]
+    fn explain_score_all_matches() {
+        let profile = profile_with(&["jazz"], &["smooth", "chill"], &["DE"]);
+        let station = make_station("http://a", "Jazz", vec!["smooth", "chill"], "DE");
+
+        let explanation = explain_score(&profile, &station);
+
+        assert_eq!(explanation.genres, vec!["jazz"]);
+        assert_eq!(explanation.tags, vec!["smooth", "chill"]);
+        assert_eq!(explanation.countries, vec!["DE"]);
+    }
+
+    #[test]
+    fn explain_score_partial_matches() {
+        let profile = profile_with(&["rock"], &["guitar", "chill"], &["US"]);
+        let station = make_station("http://a", "Jazz", vec!["guitar", "live"], "US");
+
+        let explanation = explain_score(&profile, &station);
+
+        assert!(explanation.genres.is_empty());
+        assert_eq!(explanation.tags, vec!["guitar"]);
+        assert_eq!(explanation.countries, vec!["US"]);
+    }
+
+    #[test]
+    fn explain_score_no_matches() {
+        let profile = profile_with(&["rock"], &["guitar"], &["US"]);
+        let station = make_station("http://a", "Jazz", vec!["smooth"], "DE");
+
+        let explanation = explain_score(&profile, &station);
+
+        assert!(explanation.genres.is_empty());
+        assert!(explanation.tags.is_empty());
+        assert!(explanation.countries.is_empty());
     }
 
     // --- select_top_genres tests ---
@@ -608,6 +721,110 @@ mod tests {
         assert_eq!(result.len(), 1);
     }
 
+    // --- select_fallback_tag tests ---
+
+    #[test]
+    fn select_fallback_tag_returns_next_best_genre() {
+        let profile = FavoritesProfile {
+            genres: [("rock", 5), ("jazz", 3), ("pop", 1)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
+            tags: HashMap::new(),
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_fallback_tag(&profile, "rock");
+        assert_eq!(result, Some("jazz".to_string()));
+    }
+
+    #[test]
+    fn select_fallback_tag_returns_none_when_only_primary_exists() {
+        let profile = FavoritesProfile {
+            genres: [("rock", 5)].iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            tags: HashMap::new(),
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_fallback_tag(&profile, "rock");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn select_fallback_tag_considers_tags_too() {
+        let profile = FavoritesProfile {
+            genres: [("rock", 3)].iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            tags: [("guitar", 7), ("chill", 2)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
+            country_codes: HashMap::new(),
+        };
+
+        // primary is "guitar" (tag with highest count), fallback should be "rock" (next best)
+        let result = select_fallback_tag(&profile, "guitar");
+        assert_eq!(result, Some("rock".to_string()));
+    }
+
+    #[test]
+    fn select_fallback_tag_empty_profile_returns_none() {
+        let profile = empty_profile();
+        let result = select_fallback_tag(&profile, "rock");
+        assert_eq!(result, None);
+    }
+
+    // --- deduplicate_stations tests ---
+
+    #[test]
+    fn deduplicate_stations_removes_duplicates_by_normalized_url() {
+        let stations = vec![
+            make_station("http://a", "Rock", vec![], "US"),
+            make_station("HTTP://A/", "Jazz", vec![], "DE"),
+            make_station("http://b", "Pop", vec![], "GB"),
+        ];
+
+        let result = deduplicate_stations(&stations);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].url, "http://a");
+        assert_eq!(result[1].url, "http://b");
+    }
+
+    #[test]
+    fn deduplicate_stations_preserves_order_keeps_first() {
+        let stations = vec![
+            make_station("http://x", "Rock", vec![], "US"),
+            make_station("http://y", "Jazz", vec![], "DE"),
+            make_station("http://x/", "Pop", vec![], "GB"),
+            make_station("http://z", "Metal", vec![], "FR"),
+        ];
+
+        let result = deduplicate_stations(&stations);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].url, "http://x");
+        assert_eq!(result[0].genre, "Rock"); // first occurrence kept
+        assert_eq!(result[1].url, "http://y");
+        assert_eq!(result[2].url, "http://z");
+    }
+
+    #[test]
+    fn deduplicate_stations_empty_input_returns_empty() {
+        let result = deduplicate_stations(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn deduplicate_stations_no_duplicates_preserves_all() {
+        let stations = vec![
+            make_station("http://a", "Rock", vec![], "US"),
+            make_station("http://b", "Jazz", vec![], "DE"),
+        ];
+
+        let result = deduplicate_stations(&stations);
+        assert_eq!(result.len(), 2);
+    }
+
     // --- recommend pre-filter integration tests ---
 
     #[test]
@@ -624,7 +841,7 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].url, "http://rock");
+        assert_eq!(result[0].station.url, "http://rock");
     }
 
     #[test]
@@ -647,7 +864,7 @@ mod tests {
         // Pre-filter keeps only "rock" genre stations (2), then scores them
         // Country match alone doesn't pass pre-filter (country is not in pre-filter logic)
         assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|s| s.genre == "Rock"));
+        assert!(result.iter().all(|s| s.station.genre == "Rock"));
     }
 
     #[test]
@@ -900,22 +1117,22 @@ mod property_tests {
             );
 
             // (b) no result URL is in library_urls (after normalization)
-            for station in &result {
-                let normalized = normalized_station_url(&station.url);
+            for scored in &result {
+                let normalized = normalized_station_url(&scored.station.url);
                 prop_assert!(
                     !library_urls.contains(&normalized),
-                    "result contains library URL: {}", station.url
+                    "result contains library URL: {}", scored.station.url
                 );
             }
 
             // (c) consecutive pairs sorted descending by score, then votes, then clicks
             for pair in result.windows(2) {
-                let score_a = score_station(&profile, &pair[0]);
-                let score_b = score_station(&profile, &pair[1]);
-                let votes_a = pair[0].votes.unwrap_or(0);
-                let votes_b = pair[1].votes.unwrap_or(0);
-                let clicks_a = pair[0].click_count.unwrap_or(0);
-                let clicks_b = pair[1].click_count.unwrap_or(0);
+                let score_a = pair[0].score;
+                let score_b = pair[1].score;
+                let votes_a = pair[0].station.votes.unwrap_or(0);
+                let votes_b = pair[1].station.votes.unwrap_or(0);
+                let clicks_a = pair[0].station.click_count.unwrap_or(0);
+                let clicks_b = pair[1].station.click_count.unwrap_or(0);
 
                 let ordering = score_a.cmp(&score_b).reverse()
                     .then(votes_a.cmp(&votes_b).reverse())

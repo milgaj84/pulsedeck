@@ -135,6 +135,20 @@ impl App {
         self.persist.mark_library_dirty();
     }
 
+    /// Persist the current config to TOML. Shows an error notice on failure.
+    pub(super) fn persist_config_change(&mut self) {
+        let Some(config_dir) = self.config_dir.as_ref() else {
+            return;
+        };
+        if let Err(msg) = crate::config_toml::io::save_config(
+            config_dir,
+            &self.config,
+            &self.config_preserved,
+        ) {
+            self.set_error_notice(msg);
+        }
+    }
+
     pub(super) fn flush_persistence(&mut self) {
         self.flush_persistence_at(Instant::now(), PersistenceFlushMode::Scheduled);
     }
@@ -394,5 +408,43 @@ mod tests {
         );
 
         assert_ne!(app.persist.retry.last_error_notice_at, first_notice_at);
+    }
+
+    #[test]
+    fn persist_config_change_writes_toml_file() {
+        let dir = unique_temp_dir("persist-config-change-writes");
+        let mut app = App::new(Library::in_memory(vec![station()]));
+        app.config_dir = Some(dir.clone());
+        app.config.audio.default_volume = 42;
+
+        app.persist_config_change();
+
+        let written = fs::read_to_string(dir.join("pulsedeck.toml")).unwrap();
+        assert!(written.contains("default_volume = 42"));
+    }
+
+    #[test]
+    fn persist_config_change_shows_error_notice_on_failure() {
+        let dir = unique_temp_dir("persist-config-change-error");
+        let blocker = dir.join("blocker_file");
+        fs::write(&blocker, "blocks dir creation").unwrap();
+        let impossible_dir = blocker.join("subdir");
+
+        let mut app = App::new(Library::in_memory(vec![station()]));
+        app.config_dir = Some(impossible_dir);
+
+        app.persist_config_change();
+
+        assert!(matches!(app.ui.notice.current, Some(AppNotice::Error(ref msg)) if msg.contains("Could not create config directory")));
+    }
+
+    #[test]
+    fn persist_config_change_does_nothing_when_config_dir_is_none() {
+        let mut app = App::new(Library::in_memory(vec![station()]));
+        app.config_dir = None;
+
+        app.persist_config_change();
+
+        assert!(app.ui.notice.current.is_none() || !matches!(app.ui.notice.current, Some(AppNotice::Error(_))));
     }
 }

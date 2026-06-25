@@ -20,6 +20,7 @@ pub enum PaletteCommand {
     ExportLibrary,
     Discover,
     OpenHelp,
+    ShowKeybindings,
 }
 
 const ALWAYS_AVAILABLE_COMMANDS: &[PaletteCommand] = &[
@@ -32,6 +33,7 @@ const ALWAYS_AVAILABLE_COMMANDS: &[PaletteCommand] = &[
     PaletteCommand::ExportLibrary,
     PaletteCommand::Discover,
     PaletteCommand::OpenHelp,
+    PaletteCommand::ShowKeybindings,
 ];
 
 pub fn command_label(command: PaletteCommand) -> &'static str {
@@ -47,6 +49,7 @@ pub fn command_label(command: PaletteCommand) -> &'static str {
         PaletteCommand::ExportLibrary => "Export library",
         PaletteCommand::Discover => "Discover stations",
         PaletteCommand::OpenHelp => "Open help",
+        PaletteCommand::ShowKeybindings => "Show keybindings",
     }
 }
 
@@ -63,6 +66,7 @@ pub fn command_action(command: PaletteCommand) -> Action {
         PaletteCommand::ExportLibrary => Action::ExportLibrary,
         PaletteCommand::Discover => Action::Discover,
         PaletteCommand::OpenHelp => Action::ToggleHelp,
+        PaletteCommand::ShowKeybindings => Action::ShowKeybindings,
     }
 }
 
@@ -326,5 +330,22 @@ mod tests {
 
         assert_eq!(trimmed, with_whitespace);
         assert!(!trimmed.is_empty());
+    }
+
+    #[test]
+    fn show_keybindings_command_is_available() {
+        let app = test_app();
+
+        let commands = filtered_commands("keybindings", &app);
+
+        assert_eq!(commands, vec![PaletteCommand::ShowKeybindings]);
+    }
+
+    #[test]
+    fn show_keybindings_command_maps_to_action() {
+        assert_eq!(
+            command_action(PaletteCommand::ShowKeybindings),
+            Action::ShowKeybindings
+        );
     }
 }

@@ -44,7 +44,9 @@ fn print_help() {
     println!("  pulsedeck import <path> --preview        Preview import changes without saving");
     println!("  pulsedeck import <path> --enrich-only    Refresh matching stations without adding new ones");
     println!("  pulsedeck config init                    Generate default configuration file");
+    println!("  pulsedeck config show                    Print effective configuration as TOML");
     println!("  pulsedeck keybindings validate [path]    Validate keybindings file for errors");
+    println!("  pulsedeck keybindings list               List all effective keybindings");
     println!("  pulsedeck -h, --help       Show this help message");
     println!("  pulsedeck -V, --version    Show version information");
 }
@@ -75,6 +77,22 @@ fn write_config_init(config_dir: &Path) -> anyhow::Result<CliOutcome> {
 fn handle_config_init() -> anyhow::Result<CliOutcome> {
     let config_dir = resolve_config_dir()?;
     write_config_init(&config_dir)
+}
+
+fn handle_config_show() -> anyhow::Result<CliOutcome> {
+    let config_dir = resolve_config_dir()?;
+    let result = crate::config_toml::io::load_config(&config_dir);
+
+    for warning in &result.warnings {
+        if warning.contains("Could not parse") {
+            eprintln!("{warning}");
+            std::process::exit(1);
+        }
+    }
+
+    let output = crate::config_toml::serialize::serialize_toml(&result.config, &result.preserved);
+    print!("{output}");
+    Ok(CliOutcome::Handled)
 }
 
 fn resolve_keybindings_path(path: Option<&str>) -> PathBuf {
@@ -115,6 +133,56 @@ fn handle_keybindings_validate(path: Option<&str>) -> anyhow::Result<CliOutcome>
     } else {
         std::process::exit(1);
     }
+}
+
+fn load_effective_registry() -> KeybindingRegistry {
+    let mut registry = KeybindingRegistry::defaults();
+    if let Some(path) = crate::config::config_path("keybindings.json") {
+        if let Ok(bytes) = fs::read(&path) {
+            let mut warnings = Vec::new();
+            let custom = KeybindingRegistry::from_json(&bytes, &mut warnings);
+            registry.customs = custom.customs;
+        }
+    }
+    registry
+}
+
+fn handle_keybindings_list() -> anyhow::Result<CliOutcome> {
+    let registry = load_effective_registry();
+    let bindings = registry.effective_bindings();
+    let output = format_bindings_table(&bindings);
+    print!("{output}");
+    Ok(CliOutcome::Handled)
+}
+
+fn format_bindings_table(bindings: &[crate::keybindings::KeyBinding]) -> String {
+    use crate::keybindings::{format_key_description, format_mode_name, InputMode};
+    use std::fmt::Write;
+
+    let modes = [
+        InputMode::Normal,
+        InputMode::Search,
+        InputMode::CommandPalette,
+        InputMode::SleepTimer,
+        InputMode::LibraryFilter,
+    ];
+
+    let mut output = String::new();
+    for mode in &modes {
+        let mode_bindings: Vec<_> = bindings.iter().filter(|b| &b.mode == mode).collect();
+        if mode_bindings.is_empty() {
+            continue;
+        }
+        writeln!(output, "── {} ──────────────────────────────────", format_mode_name(mode)).unwrap();
+        for b in &mode_bindings {
+            let key = format_key_description(&b.key, &b.modifiers);
+            let mods = format!("{:?}", b.modifiers);
+            let action = format!("{:?}", b.action);
+            writeln!(output, "{:<10}{:<12}{}", key, mods, action).unwrap();
+        }
+        writeln!(output).unwrap();
+    }
+    output
 }
 
 fn ensure_export_parent(path: &str) -> anyhow::Result<()> {
@@ -241,20 +309,22 @@ pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome
         }
         Some("config") => match args.next().as_deref() {
             Some("init") => handle_config_init(),
+            Some("show") => handle_config_show(),
             Some(sub) => Err(anyhow!(
-                "Unknown config subcommand: {sub}. Usage: pulsedeck config init"
+                "Unknown config subcommand: {sub}. Usage: pulsedeck config [init|show]"
             )),
             None => Err(anyhow!(
-                "Missing config subcommand. Usage: pulsedeck config init"
+                "Missing config subcommand. Usage: pulsedeck config [init|show]"
             )),
         },
         Some("keybindings") => match args.next().as_deref() {
             Some("validate") => handle_keybindings_validate(args.next().as_deref()),
+            Some("list") => handle_keybindings_list(),
             Some(sub) => Err(anyhow!(
-                "Unknown keybindings subcommand: {sub}. Usage: pulsedeck keybindings validate [path]"
+                "Unknown keybindings subcommand: {sub}. Usage: pulsedeck keybindings <validate|list>"
             )),
             None => Err(anyhow!(
-                "Missing keybindings subcommand. Usage: pulsedeck keybindings validate [path]"
+                "Missing keybindings subcommand. Usage: pulsedeck keybindings <validate|list>"
             )),
         },
         Some("--version" | "-V") => {
@@ -447,6 +517,68 @@ mod tests {
     }
 
     #[test]
+    fn test_config_show_no_file_prints_defaults() {
+        let temp_dir = unique_temp_dir("pulsedeck_config_show_no_file");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let result = crate::config_toml::io::load_config(&temp_dir);
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.config, crate::config_toml::AppConfig::default());
+
+        let output =
+            crate::config_toml::serialize::serialize_toml(&result.config, &result.preserved);
+        assert!(output.contains("default_volume = 80"));
+        assert!(output.contains("theme = \"Retrowave\""));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_config_show_valid_file_prints_toml() {
+        let temp_dir = unique_temp_dir("pulsedeck_config_show_valid");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let toml_content = r#"[audio]
+default_volume = 55
+output_device = "USB DAC"
+
+[ui]
+theme = "Terminal"
+notifications_enabled = false
+stream_metadata_enabled = true
+
+[playback]
+autoplay_last = true
+save_history = false
+"#;
+        std::fs::write(temp_dir.join("pulsedeck.toml"), toml_content).unwrap();
+
+        let result = crate::config_toml::io::load_config(&temp_dir);
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.config.audio.default_volume, 55);
+
+        let output =
+            crate::config_toml::serialize::serialize_toml(&result.config, &result.preserved);
+        assert!(output.contains("default_volume = 55"));
+        assert!(output.contains("output_device = \"USB DAC\""));
+        assert!(output.contains("theme = \"Terminal\""));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_config_show_invalid_toml_produces_parse_warning() {
+        let temp_dir = unique_temp_dir("pulsedeck_config_show_invalid");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(temp_dir.join("pulsedeck.toml"), "this is [[[not valid").unwrap();
+
+        let result = crate::config_toml::io::load_config(&temp_dir);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("Could not parse"));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn test_keybindings_validate_valid_file_returns_no_warnings() {
         let temp_dir = unique_temp_dir("pulsedeck_kb_valid");
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -562,5 +694,53 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Unknown keybindings subcommand: unknown"));
+    }
+
+    #[test]
+    fn test_keybindings_list_runs_successfully() {
+        let args = vec![
+            "pulsedeck".to_string(),
+            "keybindings".to_string(),
+            "list".to_string(),
+        ];
+        let res = run(args.into_iter()).unwrap();
+        assert!(matches!(res, CliOutcome::Handled));
+    }
+
+    #[test]
+    fn test_format_bindings_table_contains_mode_headers() {
+        use crate::keybindings::defaults::default_bindings;
+        let bindings = default_bindings();
+        let output = super::format_bindings_table(&bindings);
+
+        assert!(output.contains("── Normal ──"));
+        assert!(output.contains("── Search ──"));
+        assert!(output.contains("── CommandPalette ──"));
+        assert!(output.contains("── SleepTimer ──"));
+        assert!(output.contains("── LibraryFilter ──"));
+    }
+
+    #[test]
+    fn test_format_bindings_table_contains_key_and_action() {
+        use crate::keybindings::defaults::default_bindings;
+        let bindings = default_bindings();
+        let output = super::format_bindings_table(&bindings);
+
+        // Normal mode has 'q' → Quit
+        assert!(output.contains("q"));
+        assert!(output.contains("Quit"));
+    }
+
+    #[test]
+    fn test_format_bindings_table_empty_bindings() {
+        let output = super::format_bindings_table(&[]);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_load_effective_registry_returns_defaults() {
+        let registry = super::load_effective_registry();
+        let bindings = registry.effective_bindings();
+        assert!(!bindings.is_empty());
     }
 }

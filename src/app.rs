@@ -32,10 +32,13 @@ use crate::favorites::Library;
 use crate::keybindings::KeybindingRegistry;
 use crate::number_jump::NumberJump;
 use crate::radio::Station;
+use crate::recommend::ScoredStation;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub use command_palette::{command_label, CommandPaletteState, PaletteCommand};
+pub use discover::DiscoverFetchRequest;
 pub use lifecycle::NoticeState;
 pub use nav::Navigation;
 pub use overlays::{ActiveOverlay, Overlays};
@@ -84,19 +87,22 @@ pub struct App {
     pub(crate) notification_cooldown: lifecycle::NotificationCooldown,
 
     /// Discovery results from the recommendation engine.
-    pub discover_results: Vec<Station>,
+    pub discover_results: Vec<ScoredStation>,
 
     /// Selection cursor index into `discover_results`.
     pub discover_cursor: usize,
 
-    /// Pending discover fetch tag query (consumed by the runtime driver).
-    pub discover_fetch_pending: Option<String>,
+    /// Pending discover fetch request (consumed by the runtime driver).
+    pub discover_fetch_pending: Option<DiscoverFetchRequest>,
 
     /// Unified TOML configuration loaded at startup.
     pub config: crate::config_toml::AppConfig,
 
     /// Preserved unknown TOML keys for round-trip save operations.
     pub config_preserved: toml::Value,
+
+    /// Resolved config directory for persisting settings to TOML.
+    pub config_dir: Option<PathBuf>,
 
     /// Watches config file mtime for hot-reload on tick.
     pub config_watcher: ConfigWatcher,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::action::Action;
 
 /// Exactly one overlay can be active at a time, or none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -11,11 +12,13 @@ pub enum ActiveOverlay {
     Settings,
     PlaybackDoctor,
     SleepTimer,
+    Keybindings,
 }
 
 pub struct Overlays {
     pub active: ActiveOverlay,
     pub selected_setting_idx: usize,
+    pub keybindings_scroll: usize,
 }
 
 impl Default for Overlays {
@@ -23,6 +26,7 @@ impl Default for Overlays {
         Self {
             active: ActiveOverlay::None,
             selected_setting_idx: 0,
+            keybindings_scroll: 0,
         }
     }
 }
@@ -77,6 +81,19 @@ impl App {
 
     pub(super) fn toggle_sleep_timer_overlay(&mut self) {
         self.set_overlay(ActiveOverlay::SleepTimer);
+    }
+
+    pub(super) fn show_keybindings(&mut self) {
+        self.ui.overlays.keybindings_scroll = 0;
+        self.set_overlay(ActiveOverlay::Keybindings);
+    }
+
+    pub(super) fn handle_keybindings_overlay_action(&mut self, action: Action) {
+        match action {
+            Action::Quit => { self.close_any_overlay(); }
+            Action::Tick => self.tick(),
+            _ => {}
+        }
     }
 
     pub fn show_help(&self) -> bool {
@@ -232,5 +249,57 @@ mod tests {
         assert_eq!(app.ui.visualizer_mode, VisualizerMode::SimOscilloscope);
         app.toggle_visualizer_mode();
         assert_eq!(app.ui.visualizer_mode, VisualizerMode::Spectrum);
+    }
+
+    #[test]
+    fn show_keybindings_sets_overlay_and_resets_scroll() {
+        let mut app = test_app();
+        app.ui.overlays.keybindings_scroll = 5;
+
+        app.show_keybindings();
+
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Keybindings);
+        assert_eq!(app.ui.overlays.keybindings_scroll, 0);
+    }
+
+    #[test]
+    fn show_keybindings_action_opens_overlay() {
+        let mut app = test_app();
+
+        app.update(Action::ShowKeybindings);
+
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Keybindings);
+    }
+
+    #[test]
+    fn keybindings_overlay_dismiss_on_quit_action() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Keybindings;
+
+        app.update(Action::Quit);
+
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::None);
+        assert!(!app.ui.should_quit);
+    }
+
+    #[test]
+    fn keybindings_overlay_swallows_non_quit_actions() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Keybindings;
+
+        app.update(Action::NextStation);
+
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Keybindings);
+        assert_eq!(app.ui.nav.selected, 0);
+    }
+
+    #[test]
+    fn show_keybindings_replaces_other_overlay() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Help;
+
+        app.show_keybindings();
+
+        assert_eq!(app.ui.overlays.active, ActiveOverlay::Keybindings);
     }
 }

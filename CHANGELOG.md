@@ -4,6 +4,34 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.8.3] - Unreleased
+
+### Added
+- **Settings persist to TOML**: Changing theme, volume, notifications, autoplay, save_history, audio output, or stream metadata via the settings overlay now writes to `pulsedeck.toml` immediately. Settings no longer write to `library.json`.
+- **Discover multi-query fallback**: If the primary tag fetch returns fewer than 5 results, a second query with the next-best genre/tag fires automatically. Results are deduplicated and combined before scoring.
+- **Discover score display**: Each station in the discover overlay now shows its similarity score as `⚡{score}`.
+- **Discover "why recommended" hint**: A one-line explanation below the station list shows which genres, tags, and countries matched for the highlighted station (e.g., `matches: jazz, smooth, DE`).
+- **Discover empty results message**: "No matches found — try starring more stations" notice when all candidates score zero.
+- **Show keybindings command**: "Show keybindings" in the command palette opens a scrollable overlay listing all effective bindings grouped by mode. Dismisses with Esc/q.
+- **Keybinding shadow warning**: On startup, custom bindings that override defaults log informational warnings to stderr (e.g., `[keybindings] custom binding overrides default: 'q' in Normal mode`).
+- **`pulsedeck config show` CLI**: Prints effective configuration (defaults merged with TOML file) to stdout in TOML format.
+- **`pulsedeck keybindings list` CLI**: Prints all effective bindings in a human-readable table grouped by mode.
+
+### Improved
+- **Config watcher debounce**: Hot-reload now waits 500ms after detecting a file change before reloading. Rapid edits (editor save → rename pattern) no longer trigger redundant reloads.
+- **Discover fetch timeout**: Each Radio Browser query is capped at 8 seconds. Timeout produces a clear notice instead of hanging indefinitely.
+
+### Internal
+- 1110 tests pass, zero clippy warnings.
+- New domain functions: `select_fallback_tag`, `deduplicate_stations`, `explain_score`, `ScoreExplanation`, `ScoredStation`, `effective_bindings`, `detect_shadows`, `format_key_description`, `format_mode_name`.
+- New overlay: `src/ui/keybindings_widget.rs`.
+- `ConfigWatcher` now uses `pending_since: Option<Instant>` for debounce state machine with injectable time.
+- `DiscoverFetchRequest` replaces plain `Option<String>` for multi-query state.
+- `AppDriver` tracks `pending_primary_results` and `pending_fallback_tag` for two-stage discover.
+- `discover_results` changed from `Vec<Station>` to `Vec<ScoredStation>`.
+
+---
+
 ## [0.8.2] - Unreleased
 
 ### Added

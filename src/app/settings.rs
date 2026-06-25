@@ -18,15 +18,15 @@ impl App {
                     };
             }
             Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
-                self.mark_library_dirty();
+                self.persist_config_change();
             }
             Action::StepSettingForward if self.apply_selected_setting(true) => {
-                self.mark_library_dirty();
+                self.persist_config_change();
             }
             Action::StepSettingBackward | Action::ToggleHelp
                 if self.apply_selected_setting(false) =>
             {
-                self.mark_library_dirty();
+                self.persist_config_change();
             }
             Action::PlaySelected
             | Action::TogglePause
@@ -53,64 +53,79 @@ impl App {
     pub(super) fn apply_selected_setting(&mut self, forward: bool) -> bool {
         match self.selected_setting_row() {
             Some(SettingRow::Notifications) => {
-                self.library.settings.notifications_enabled =
-                    !self.library.settings.notifications_enabled;
+                let value = !self.config.ui.notifications_enabled;
+                self.config.ui.notifications_enabled = value;
+                self.library.settings.notifications_enabled = value;
                 true
             }
             Some(SettingRow::AutoplayLast) => {
-                self.library.settings.autoplay_last = !self.library.settings.autoplay_last;
+                let value = !self.config.playback.autoplay_last;
+                self.config.playback.autoplay_last = value;
+                self.library.settings.autoplay_last = value;
                 true
             }
             Some(SettingRow::OutputDevice) => {
-                self.library.settings.output_device_name = step_output_device_preference(
-                    self.library.settings.output_device_name.as_deref(),
-                    &available_output_device_choices(),
-                    forward,
-                );
-                self.playback.diagnostics.output_device =
-                    output_device_display_name(self.library.settings.output_device_name.as_deref());
-                self.sync_output_device();
-                self.set_info_notice(format!(
-                    "Audio output: {}",
-                    output_device_display_name(self.library.settings.output_device_name.as_deref())
-                ));
-                true
+                self.apply_output_device_setting(forward)
             }
             Some(SettingRow::Theme) => {
-                let current = ThemeName::from_key(&self.library.settings.theme);
-                let next = step_choice(ThemeName::ALL, current, forward);
-                self.library.settings.theme = next.key().to_string();
-                crate::ui::theme::set_active(next);
-                true
+                self.apply_theme_setting(forward)
             }
             Some(SettingRow::StreamMetadata) => {
-                self.library.settings.stream_metadata_enabled =
-                    !self.library.settings.stream_metadata_enabled;
-                self.playback.diagnostics.metadata_enabled =
-                    self.library.settings.stream_metadata_enabled;
-                self.sync_stream_metadata();
-                self.set_info_notice(format!(
-                    "Song info metadata: {}",
-                    if self.library.settings.stream_metadata_enabled {
-                        "on"
-                    } else {
-                        "off"
-                    }
-                ));
-                true
+                self.apply_stream_metadata_setting()
             }
             Some(SettingRow::SaveHistory) => {
-                self.library.settings.save_history = !self.library.settings.save_history;
+                let value = !self.config.playback.save_history;
+                self.config.playback.save_history = value;
+                self.library.settings.save_history = value;
                 true
             }
             None => false,
         }
     }
 
+    fn apply_output_device_setting(&mut self, forward: bool) -> bool {
+        let new_device = step_output_device_preference(
+            self.config.audio.output_device.as_deref(),
+            &available_output_device_choices(),
+            forward,
+        );
+        self.config.audio.output_device = new_device.clone();
+        self.library.settings.output_device_name = new_device.clone();
+        self.playback.diagnostics.output_device = output_device_display_name(new_device.as_deref());
+        self.sync_output_device();
+        self.set_info_notice(format!(
+            "Audio output: {}",
+            output_device_display_name(new_device.as_deref())
+        ));
+        true
+    }
+
+    fn apply_theme_setting(&mut self, forward: bool) -> bool {
+        let current = ThemeName::from_key(&self.config.ui.theme);
+        let next = step_choice(ThemeName::ALL, current, forward);
+        self.config.ui.theme = next.key().to_string();
+        self.library.settings.theme = next.key().to_string();
+        crate::ui::theme::set_active(next);
+        true
+    }
+
+    fn apply_stream_metadata_setting(&mut self) -> bool {
+        let value = !self.config.ui.stream_metadata_enabled;
+        self.config.ui.stream_metadata_enabled = value;
+        self.library.settings.stream_metadata_enabled = value;
+        self.playback.diagnostics.metadata_enabled = value;
+        self.sync_stream_metadata();
+        self.set_info_notice(format!(
+            "Song info metadata: {}",
+            if value { "on" } else { "off" }
+        ));
+        true
+    }
+
     pub(super) fn cycle_theme_setting(&mut self) {
         self.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         if self.apply_selected_setting(true) {
-            self.mark_library_dirty();
+            self.persist_config_change();
             self.set_info_notice(format!("Theme: {}", self.library.settings.theme));
         }
     }
@@ -118,7 +133,7 @@ impl App {
     pub(super) fn toggle_stream_metadata_setting(&mut self) {
         self.ui.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
         if self.apply_selected_setting(true) {
-            self.mark_library_dirty();
+            self.persist_config_change();
         }
     }
 
@@ -126,7 +141,7 @@ impl App {
         self.playback
             .audio
             .send(crate::audio::AudioCommand::SetOutputDevice(
-                self.library.settings.output_device_name.clone(),
+                self.config.audio.output_device.clone(),
             ))
     }
 
@@ -134,7 +149,7 @@ impl App {
         self.playback
             .audio
             .send(crate::audio::AudioCommand::SetStreamMetadata(
-                self.library.settings.stream_metadata_enabled,
+                self.config.ui.stream_metadata_enabled,
             ))
     }
 }
@@ -254,12 +269,15 @@ mod tests {
         let mut app = test_app();
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.config.ui.theme = "Retrowave".to_string();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingForward);
+        assert_eq!(app.config.ui.theme, "CatppuccinMocha");
         assert_eq!(app.library.settings.theme, "CatppuccinMocha");
 
         app.update(Action::StepSettingBackward);
+        assert_eq!(app.config.ui.theme, "Retrowave");
         assert_eq!(app.library.settings.theme, "Retrowave");
     }
 
@@ -268,10 +286,12 @@ mod tests {
         let mut app = test_app();
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.config.ui.theme = "Retrowave".to_string();
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingBackward);
 
+        assert_eq!(app.config.ui.theme, "Terminal");
         assert_eq!(app.library.settings.theme, "Terminal");
     }
 
@@ -323,11 +343,13 @@ mod tests {
         let mut app = test_app();
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
+        app.config.ui.stream_metadata_enabled = true;
         app.library.settings.stream_metadata_enabled = true;
 
         app.update(Action::TogglePause);
 
         assert!(!app.library.settings.stream_metadata_enabled);
+        assert!(!app.config.ui.stream_metadata_enabled);
     }
 
     #[test]
@@ -347,11 +369,13 @@ mod tests {
         let mut app = test_app();
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
+        app.config.ui.theme = "CatppuccinMocha".to_string();
         app.library.settings.theme = "CatppuccinMocha".to_string();
 
         app.update(Action::ToggleHelp);
 
         assert!(app.show_settings());
+        assert_eq!(app.config.ui.theme, "Retrowave");
         assert_eq!(app.library.settings.theme, "Retrowave");
     }
 
@@ -398,8 +422,66 @@ mod tests {
 
         app.update(Action::PlaySelected);
         assert!(app.library.settings.save_history);
+        assert!(app.config.playback.save_history);
 
         app.update(Action::PlaySelected);
         assert!(!app.library.settings.save_history);
+        assert!(!app.config.playback.save_history);
+    }
+
+    #[test]
+    fn settings_change_persists_config_to_toml_file() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!(
+            "pulsedeck-settings-persist-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut app = test_app();
+        app.config_dir = Some(dir.clone());
+        app.config.ui.notifications_enabled = true;
+        app.library.settings.notifications_enabled = true;
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+
+        app.update(Action::PlaySelected);
+
+        let toml_path = dir.join("pulsedeck.toml");
+        assert!(toml_path.exists(), "TOML config file should be written");
+        let contents = fs::read_to_string(&toml_path).unwrap();
+        assert!(
+            contents.contains("notifications_enabled = false"),
+            "Config should contain the updated setting, got:\n{contents}"
+        );
+    }
+
+    #[test]
+    fn settings_change_does_not_mark_library_dirty() {
+        let dir = std::env::temp_dir().join(format!(
+            "pulsedeck-settings-no-lib-dirty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let library_path = dir.join("library.json");
+
+        let mut app = test_app();
+        app.library.path = Some(library_path.clone());
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+
+        app.update(Action::PlaySelected);
+
+        // Library dirty flag should not be set — flushing should not write library.json
+        app.force_flush_persistence();
+        assert!(!library_path.exists(), "library.json should not be written for settings changes");
     }
 }

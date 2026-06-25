@@ -1,7 +1,7 @@
 use super::*;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 use crate::config_toml::AppConfig;
-use crate::keybindings::KeybindingRegistry;
+use crate::keybindings::{detect_shadows, KeybindingRegistry};
 use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
 use std::time::{Duration, Instant};
 
@@ -114,6 +114,10 @@ fn load_keybinding_registry() -> KeybindingRegistry {
                 eprintln!("[keybindings] {warning}");
             }
             registry.customs = custom.customs;
+            let shadows = detect_shadows(&registry.defaults, &registry.customs);
+            for warning in shadows {
+                eprintln!("{warning}");
+            }
         }
         Err(err) => {
             eprintln!("[keybindings] Could not read {}: {err}", path.display());
@@ -190,6 +194,8 @@ impl App {
 
         let config_watcher = build_config_watcher();
 
+        let config_dir = crate::config::config_dir();
+
         let mut app = Self {
             library: parts.library,
             search: SearchState::default(),
@@ -210,6 +216,7 @@ impl App {
             discover_fetch_pending: None,
             config,
             config_preserved,
+            config_dir,
             config_watcher,
             #[cfg(test)]
             notification_count: 0,
@@ -296,10 +303,10 @@ impl App {
     }
 
     /// Check config file for changes and apply hot-reloadable settings.
-    pub(super) fn check_config_reload(&mut self) {
+    pub(super) fn check_config_reload(&mut self, now: Instant) {
         use crate::config_toml::hot_reload::ReloadResult;
 
-        match self.config_watcher.check_reload() {
+        match self.config_watcher.check_reload(now) {
             ReloadResult::Unchanged => {}
             ReloadResult::Reloaded(new_config, new_preserved) => {
                 self.apply_hot_reload(new_config, new_preserved);
@@ -1095,7 +1102,7 @@ mod tests {
     fn check_config_reload_unchanged_does_nothing() {
         let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
         // ConfigWatcher points to nonexistent path → always Unchanged
-        app.check_config_reload();
+        app.check_config_reload(Instant::now());
 
         assert!(app.ui.notice.current.is_none());
     }
@@ -1116,7 +1123,9 @@ mod tests {
         let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
-        app.check_config_reload();
+        let t0 = Instant::now();
+        app.check_config_reload(t0); // detect change, start debounce
+        app.check_config_reload(t0 + Duration::from_millis(500)); // debounce fires
 
         assert_eq!(app.library.settings.theme, "Terminal");
         assert!(!app.library.settings.notifications_enabled);
@@ -1142,7 +1151,9 @@ mod tests {
         let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
-        app.check_config_reload();
+        let t0 = Instant::now();
+        app.check_config_reload(t0);
+        app.check_config_reload(t0 + Duration::from_millis(500));
 
         assert_eq!(app.config.audio.default_volume, 42);
     }
@@ -1161,7 +1172,9 @@ mod tests {
         let original_keybindings = app.config.keybindings.clone();
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
-        app.check_config_reload();
+        let t0 = Instant::now();
+        app.check_config_reload(t0);
+        app.check_config_reload(t0 + Duration::from_millis(500));
 
         assert_eq!(app.config.keybindings, original_keybindings);
     }
@@ -1180,7 +1193,9 @@ mod tests {
         let original_theme = app.library.settings.theme.clone();
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
-        app.check_config_reload();
+        let t0 = Instant::now();
+        app.check_config_reload(t0);
+        app.check_config_reload(t0 + Duration::from_millis(500));
 
         assert_eq!(app.library.settings.theme, original_theme);
         assert!(matches!(
@@ -1202,7 +1217,9 @@ mod tests {
         let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
-        app.check_config_reload();
+        let t0 = Instant::now();
+        app.check_config_reload(t0);
+        app.check_config_reload(t0 + Duration::from_millis(500));
 
         assert!(matches!(
             app.ui.notice.current,

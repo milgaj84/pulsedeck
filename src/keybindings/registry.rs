@@ -103,6 +103,41 @@ impl KeybindingRegistry {
         }
     }
 
+    /// Return all effective bindings: customs override defaults for same key+mode.
+    /// Defaults appear first (in original order), then additional customs.
+    pub fn effective_bindings(&self) -> Vec<KeyBinding> {
+        let mut result: Vec<KeyBinding> = self
+            .defaults
+            .iter()
+            .map(|d| self.find_custom_override(d).unwrap_or(d).clone())
+            .collect();
+        result.extend(self.additional_customs());
+        result
+    }
+
+    /// Find a custom binding that overrides the given default.
+    fn find_custom_override(&self, default: &KeyBinding) -> Option<&KeyBinding> {
+        self.customs.iter().rev().find(|c| {
+            c.key == default.key && c.mode == default.mode && modifiers_match(&c.modifiers, &default.modifiers)
+        })
+    }
+
+    /// Return customs that don't shadow any default binding.
+    fn additional_customs(&self) -> Vec<KeyBinding> {
+        self.customs
+            .iter()
+            .filter(|c| !self.shadows_default(c))
+            .cloned()
+            .collect()
+    }
+
+    /// Check if a custom binding shadows (matches) any default.
+    fn shadows_default(&self, custom: &KeyBinding) -> bool {
+        self.defaults.iter().any(|d| {
+            d.key == custom.key && d.mode == custom.mode && modifiers_match(&d.modifiers, &custom.modifiers)
+        })
+    }
+
     fn empty() -> Self {
         Self {
             defaults: Vec::new(),
@@ -260,6 +295,77 @@ fn parse_simple_action(input: &str) -> Option<Action> {
         "discover" => Some(Action::Discover),
         _ => None,
     }
+}
+
+/// Format a key description for human-readable display.
+/// Examples: "q", "Ctrl+c", "Shift+Tab", "Enter", "F3"
+pub fn format_key_description(key: &KeySpec, modifiers: &[Modifier]) -> String {
+    let key_name = match key {
+        KeySpec::Char(c) => c.to_string(),
+        KeySpec::Function(n) => format!("F{n}"),
+        KeySpec::Named(named) => format_named_key(named).to_string(),
+    };
+    if modifiers.is_empty() {
+        return key_name;
+    }
+    let mods: Vec<&str> = modifiers.iter().map(format_modifier_name).collect();
+    format!("{}+{}", mods.join("+"), key_name)
+}
+
+fn format_named_key(key: &super::NamedKey) -> &'static str {
+    match key {
+        super::NamedKey::Enter => "Enter",
+        super::NamedKey::Esc => "Esc",
+        super::NamedKey::Up => "Up",
+        super::NamedKey::Down => "Down",
+        super::NamedKey::Left => "Left",
+        super::NamedKey::Right => "Right",
+        super::NamedKey::Tab => "Tab",
+        super::NamedKey::Backspace => "Backspace",
+        super::NamedKey::Home => "Home",
+        super::NamedKey::End => "End",
+        super::NamedKey::PageUp => "PageUp",
+        super::NamedKey::PageDown => "PageDown",
+        super::NamedKey::Delete => "Delete",
+        super::NamedKey::Insert => "Insert",
+    }
+}
+
+fn format_modifier_name(modifier: &Modifier) -> &'static str {
+    match modifier {
+        Modifier::Ctrl => "Ctrl",
+        Modifier::Alt => "Alt",
+        Modifier::Shift => "Shift",
+    }
+}
+
+/// Format an InputMode variant as a human-readable name.
+pub fn format_mode_name(mode: &InputMode) -> &'static str {
+    match mode {
+        InputMode::Normal => "Normal",
+        InputMode::Search => "Search",
+        InputMode::CommandPalette => "CommandPalette",
+        InputMode::SleepTimer => "SleepTimer",
+        InputMode::LibraryFilter => "LibraryFilter",
+    }
+}
+
+/// Detect custom bindings that shadow defaults.
+/// Returns one warning string per shadowed binding.
+pub fn detect_shadows(defaults: &[KeyBinding], customs: &[KeyBinding]) -> Vec<String> {
+    customs
+        .iter()
+        .filter(|custom| {
+            defaults
+                .iter()
+                .any(|d| d.key == custom.key && d.mode == custom.mode && modifiers_match(&d.modifiers, &custom.modifiers))
+        })
+        .map(|custom| {
+            let key_desc = format_key_description(&custom.key, &custom.modifiers);
+            let mode_name = format_mode_name(&custom.mode);
+            format!("[keybindings] custom binding overrides default: '{key_desc}' in {mode_name} mode")
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -434,6 +540,119 @@ mod tests {
 
         assert!(registry.customs.is_empty());
         assert!(warnings.is_empty());
+    }
+
+    // --- effective_bindings tests ---
+
+    #[test]
+    fn test_effective_bindings_no_customs_returns_all_defaults() {
+        let defaults = vec![
+            binding(KeySpec::Char('q'), vec![], Action::Quit, InputMode::Normal),
+            binding(
+                KeySpec::Char('j'),
+                vec![],
+                Action::NextStation,
+                InputMode::Normal,
+            ),
+        ];
+        let registry = KeybindingRegistry::new_with_defaults(defaults.clone());
+
+        let effective = registry.effective_bindings();
+
+        assert_eq!(effective.len(), 2);
+        assert_eq!(effective[0].action, Action::Quit);
+        assert_eq!(effective[1].action, Action::NextStation);
+    }
+
+    #[test]
+    fn test_effective_bindings_custom_overrides_default() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let mut registry = KeybindingRegistry::new_with_defaults(defaults);
+        registry.customs.push(binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            InputMode::Normal,
+        ));
+
+        let effective = registry.effective_bindings();
+
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].action, Action::Stop);
+    }
+
+    #[test]
+    fn test_effective_bindings_custom_adds_new_binding() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let mut registry = KeybindingRegistry::new_with_defaults(defaults);
+        registry.customs.push(binding(
+            KeySpec::Char('x'),
+            vec![],
+            Action::Stop,
+            InputMode::Normal,
+        ));
+
+        let effective = registry.effective_bindings();
+
+        assert_eq!(effective.len(), 2);
+        assert_eq!(effective[0].action, Action::Quit);
+        assert_eq!(effective[1].action, Action::Stop);
+    }
+
+    #[test]
+    fn test_effective_bindings_modifier_order_independent_override() {
+        let defaults = vec![binding(
+            KeySpec::Char('c'),
+            vec![Modifier::Ctrl, Modifier::Shift],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let mut registry = KeybindingRegistry::new_with_defaults(defaults);
+        // Custom has modifiers in different order
+        registry.customs.push(binding(
+            KeySpec::Char('c'),
+            vec![Modifier::Shift, Modifier::Ctrl],
+            Action::Stop,
+            InputMode::Normal,
+        ));
+
+        let effective = registry.effective_bindings();
+
+        assert_eq!(effective.len(), 1);
+        assert_eq!(effective[0].action, Action::Stop);
+    }
+
+    #[test]
+    fn test_effective_bindings_different_mode_not_override() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let mut registry = KeybindingRegistry::new_with_defaults(defaults);
+        registry.customs.push(binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            InputMode::Search,
+        ));
+
+        let effective = registry.effective_bindings();
+
+        assert_eq!(effective.len(), 2);
+        assert_eq!(effective[0].action, Action::Quit);
+        assert_eq!(effective[1].action, Action::Stop);
     }
 
     // --- resolve tests ---
@@ -635,6 +854,165 @@ mod tests {
             "Expected at least 5 bindings, got {}",
             registry.customs.len()
         );
+    }
+
+    // --- detect_shadows tests ---
+
+    #[test]
+    fn test_detect_shadows_custom_shadows_default_produces_warning() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let customs = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            InputMode::Normal,
+        )];
+
+        let warnings = detect_shadows(&defaults, &customs);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("custom binding overrides default"));
+        assert!(warnings[0].contains("'q'"));
+        assert!(warnings[0].contains("Normal mode"));
+    }
+
+    #[test]
+    fn test_detect_shadows_no_shadow_no_warning() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let customs = vec![binding(
+            KeySpec::Char('x'),
+            vec![],
+            Action::Stop,
+            InputMode::Normal,
+        )];
+
+        let warnings = detect_shadows(&defaults, &customs);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_detect_shadows_multiple_shadows_multiple_warnings() {
+        let defaults = vec![
+            binding(KeySpec::Char('q'), vec![], Action::Quit, InputMode::Normal),
+            binding(
+                KeySpec::Char('c'),
+                vec![Modifier::Ctrl],
+                Action::Quit,
+                InputMode::Normal,
+            ),
+        ];
+        let customs = vec![
+            binding(KeySpec::Char('q'), vec![], Action::Stop, InputMode::Normal),
+            binding(
+                KeySpec::Char('c'),
+                vec![Modifier::Ctrl],
+                Action::Stop,
+                InputMode::Normal,
+            ),
+        ];
+
+        let warnings = detect_shadows(&defaults, &customs);
+
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("'q'"));
+        assert!(warnings[1].contains("'Ctrl+c'"));
+    }
+
+    #[test]
+    fn test_detect_shadows_different_mode_no_shadow() {
+        let defaults = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let customs = vec![binding(
+            KeySpec::Char('q'),
+            vec![],
+            Action::Stop,
+            InputMode::Search,
+        )];
+
+        let warnings = detect_shadows(&defaults, &customs);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_detect_shadows_different_modifiers_no_shadow() {
+        let defaults = vec![binding(
+            KeySpec::Char('c'),
+            vec![Modifier::Ctrl],
+            Action::Quit,
+            InputMode::Normal,
+        )];
+        let customs = vec![binding(
+            KeySpec::Char('c'),
+            vec![],
+            Action::Stop,
+            InputMode::Normal,
+        )];
+
+        let warnings = detect_shadows(&defaults, &customs);
+
+        assert!(warnings.is_empty());
+    }
+
+    // --- format_key_description tests ---
+
+    #[test]
+    fn test_format_key_description_simple_char() {
+        assert_eq!(
+            format_key_description(&KeySpec::Char('q'), &[]),
+            "q"
+        );
+    }
+
+    #[test]
+    fn test_format_key_description_with_modifier() {
+        assert_eq!(
+            format_key_description(&KeySpec::Char('c'), &[Modifier::Ctrl]),
+            "Ctrl+c"
+        );
+    }
+
+    #[test]
+    fn test_format_key_description_named_key() {
+        assert_eq!(
+            format_key_description(
+                &KeySpec::Named(super::super::NamedKey::Enter),
+                &[]
+            ),
+            "Enter"
+        );
+    }
+
+    #[test]
+    fn test_format_key_description_function_key() {
+        assert_eq!(
+            format_key_description(&KeySpec::Function(3), &[]),
+            "F3"
+        );
+    }
+
+    #[test]
+    fn test_format_mode_name_variants() {
+        assert_eq!(format_mode_name(&InputMode::Normal), "Normal");
+        assert_eq!(format_mode_name(&InputMode::Search), "Search");
+        assert_eq!(format_mode_name(&InputMode::CommandPalette), "CommandPalette");
+        assert_eq!(format_mode_name(&InputMode::SleepTimer), "SleepTimer");
+        assert_eq!(format_mode_name(&InputMode::LibraryFilter), "LibraryFilter");
     }
 }
 
