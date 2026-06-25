@@ -12,6 +12,7 @@ mod favorites_set;
 mod history;
 mod keybindings;
 mod library_filter;
+pub mod library_sort;
 mod number_jump;
 mod playlist;
 mod playlist_export;

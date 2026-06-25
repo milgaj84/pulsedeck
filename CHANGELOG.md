@@ -4,6 +4,24 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.10.0] - Unreleased
+
+### Added
+- **Library sort modes**: Press `S` to cycle through Favorites First → Alphabetical → Recently Added → Most Played. Favorites stay pinned to the top in all modes. Pure domain function with no UI dependencies.
+- **Stale station pruning hint**: On startup, a notice shows how many saved stations have been continuously failing for 30+ days. Awareness only — no auto-deletion.
+- **Keybinding hot-reload**: Changes to `keybindings.json` are detected and applied live without restarting (500ms debounce). Shows "Keybindings reloaded" notice on success, keeps existing bindings on parse failure.
+- **Config validation on save**: Before writing `pulsedeck.toml`, a round-trip validation (serialize → re-parse → compare) prevents corrupted config writes. Invalid saves are aborted with a notice.
+- **Settings undo**: Press `u` in the settings overlay to undo the last setting change. Single-level per-row buffer, cleared when the overlay closes.
+
+### Internal
+- 1298 tests pass, zero clippy warnings.
+- 9 new property-based tests covering sort permutation invariant, per-mode ordering, cycling round-trip, stale count correctness, config validation round-trip, and undo stack semantics.
+- New modules: `src/library_sort.rs`, `src/radio/stale_query.rs`, `src/keybindings/watcher.rs`, `src/config_toml/validate.rs`, `src/app/settings_undo.rs`.
+- New actions: `CycleSortMode`, `UndoSetting`.
+- `build_line` clippy warning suppressed, `sort_by_key` used for library name sort.
+
+---
+
 ## [0.9.1] - Unreleased
 
 ### Fixed

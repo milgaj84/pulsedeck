@@ -140,11 +140,9 @@ impl App {
         let Some(config_dir) = self.config_dir.as_ref() else {
             return;
         };
-        if let Err(msg) = crate::config_toml::io::save_config(
-            config_dir,
-            &self.config,
-            &self.config_preserved,
-        ) {
+        if let Err(msg) =
+            crate::config_toml::io::save_config(config_dir, &self.config, &self.config_preserved)
+        {
             self.set_error_notice(msg);
         }
     }
@@ -435,7 +433,9 @@ mod tests {
 
         app.persist_config_change();
 
-        assert!(matches!(app.ui.notice.current, Some(AppNotice::Error(ref msg)) if msg.contains("Could not create config directory")));
+        assert!(
+            matches!(app.ui.notice.current, Some(AppNotice::Error(ref msg)) if msg.contains("Could not create config directory"))
+        );
     }
 
     #[test]
@@ -445,6 +445,9 @@ mod tests {
 
         app.persist_config_change();
 
-        assert!(app.ui.notice.current.is_none() || !matches!(app.ui.notice.current, Some(AppNotice::Error(_))));
+        assert!(
+            app.ui.notice.current.is_none()
+                || !matches!(app.ui.notice.current, Some(AppNotice::Error(_)))
+        );
     }
 }

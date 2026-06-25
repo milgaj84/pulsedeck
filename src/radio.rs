@@ -3,6 +3,7 @@ pub mod health_classifier;
 mod map;
 mod query;
 mod rank;
+pub mod stale_query;
 mod station;
 
 pub use query::{has_unknown_prefix, prefix_examples_inline, SearchField, StationSearchQuery};

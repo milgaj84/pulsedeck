@@ -19,6 +19,7 @@ mod reconnect;
 mod search;
 mod selectors;
 mod settings;
+mod settings_undo;
 mod sleep_timer;
 mod types;
 mod ui_runtime;
@@ -29,7 +30,9 @@ pub mod visualizer_mode;
 
 use crate::config_toml::hot_reload::ConfigWatcher;
 use crate::favorites::Library;
+use crate::keybindings::watcher::KeybindingWatcher;
 use crate::keybindings::KeybindingRegistry;
+use crate::library_sort::SortMode;
 use crate::number_jump::NumberJump;
 use crate::radio::Station;
 use crate::recommend::ScoredStation;
@@ -50,6 +53,7 @@ pub(crate) use playback_error::{classify_playback_error, PlaybackErrorKind};
 pub use playback_runtime::{PlaybackOptions, PlaybackRuntime};
 pub use reconnect::Reconnect;
 pub use search::SearchState;
+pub use settings_undo::SettingsUndoStack;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{
     AppNotice, DecoderState, DisplayMode, InputMode, LayoutMode, PlaybackDiagnostics,
@@ -81,6 +85,9 @@ pub struct App {
     metadata_refresh_running: bool,
     persist: persist::PersistFlags,
 
+    /// Current library sort mode.
+    pub sort_mode: SortMode,
+
     /// Custom keybinding registry (loaded from keybindings.json).
     pub keybinding_registry: KeybindingRegistry,
 
@@ -108,8 +115,14 @@ pub struct App {
     /// Watches config file mtime for hot-reload on tick.
     pub config_watcher: ConfigWatcher,
 
+    /// Watches keybindings JSON file for hot-reload on tick.
+    pub keybinding_watcher: KeybindingWatcher,
+
     /// Search history ring for query recall via Up/Down arrows.
     pub search_history: SearchHistoryRing,
+
+    /// Per-row undo buffer for the settings overlay.
+    pub settings_undo: SettingsUndoStack,
 
     /// Test-only counter for how many notifications were dispatched.
     #[cfg(test)]

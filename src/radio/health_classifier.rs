@@ -77,7 +77,7 @@ fn apply_decay(
 
 /// Compute the age in seconds between two timestamps.
 /// Supports ISO 8601 format ("2024-01-01T00:00:00Z") and plain Unix seconds.
-fn timestamp_age_secs(earlier: &str, later: &str) -> Option<u64> {
+pub(crate) fn timestamp_age_secs(earlier: &str, later: &str) -> Option<u64> {
     let earlier_epoch = parse_to_epoch(earlier)?;
     let later_epoch = parse_to_epoch(later)?;
     Some(later_epoch.saturating_sub(earlier_epoch))

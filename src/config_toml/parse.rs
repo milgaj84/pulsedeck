@@ -226,7 +226,15 @@ fn parse_reconnect_backoff_seconds(
     let mut result: Vec<u64> = arr
         .iter()
         .filter_map(|v| v.as_integer())
-        .map(|v| clamp_i64(v, 1, 60, "playback.reconnect_backoff_seconds element", warnings) as u64)
+        .map(|v| {
+            clamp_i64(
+                v,
+                1,
+                60,
+                "playback.reconnect_backoff_seconds element",
+                warnings,
+            ) as u64
+        })
         .collect();
 
     if result.is_empty() {
@@ -682,7 +690,10 @@ foo = "bar"
         let input = "[playback]\nreconnect_backoff_seconds = [2, 5, 10, 30]\n";
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![2, 5, 10, 30]);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![2, 5, 10, 30]
+        );
         assert!(result.warnings.is_empty());
     }
 
@@ -691,7 +702,10 @@ foo = "bar"
         let input = "[playback]\nreconnect_backoff_seconds = [0, 5, 100]\n";
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![1, 5, 60]);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![1, 5, 60]
+        );
         assert_eq!(result.warnings.len(), 2);
         assert!(result.warnings[0].contains("clamped to 1"));
         assert!(result.warnings[1].contains("clamped to 60"));
@@ -702,7 +716,10 @@ foo = "bar"
         let input = "[playback]\nreconnect_backoff_seconds = []\n";
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![3, 6, 12]
+        );
         assert_eq!(result.warnings.len(), 1);
         assert!(result.warnings[0].contains("using default [3, 6, 12]"));
     }
@@ -726,7 +743,10 @@ foo = "bar"
         let input = "[playback]\nautoplay_last = true\n";
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![3, 6, 12]
+        );
         assert!(result.warnings.is_empty());
     }
 
@@ -735,7 +755,10 @@ foo = "bar"
         let input = "[playback]\nreconnect_backoff_seconds = \"not an array\"\n";
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![3, 6, 12]
+        );
         assert!(result.warnings.is_empty());
     }
 
@@ -1005,10 +1028,7 @@ exclude_countries = ["US", "", "  ", "GB"]
 "#;
         let result = parse_toml(input).unwrap();
 
-        assert_eq!(
-            result.config.discover.exclude_countries,
-            vec!["US", "GB"]
-        );
+        assert_eq!(result.config.discover.exclude_countries, vec!["US", "GB"]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use crate::radio::Station;
 
 /// Stable partition: favorited stations first (preserving input order among them),
 /// then non-favorited stations (preserving input order among them).
+#[allow(dead_code)]
 pub fn sort_with_favorites<'a>(
     stations: Vec<&'a Station>,
     favorites: &FavoritesSet,

@@ -66,7 +66,12 @@ impl AudioEngine {
 
         let sample_buffer_clone = sample_buffer.clone();
         std::thread::spawn(move || {
-            engine_loop_v2::EngineLoop::run(cmd_rx, status_tx, sample_buffer_clone, recovery_config);
+            engine_loop_v2::EngineLoop::run(
+                cmd_rx,
+                status_tx,
+                sample_buffer_clone,
+                recovery_config,
+            );
         });
 
         Self { cmd_tx, status_rx }

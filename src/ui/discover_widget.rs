@@ -30,7 +30,10 @@ pub fn render_discover_overlay(
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let list_area = Rect { height: inner.height.saturating_sub(1), ..inner };
+    let list_area = Rect {
+        height: inner.height.saturating_sub(1),
+        ..inner
+    };
     let hint_area = Rect {
         y: inner.y + list_area.height,
         height: 1,
@@ -94,7 +97,10 @@ fn format_station_line(station: &Station, score: u32) -> String {
     } else {
         &station.country_code
     };
-    format!("{}  {}  {}  ⚡{}", station.name, station.genre, country, score)
+    format!(
+        "{}  {}  {}  ⚡{}",
+        station.name, station.genre, country, score
+    )
 }
 
 /// Compute scroll offset to keep `cursor` visible within viewport of `visible_height`.
@@ -163,7 +169,10 @@ mod tests {
     #[test]
     fn format_station_line_falls_back_to_country_when_no_code() {
         let station = station_with("Rock Radio", "Rock", "Germany", "");
-        assert_eq!(format_station_line(&station, 3), "Rock Radio  Rock  Germany  ⚡3");
+        assert_eq!(
+            format_station_line(&station, 3),
+            "Rock Radio  Rock  Germany  ⚡3"
+        );
     }
 
     #[test]
@@ -202,8 +211,14 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         let results = vec![
-            ScoredStation { station: station_with("Station A", "Pop", "US", "US"), score: 4 },
-            ScoredStation { station: station_with("Station B", "Rock", "UK", "GB"), score: 3 },
+            ScoredStation {
+                station: station_with("Station A", "Pop", "US", "US"),
+                score: 4,
+            },
+            ScoredStation {
+                station: station_with("Station B", "Rock", "UK", "GB"),
+                score: 3,
+            },
         ];
 
         terminal
@@ -264,9 +279,10 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let results = vec![
-            ScoredStation { station: station_with("Station A", "Jazz", "DE", "DE"), score: 5 },
-        ];
+        let results = vec![ScoredStation {
+            station: station_with("Station A", "Jazz", "DE", "DE"),
+            score: 5,
+        }];
 
         terminal
             .draw(|frame| {
@@ -277,7 +293,10 @@ mod tests {
 
         let buffer = terminal.backend().buffer().clone();
         let content = buffer_to_string(&buffer);
-        assert!(content.contains("matches: jazz, DE"), "Explanation line should be visible");
+        assert!(
+            content.contains("matches: jazz, DE"),
+            "Explanation line should be visible"
+        );
     }
 
     #[test]
@@ -289,9 +308,10 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let results = vec![
-            ScoredStation { station: station_with("Station A", "Jazz", "DE", "DE"), score: 5 },
-        ];
+        let results = vec![ScoredStation {
+            station: station_with("Station A", "Jazz", "DE", "DE"),
+            score: 5,
+        }];
 
         terminal
             .draw(|frame| {

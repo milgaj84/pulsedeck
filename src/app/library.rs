@@ -88,6 +88,11 @@ impl App {
         }
     }
 
+    pub(super) fn cycle_sort_mode(&mut self) {
+        self.sort_mode = self.sort_mode.next();
+        self.set_info_notice(format!("Sort: {}", self.sort_mode.label()));
+    }
+
     pub(super) fn request_metadata_refresh(&mut self) {
         if self.library.stations.is_empty() {
             self.set_info_notice("Library is empty; nothing to refresh");
@@ -560,5 +565,58 @@ mod tests {
             "Ambient"
         );
         assert_eq!(app.ui.nav.selected, 0);
+    }
+
+    #[test]
+    fn test_cycle_sort_mode_advances_and_shows_notice() {
+        use crate::library_sort::SortMode;
+
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+        assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
+
+        app.update(Action::CycleSortMode);
+
+        assert_eq!(app.sort_mode, SortMode::Alphabetical);
+        assert_eq!(notice_text(&app), Some("Sort: Alphabetical"));
+    }
+
+    #[test]
+    fn test_cycle_sort_mode_wraps_around() {
+        use crate::library_sort::SortMode;
+
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+
+        app.update(Action::CycleSortMode); // → Alphabetical
+        app.update(Action::CycleSortMode); // → RecentlyAdded
+        app.update(Action::CycleSortMode); // → MostPlayed
+        app.update(Action::CycleSortMode); // → FavoritesFirst
+
+        assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
+        assert_eq!(notice_text(&app), Some("Sort: Favorites First"));
+    }
+
+    #[test]
+    fn test_visible_stations_uses_active_sort_mode() {
+        use crate::library_sort::SortMode;
+
+        let mut app = App::new(Library::in_memory(vec![
+            station("Zeta", "http://z", "Synthwave"),
+            station("Alpha", "http://a", "Synthwave"),
+            station("Beta", "http://b", "Synthwave"),
+        ]));
+        app.sort_mode = SortMode::Alphabetical;
+
+        let visible = app.visible_stations();
+        let names: Vec<&str> = visible.iter().map(|s| s.name.as_str()).collect();
+
+        assert_eq!(names, vec!["Alpha", "Beta", "Zeta"]);
     }
 }

@@ -164,10 +164,8 @@ fn compute_discover_explanation(model: &UiModel<'_>) -> String {
         Some(scored) => &scored.station,
         None => return String::new(),
     };
-    let profile = build_favorites_profile(
-        &model.library.stations,
-        &model.library.settings.favorites,
-    );
+    let profile =
+        build_favorites_profile(&model.library.stations, &model.library.settings.favorites);
     let explanation = explain_score(&profile, station);
     discover_widget::format_explanation(&explanation)
 }

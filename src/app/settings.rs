@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::Action;
+use crate::app::settings_undo::SettingSnapshot;
 use crate::theme_name::ThemeName;
 
 impl App {
@@ -17,15 +18,13 @@ impl App {
                         self.ui.overlays.selected_setting_idx - 1
                     };
             }
-            Action::PlaySelected | Action::TogglePause if self.apply_selected_setting(true) => {
+            Action::PlaySelected | Action::TogglePause if self.capture_and_apply(true) => {
                 self.persist_config_change();
             }
-            Action::StepSettingForward if self.apply_selected_setting(true) => {
+            Action::StepSettingForward if self.capture_and_apply(true) => {
                 self.persist_config_change();
             }
-            Action::StepSettingBackward | Action::ToggleHelp
-                if self.apply_selected_setting(false) =>
-            {
+            Action::StepSettingBackward | Action::ToggleHelp if self.capture_and_apply(false) => {
                 self.persist_config_change();
             }
             Action::PlaySelected
@@ -33,16 +32,108 @@ impl App {
             | Action::StepSettingForward
             | Action::StepSettingBackward
             | Action::ToggleHelp => {}
+            Action::UndoSetting | Action::UndoRemoveLibrarySelection => {
+                self.undo_selected_setting();
+            }
             Action::ToggleSettings => {
+                self.settings_undo.clear();
                 self.ui.overlays.active = ActiveOverlay::None;
             }
             Action::Quit => {
+                self.settings_undo.clear();
                 self.ui.overlays.active = ActiveOverlay::None;
             }
             Action::Tick => self.tick(),
             _ => {
                 // Block all other actions while settings are open.
             }
+        }
+    }
+
+    /// Capture the current value before applying a setting change.
+    /// Returns true if the setting was successfully applied.
+    fn capture_and_apply(&mut self, forward: bool) -> bool {
+        let row_index = self.ui.overlays.selected_setting_idx;
+        if let Some(snapshot) = self.snapshot_current_setting() {
+            self.settings_undo.capture(row_index, snapshot);
+        }
+        self.apply_selected_setting(forward)
+    }
+
+    /// Take a snapshot of the currently selected setting's value.
+    fn snapshot_current_setting(&self) -> Option<SettingSnapshot> {
+        match self.selected_setting_row()? {
+            SettingRow::Notifications => {
+                Some(SettingSnapshot::Bool(self.config.ui.notifications_enabled))
+            }
+            SettingRow::AutoplayLast => {
+                Some(SettingSnapshot::Bool(self.config.playback.autoplay_last))
+            }
+            SettingRow::OutputDevice => Some(SettingSnapshot::OptionalString(
+                self.config.audio.output_device.clone(),
+            )),
+            SettingRow::Theme => Some(SettingSnapshot::String(self.config.ui.theme.clone())),
+            SettingRow::StreamMetadata => Some(SettingSnapshot::Bool(
+                self.config.ui.stream_metadata_enabled,
+            )),
+            SettingRow::SaveHistory => {
+                Some(SettingSnapshot::Bool(self.config.playback.save_history))
+            }
+        }
+    }
+
+    /// Undo the last change for the currently selected setting row.
+    fn undo_selected_setting(&mut self) {
+        let row_index = self.ui.overlays.selected_setting_idx;
+        match self.settings_undo.take(row_index) {
+            Some(snapshot) => {
+                self.restore_setting_snapshot(row_index, snapshot);
+                self.persist_config_change();
+            }
+            None => {
+                self.set_info_notice("Nothing to undo");
+            }
+        }
+    }
+
+    /// Restore a setting from a snapshot.
+    fn restore_setting_snapshot(&mut self, row_index: usize, snapshot: SettingSnapshot) {
+        let Some(row) = SettingRow::from_index(row_index) else {
+            return;
+        };
+        match (row, snapshot) {
+            (SettingRow::Notifications, SettingSnapshot::Bool(value)) => {
+                self.config.ui.notifications_enabled = value;
+                self.library.settings.notifications_enabled = value;
+            }
+            (SettingRow::AutoplayLast, SettingSnapshot::Bool(value)) => {
+                self.config.playback.autoplay_last = value;
+                self.library.settings.autoplay_last = value;
+            }
+            (SettingRow::OutputDevice, SettingSnapshot::OptionalString(value)) => {
+                self.config.audio.output_device = value.clone();
+                self.library.settings.output_device_name = value.clone();
+                self.playback.diagnostics.output_device =
+                    crate::audio::output_device_display_name(value.as_deref());
+                self.sync_output_device();
+            }
+            (SettingRow::Theme, SettingSnapshot::String(value)) => {
+                self.config.ui.theme = value.clone();
+                self.library.settings.theme = value.clone();
+                let theme = ThemeName::from_key(&value);
+                crate::ui::theme::set_active(theme);
+            }
+            (SettingRow::StreamMetadata, SettingSnapshot::Bool(value)) => {
+                self.config.ui.stream_metadata_enabled = value;
+                self.library.settings.stream_metadata_enabled = value;
+                self.playback.diagnostics.metadata_enabled = value;
+                self.sync_stream_metadata();
+            }
+            (SettingRow::SaveHistory, SettingSnapshot::Bool(value)) => {
+                self.config.playback.save_history = value;
+                self.library.settings.save_history = value;
+            }
+            _ => {}
         }
     }
 
@@ -64,15 +155,9 @@ impl App {
                 self.library.settings.autoplay_last = value;
                 true
             }
-            Some(SettingRow::OutputDevice) => {
-                self.apply_output_device_setting(forward)
-            }
-            Some(SettingRow::Theme) => {
-                self.apply_theme_setting(forward)
-            }
-            Some(SettingRow::StreamMetadata) => {
-                self.apply_stream_metadata_setting()
-            }
+            Some(SettingRow::OutputDevice) => self.apply_output_device_setting(forward),
+            Some(SettingRow::Theme) => self.apply_theme_setting(forward),
+            Some(SettingRow::StreamMetadata) => self.apply_stream_metadata_setting(),
             Some(SettingRow::SaveHistory) => {
                 let value = !self.config.playback.save_history;
                 self.config.playback.save_history = value;
@@ -484,6 +569,103 @@ mod tests {
 
         // Library dirty flag should not be set — flushing should not write library.json
         app.force_flush_persistence();
-        assert!(!library_path.exists(), "library.json should not be written for settings changes");
+        assert!(
+            !library_path.exists(),
+            "library.json should not be written for settings changes"
+        );
+    }
+
+    // --- Settings undo tests ---
+
+    #[test]
+    fn test_undo_restores_previous_value() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+        app.config.ui.notifications_enabled = true;
+        app.library.settings.notifications_enabled = true;
+
+        // Toggle the setting (true → false)
+        app.update(Action::PlaySelected);
+        assert!(!app.config.ui.notifications_enabled);
+
+        // Undo → should restore to true
+        app.update(Action::UndoSetting);
+        assert!(app.config.ui.notifications_enabled);
+        assert!(app.library.settings.notifications_enabled);
+    }
+
+    #[test]
+    fn test_undo_with_no_entry_shows_notice() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+
+        // Undo without any prior change
+        app.update(Action::UndoSetting);
+
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg == "Nothing to undo"
+        ));
+    }
+
+    #[test]
+    fn test_undo_stack_cleared_on_close() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+        app.config.ui.notifications_enabled = true;
+        app.library.settings.notifications_enabled = true;
+
+        // Make a change
+        app.update(Action::PlaySelected);
+        assert!(app
+            .settings_undo
+            .has_entry(SettingRow::Notifications.index()));
+
+        // Close settings overlay
+        app.update(Action::ToggleSettings);
+        assert!(!app.show_settings());
+        assert!(!app
+            .settings_undo
+            .has_entry(SettingRow::Notifications.index()));
+    }
+
+    #[test]
+    fn test_undo_persists_config() {
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!(
+            "pulsedeck-settings-undo-persist-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut app = test_app();
+        app.config_dir = Some(dir.clone());
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
+        app.config.ui.notifications_enabled = true;
+        app.library.settings.notifications_enabled = true;
+
+        // Toggle setting (true → false)
+        app.update(Action::PlaySelected);
+        // Undo (false → true)
+        app.update(Action::UndoSetting);
+
+        let toml_path = dir.join("pulsedeck.toml");
+        assert!(
+            toml_path.exists(),
+            "TOML config file should be written after undo"
+        );
+        let contents = fs::read_to_string(&toml_path).unwrap();
+        assert!(
+            contents.contains("notifications_enabled = true"),
+            "Config should contain the restored setting after undo, got:\n{contents}"
+        );
     }
 }

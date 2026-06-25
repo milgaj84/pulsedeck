@@ -304,11 +304,8 @@ fn maybe_prefilter<'a>(
 /// Combines genres and tags, sorts by count descending, returns the first entry
 /// that differs from `primary`. Returns None if no alternative exists.
 pub fn select_fallback_tag(profile: &FavoritesProfile, primary: &str) -> Option<String> {
-    let mut entries: Vec<(&String, &u32)> = profile
-        .genres
-        .iter()
-        .chain(profile.tags.iter())
-        .collect();
+    let mut entries: Vec<(&String, &u32)> =
+        profile.genres.iter().chain(profile.tags.iter()).collect();
     entries.sort_by(|a, b| b.1.cmp(a.1));
     entries
         .into_iter()
@@ -456,7 +453,10 @@ mod tests {
         let profile = empty_profile();
         let station = make_station("http://a", "Rock", vec!["guitar"], "US");
 
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 0);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            0
+        );
     }
 
     #[test]
@@ -464,7 +464,10 @@ mod tests {
         let profile = profile_with(&["rock"], &[], &[]);
         let station = make_station("http://a", "Rock", vec![], "");
 
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 3);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            3
+        );
     }
 
     #[test]
@@ -473,7 +476,10 @@ mod tests {
         let station = make_station("http://a", "", vec!["Guitar", "Live"], "");
 
         // Only "guitar" overlaps (case-insensitive) → 1 tag × 1 = 1
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 1);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            1
+        );
     }
 
     #[test]
@@ -481,7 +487,10 @@ mod tests {
         let profile = profile_with(&[], &[], &["US", "DE"]);
         let station = make_station("http://a", "", vec![], "de");
 
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 1);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            1
+        );
     }
 
     #[test]
@@ -490,7 +499,10 @@ mod tests {
         let station = make_station("http://a", "Jazz", vec!["smooth", "chill", "live"], "DE");
 
         // genre: 3 + tags: 2 (smooth, chill) + country: 1 = 6
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 6);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            6
+        );
     }
 
     #[test]
@@ -542,7 +554,10 @@ mod tests {
         // Original hardcoded: genre=3, tag=1 per match, country=1
         // Default weights: genre_weight=3, tag_weight=1, country_weight=1
         // Expected: 3×1 + 1×2 + 1×1 = 6
-        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 6);
+        assert_eq!(
+            score_station(&profile, &station, &ScoringWeights::default()),
+            6
+        );
     }
 
     // --- build_favorites_profile tests ---
@@ -973,7 +988,10 @@ mod tests {
     #[test]
     fn select_fallback_tag_returns_none_when_only_primary_exists() {
         let profile = FavoritesProfile {
-            genres: [("rock", 5)].iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            genres: [("rock", 5)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
             tags: HashMap::new(),
             country_codes: HashMap::new(),
         };
@@ -985,7 +1003,10 @@ mod tests {
     #[test]
     fn select_fallback_tag_considers_tags_too() {
         let profile = FavoritesProfile {
-            genres: [("rock", 3)].iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            genres: [("rock", 3)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
             tags: [("guitar", 7), ("chill", 2)]
                 .iter()
                 .map(|(k, v)| (k.to_string(), *v))

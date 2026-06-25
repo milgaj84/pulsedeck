@@ -128,6 +128,7 @@ fn elapsed_display(app: &UiModel<'_>, width: u16) -> Option<String> {
 }
 
 /// Build the single-line layout with truncation.
+#[allow(clippy::too_many_arguments)]
 fn build_line<'a>(
     indicator: char,
     buffer: Option<&str>,
@@ -138,7 +139,9 @@ fn build_line<'a>(
     max_width: usize,
     volume_flash_active: bool,
 ) -> Line<'a> {
-    let parts = compose_parts(indicator, buffer, station, track, elapsed, volume, max_width);
+    let parts = compose_parts(
+        indicator, buffer, station, track, elapsed, volume, max_width,
+    );
     Line::from(styled_spans(&parts, volume_flash_active))
 }
 
@@ -479,8 +482,15 @@ mod tests {
 
     #[test]
     fn test_truncation_station_truncated_when_track_gone() {
-        let parts =
-            compose_parts('▶', None, "Very Long Station", Some("Track"), None, "80%", 10);
+        let parts = compose_parts(
+            '▶',
+            None,
+            "Very Long Station",
+            Some("Track"),
+            None,
+            "80%",
+            10,
+        );
         assert!(parts.station.chars().count() <= 4);
         assert!(parts.track.is_none() || parts.station.ends_with('…'));
     }
@@ -580,7 +590,15 @@ mod tests {
 
     #[test]
     fn test_elapsed_included_when_width_at_least_60() {
-        let parts = compose_parts('▶', None, "Station", Some("Track"), Some("03:45"), "80%", 80);
+        let parts = compose_parts(
+            '▶',
+            None,
+            "Station",
+            Some("Track"),
+            Some("03:45"),
+            "80%",
+            80,
+        );
         assert_eq!(parts.elapsed.as_deref(), Some("03:45"));
     }
 
@@ -667,7 +685,15 @@ mod tests {
     fn test_compose_with_buffer_accounts_for_width() {
         // indicator(1) + buffer(3) + sep(1) + station = max_width(20)
         // available for station = 20 - 1 - 3 - 1 = 15
-        let parts = compose_parts('◌', Some("42%"), "Very Long Station Name", None, None, "", 20);
+        let parts = compose_parts(
+            '◌',
+            Some("42%"),
+            "Very Long Station Name",
+            None,
+            None,
+            "",
+            20,
+        );
         assert!(parts.station.chars().count() <= 15);
     }
 

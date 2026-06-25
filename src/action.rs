@@ -76,6 +76,9 @@ pub enum Action {
     RefreshLibraryMetadata,
     ToggleVisualizerMode,
 
+    /// Library sort
+    CycleSortMode,
+
     /// Display mode
     ToggleMiniMode,
 
@@ -88,6 +91,9 @@ pub enum Action {
     DiscoverPrev,
     DiscoverSelect,
     DiscoverDismiss,
+
+    /// Settings undo
+    UndoSetting,
 
     /// App lifecycle
     Tick,

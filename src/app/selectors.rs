@@ -1,6 +1,7 @@
 use super::*;
 use crate::favorites::resolve_parent_genre;
 use crate::library_filter::station_matches_query;
+use crate::library_sort::sort_library;
 use crate::radio::{find_station_by_url, station_url_matches};
 
 /// Shared genre filter: returns stations visible for the given genre (or all if genre is "All").
@@ -42,8 +43,9 @@ impl App {
             .get(self.ui.nav.selected_genre_idx)
             .map(|s| s.as_str());
         let genre_filtered = filter_stations_by_genre(&self.library.stations, genre);
-        let sorted = super::favorites_actions::sort_with_favorites(
+        let sorted = sort_library(
             genre_filtered,
+            self.sort_mode,
             &self.library.settings.favorites,
         );
 

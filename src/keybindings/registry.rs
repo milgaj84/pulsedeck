@@ -118,7 +118,9 @@ impl KeybindingRegistry {
     /// Find a custom binding that overrides the given default.
     fn find_custom_override(&self, default: &KeyBinding) -> Option<&KeyBinding> {
         self.customs.iter().rev().find(|c| {
-            c.key == default.key && c.mode == default.mode && modifiers_match(&c.modifiers, &default.modifiers)
+            c.key == default.key
+                && c.mode == default.mode
+                && modifiers_match(&c.modifiers, &default.modifiers)
         })
     }
 
@@ -134,7 +136,9 @@ impl KeybindingRegistry {
     /// Check if a custom binding shadows (matches) any default.
     fn shadows_default(&self, custom: &KeyBinding) -> bool {
         self.defaults.iter().any(|d| {
-            d.key == custom.key && d.mode == custom.mode && modifiers_match(&d.modifiers, &custom.modifiers)
+            d.key == custom.key
+                && d.mode == custom.mode
+                && modifiers_match(&d.modifiers, &custom.modifiers)
         })
     }
 
@@ -284,6 +288,7 @@ fn parse_simple_action(input: &str) -> Option<Action> {
         "toggle_stream_metadata" => Some(Action::ToggleStreamMetadata),
         "refresh_library_metadata" => Some(Action::RefreshLibraryMetadata),
         "toggle_visualizer_mode" => Some(Action::ToggleVisualizerMode),
+        "cycle_sort_mode" => Some(Action::CycleSortMode),
         "toggle_mini_mode" => Some(Action::ToggleMiniMode),
         "quit" => Some(Action::Quit),
         "toggle_sleep_timer" => Some(Action::ToggleSleepTimer),
@@ -291,6 +296,7 @@ fn parse_simple_action(input: &str) -> Option<Action> {
         "sleep_timer_decrease" => Some(Action::SleepTimerDecrease),
         "sleep_timer_clear" => Some(Action::SleepTimerClear),
         "export_library" => Some(Action::ExportLibrary),
+        "undo_setting" => Some(Action::UndoSetting),
         "tick" => Some(Action::Tick),
         "discover" => Some(Action::Discover),
         _ => None,
@@ -356,14 +362,18 @@ pub fn detect_shadows(defaults: &[KeyBinding], customs: &[KeyBinding]) -> Vec<St
     customs
         .iter()
         .filter(|custom| {
-            defaults
-                .iter()
-                .any(|d| d.key == custom.key && d.mode == custom.mode && modifiers_match(&d.modifiers, &custom.modifiers))
+            defaults.iter().any(|d| {
+                d.key == custom.key
+                    && d.mode == custom.mode
+                    && modifiers_match(&d.modifiers, &custom.modifiers)
+            })
         })
         .map(|custom| {
             let key_desc = format_key_description(&custom.key, &custom.modifiers);
             let mode_name = format_mode_name(&custom.mode);
-            format!("[keybindings] custom binding overrides default: '{key_desc}' in {mode_name} mode")
+            format!(
+                "[keybindings] custom binding overrides default: '{key_desc}' in {mode_name} mode"
+            )
         })
         .collect()
 }
@@ -973,10 +983,7 @@ mod tests {
 
     #[test]
     fn test_format_key_description_simple_char() {
-        assert_eq!(
-            format_key_description(&KeySpec::Char('q'), &[]),
-            "q"
-        );
+        assert_eq!(format_key_description(&KeySpec::Char('q'), &[]), "q");
     }
 
     #[test]
@@ -990,27 +997,24 @@ mod tests {
     #[test]
     fn test_format_key_description_named_key() {
         assert_eq!(
-            format_key_description(
-                &KeySpec::Named(super::super::NamedKey::Enter),
-                &[]
-            ),
+            format_key_description(&KeySpec::Named(super::super::NamedKey::Enter), &[]),
             "Enter"
         );
     }
 
     #[test]
     fn test_format_key_description_function_key() {
-        assert_eq!(
-            format_key_description(&KeySpec::Function(3), &[]),
-            "F3"
-        );
+        assert_eq!(format_key_description(&KeySpec::Function(3), &[]), "F3");
     }
 
     #[test]
     fn test_format_mode_name_variants() {
         assert_eq!(format_mode_name(&InputMode::Normal), "Normal");
         assert_eq!(format_mode_name(&InputMode::Search), "Search");
-        assert_eq!(format_mode_name(&InputMode::CommandPalette), "CommandPalette");
+        assert_eq!(
+            format_mode_name(&InputMode::CommandPalette),
+            "CommandPalette"
+        );
         assert_eq!(format_mode_name(&InputMode::SleepTimer), "SleepTimer");
         assert_eq!(format_mode_name(&InputMode::LibraryFilter), "LibraryFilter");
     }

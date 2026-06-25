@@ -108,7 +108,10 @@ fn set_keybindings_section(
     }
 }
 
-fn set_discover_section(table: &mut toml::map::Map<String, toml::Value>, discover: &DiscoverConfig) {
+fn set_discover_section(
+    table: &mut toml::map::Map<String, toml::Value>,
+    discover: &DiscoverConfig,
+) {
     let section = table
         .entry("discover")
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));

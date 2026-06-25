@@ -139,11 +139,8 @@ impl AppDriver {
         let tx = self.discover_tx.clone();
         let query = format!("tag:{tag}");
         tokio::spawn(async move {
-            let result = tokio::time::timeout(
-                DISCOVER_FETCH_TIMEOUT,
-                radio::search_stations(&query),
-            )
-            .await;
+            let result =
+                tokio::time::timeout(DISCOVER_FETCH_TIMEOUT, radio::search_stations(&query)).await;
 
             let mapped = match result {
                 Ok(Ok(stations)) => Ok(stations),
@@ -185,10 +182,7 @@ impl AppDriver {
         }
     }
 
-    fn needs_fallback_fetch(
-        &self,
-        result: &Result<Vec<radio::Station>, String>,
-    ) -> bool {
+    fn needs_fallback_fetch(&self, result: &Result<Vec<radio::Station>, String>) -> bool {
         self.pending_fallback_tag.is_some()
             && matches!(result, Ok(stations) if stations.len() < MULTI_QUERY_THRESHOLD)
     }
@@ -299,8 +293,9 @@ mod tests {
         driver.pending_fallback_tag = Some("jazz".to_string());
         let mut app = test_app();
 
-        let stations: Vec<radio::Station> =
-            (0..5).map(|i| make_station(&format!("http://s{i}"))).collect();
+        let stations: Vec<radio::Station> = (0..5)
+            .map(|i| make_station(&format!("http://s{i}")))
+            .collect();
         driver.handle_discover_response(&mut app, Ok(stations));
 
         // >= 5 results: no fallback triggered, results sent to app
@@ -314,8 +309,9 @@ mod tests {
         driver.pending_fallback_tag = Some("jazz".to_string());
         let mut app = test_app();
 
-        let stations: Vec<radio::Station> =
-            (0..3).map(|i| make_station(&format!("http://s{i}"))).collect();
+        let stations: Vec<radio::Station> = (0..3)
+            .map(|i| make_station(&format!("http://s{i}")))
+            .collect();
         driver.handle_discover_response(&mut app, Ok(stations.clone()));
 
         // < 5 results with fallback: stores primary, awaits second
@@ -328,16 +324,14 @@ mod tests {
     fn handle_discover_response_second_fetch_combines_and_deduplicates() {
         let mut driver = AppDriver::new();
         // Simulate state after primary returned < 5 results
-        driver.pending_primary_results = Some(vec![
-            make_station("http://a"),
-            make_station("http://b"),
-        ]);
+        driver.pending_primary_results =
+            Some(vec![make_station("http://a"), make_station("http://b")]);
         let mut app = test_app();
 
         // Second fetch returns overlapping + new stations
         let secondary = vec![
-            make_station("http://b"),  // duplicate
-            make_station("http://c"),  // new
+            make_station("http://b"), // duplicate
+            make_station("http://c"), // new
         ];
         driver.handle_discover_response(&mut app, Ok(secondary));
 
@@ -381,10 +375,8 @@ mod tests {
     #[test]
     fn handle_discover_response_second_fetch_error_uses_primary_only() {
         let mut driver = AppDriver::new();
-        driver.pending_primary_results = Some(vec![
-            make_station("http://a"),
-            make_station("http://b"),
-        ]);
+        driver.pending_primary_results =
+            Some(vec![make_station("http://a"), make_station("http://b")]);
         let mut app = test_app();
 
         // Second fetch errors — combine primary with empty
@@ -408,8 +400,9 @@ mod tests {
         let mut driver = AppDriver::new();
         driver.pending_fallback_tag = Some("jazz".to_string());
 
-        let stations: Vec<radio::Station> =
-            (0..5).map(|i| make_station(&format!("http://s{i}"))).collect();
+        let stations: Vec<radio::Station> = (0..5)
+            .map(|i| make_station(&format!("http://s{i}")))
+            .collect();
         let result: Result<Vec<radio::Station>, String> = Ok(stations);
         assert!(!driver.needs_fallback_fetch(&result));
     }

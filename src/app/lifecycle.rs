@@ -2,6 +2,7 @@ use super::*;
 use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 use crate::config_toml::AppConfig;
 use crate::keybindings::{detect_shadows, KeybindingRegistry};
+use crate::radio::stale_query::count_stale_stations;
 use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
 use crate::search_history::SearchHistoryRing;
 use std::time::{Duration, Instant};
@@ -170,6 +171,13 @@ fn build_config_watcher() -> ConfigWatcher {
     ConfigWatcher::new(path)
 }
 
+/// Build a KeybindingWatcher pointed at the keybindings JSON file path.
+/// Returns a watcher with None path if no config directory is available.
+fn build_keybinding_watcher() -> crate::keybindings::watcher::KeybindingWatcher {
+    let path = crate::config::config_path(KEYBINDINGS_FILE).filter(|p| p.exists());
+    crate::keybindings::watcher::KeybindingWatcher::new(path)
+}
+
 pub(super) const SEARCH_HISTORY_FILE: &str = "search_history.json";
 
 /// Load search history ring from the config directory.
@@ -217,6 +225,8 @@ impl App {
 
         let config_dir = crate::config::config_dir();
 
+        let keybinding_watcher = build_keybinding_watcher();
+
         let search_history = load_search_history(&config_dir);
 
         let mut app = Self {
@@ -233,6 +243,7 @@ impl App {
             metadata_refresh_running: false,
             persist: persist::PersistFlags::default(),
             keybinding_registry,
+            sort_mode: crate::library_sort::SortMode::FavoritesFirst,
             notification_cooldown: NotificationCooldown::new(),
             discover_results: Vec::new(),
             discover_cursor: 0,
@@ -241,7 +252,9 @@ impl App {
             config_preserved,
             config_dir,
             config_watcher,
+            keybinding_watcher,
             search_history,
+            settings_undo: SettingsUndoStack::new(),
             #[cfg(test)]
             notification_count: 0,
         };
@@ -252,6 +265,7 @@ impl App {
         app.sync_startup_audio_settings();
         app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
         app.apply_config_warnings(parts.config_warnings);
+        app.apply_stale_station_notice();
         app.apply_startup_autoplay();
         app
     }
@@ -342,6 +356,22 @@ impl App {
         }
     }
 
+    /// Check keybinding file for changes and rebuild registry on reload.
+    pub(super) fn check_keybinding_reload(&mut self, now: Instant) {
+        use crate::keybindings::watcher::KeybindingReloadResult;
+
+        match self.keybinding_watcher.check_reload(now) {
+            KeybindingReloadResult::Unchanged => {}
+            KeybindingReloadResult::Reloaded(customs) => {
+                self.keybinding_registry.customs = customs;
+                self.set_info_notice("Keybindings reloaded");
+            }
+            KeybindingReloadResult::Error(msg) => {
+                self.set_error_notice(format!("Keybinding reload failed: {msg}"));
+            }
+        }
+    }
+
     /// Apply hot-reloadable config fields (ui, audio.default_volume, playback, discover).
     /// Does NOT apply keybindings (requires restart).
     fn apply_hot_reload(&mut self, new_config: AppConfig, new_preserved: toml::Value) {
@@ -384,6 +414,14 @@ impl App {
     fn apply_config_warnings(&mut self, warnings: Vec<String>) {
         for warning in warnings {
             self.library.load_warnings.push(warning);
+        }
+    }
+
+    fn apply_stale_station_notice(&mut self) {
+        let now = unix_now_string();
+        let count = count_stale_stations(&self.library.stations, &now);
+        if count > 0 {
+            self.set_info_notice(format!("{count} stations have been failing for 30+ days"));
         }
     }
 
@@ -1299,14 +1337,118 @@ mod tests {
         assert_eq!(app.playback.reconnect.max(), 7);
         // Verify the new backoff is used: first backoff should be 1s
         let now = std::time::Instant::now();
-        app.playback
-            .reconnect
-            .arm("http://test".to_string(), now);
+        app.playback.reconnect.arm("http://test".to_string(), now);
         let t1 = now + Duration::from_secs(1);
         assert_eq!(
             app.playback.reconnect.take_due(t1),
             Some("http://test".to_string())
         );
+    }
+
+    #[test]
+    fn test_keybinding_reload_updates_registry_and_shows_notice() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_keybinding_reload_tests")
+            .join("success");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("keybindings.json");
+        std::fs::write(
+            &path,
+            r#"[{"key": "char(x)", "modifiers": [], "action": "quit"}]"#,
+        )
+        .unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        app.keybinding_watcher = crate::keybindings::watcher::KeybindingWatcher::new(Some(path));
+
+        let t0 = Instant::now();
+        app.check_keybinding_reload(t0); // detect mtime change
+        app.check_keybinding_reload(t0 + Duration::from_millis(500)); // debounce fires
+
+        assert_eq!(app.keybinding_registry.customs.len(), 1);
+        assert_eq!(
+            app.keybinding_registry.customs[0].action,
+            crate::action::Action::Quit
+        );
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg == "Keybindings reloaded"
+        ));
+    }
+
+    #[test]
+    fn test_keybinding_reload_error_keeps_existing_registry() {
+        let dir = std::env::temp_dir()
+            .join("pulsedeck_keybinding_reload_tests")
+            .join("error");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("keybindings.json");
+        std::fs::write(&path, "not valid json{{{").unwrap();
+
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        let original_customs = app.keybinding_registry.customs.clone();
+        app.keybinding_watcher = crate::keybindings::watcher::KeybindingWatcher::new(Some(path));
+
+        let t0 = Instant::now();
+        app.check_keybinding_reload(t0); // detect mtime change
+        app.check_keybinding_reload(t0 + Duration::from_millis(500)); // debounce fires
+
+        assert_eq!(app.keybinding_registry.customs, original_customs);
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Error(ref msg)) if msg.contains("Keybinding reload failed")
+        ));
+    }
+
+    #[test]
+    fn test_startup_with_stale_stations_shows_notice() {
+        use crate::radio::StationHealth;
+
+        // Station that failed 40+ days ago with failure_count >= 3 → stale
+        let mut station = Station::basic("Dead Radio", "http://dead", "Rock", "US", 128);
+        station.health = StationHealth {
+            last_success_at: Some("1700000000".to_string()), // old success
+            last_failure_at: Some("1700100000".to_string()), // ~40 days before "now"
+            failure_count: Some(5),
+            last_error_summary: "timeout".to_string(),
+        };
+
+        // "now" is 40 days after last_failure_at: 1700100000 + (40 * 86400) = 1703556000
+        // We use real time via unix_now_string(), so set failure far enough in the past
+        // to be >30 days ago relative to the actual current time.
+        let far_past = "1600000000"; // well over 30 days ago from any reasonable "now"
+        station.health.last_failure_at = Some(far_past.to_string());
+        station.health.last_success_at = Some("1500000000".to_string());
+
+        let library = Library::in_memory(vec![station]);
+        let app = App::from_parts(test_parts(library));
+
+        assert!(matches!(
+            app.ui.notice.current,
+            Some(AppNotice::Info(ref msg)) if msg.contains("1 stations have been failing for 30+ days")
+        ));
+    }
+
+    #[test]
+    fn test_startup_without_stale_stations_no_notice() {
+        // Healthy station — no failures
+        let station = Station::basic("Good Radio", "http://good", "Jazz", "US", 128);
+        let library = Library::in_memory(vec![station]);
+        let app = App::from_parts(test_parts(library));
+
+        // No stale notice should be set (notice is None since there are no warnings either)
+        match &app.ui.notice.current {
+            None => {} // OK - no notice at all
+            Some(AppNotice::Info(msg)) => {
+                assert!(
+                    !msg.contains("stations have been failing"),
+                    "Should not show stale notice for healthy stations"
+                );
+            }
+            Some(AppNotice::Error(_)) => {} // Could be other startup warnings, not stale
+        }
     }
 }
 
@@ -1401,10 +1543,7 @@ mod hot_reload_proptests {
     }
 
     fn arb_reconnect_params() -> impl Strategy<Value = (u8, Vec<u64>)> {
-        (
-            1u8..=10,
-            proptest::collection::vec(1u64..=60, 1..=10),
-        )
+        (1u8..=10, proptest::collection::vec(1u64..=60, 1..=10))
     }
 
     // Feature: v091-polish, Property 1: Hot-reload propagates discover and reconnect fields

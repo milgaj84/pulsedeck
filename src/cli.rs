@@ -173,7 +173,12 @@ fn format_bindings_table(bindings: &[crate::keybindings::KeyBinding]) -> String 
         if mode_bindings.is_empty() {
             continue;
         }
-        writeln!(output, "── {} ──────────────────────────────────", format_mode_name(mode)).unwrap();
+        writeln!(
+            output,
+            "── {} ──────────────────────────────────",
+            format_mode_name(mode)
+        )
+        .unwrap();
         for b in &mode_bindings {
             let key = format_key_description(&b.key, &b.modifiers);
             let mods = format!("{:?}", b.modifiers);
@@ -537,8 +542,7 @@ mod tests {
     fn test_config_show_contains_discover_section_with_defaults() {
         let config = crate::config_toml::AppConfig::default();
         let preserved = toml::Value::Table(toml::map::Map::new());
-        let output =
-            crate::config_toml::serialize::serialize_toml(&config, &preserved);
+        let output = crate::config_toml::serialize::serialize_toml(&config, &preserved);
 
         // Section header
         assert!(output.contains("[discover]"));
@@ -554,8 +558,7 @@ mod tests {
     fn test_config_show_contains_playback_section_with_defaults() {
         let config = crate::config_toml::AppConfig::default();
         let preserved = toml::Value::Table(toml::map::Map::new());
-        let output =
-            crate::config_toml::serialize::serialize_toml(&config, &preserved);
+        let output = crate::config_toml::serialize::serialize_toml(&config, &preserved);
 
         // Section header
         assert!(output.contains("[playback]"));
@@ -567,7 +570,11 @@ mod tests {
         // Verify backoff array contains expected values
         let reparsed: toml::Value = output.parse().unwrap();
         let playback = reparsed.get("playback").unwrap().as_table().unwrap();
-        let backoff = playback.get("reconnect_backoff_seconds").unwrap().as_array().unwrap();
+        let backoff = playback
+            .get("reconnect_backoff_seconds")
+            .unwrap()
+            .as_array()
+            .unwrap();
         let backoff_vals: Vec<i64> = backoff.iter().map(|v| v.as_integer().unwrap()).collect();
         assert_eq!(backoff_vals, vec![3, 6, 12]);
     }
@@ -604,7 +611,11 @@ mod tests {
         // Verify backoff array values via re-parse
         let reparsed: toml::Value = output.parse().unwrap();
         let playback = reparsed.get("playback").unwrap().as_table().unwrap();
-        let backoff = playback.get("reconnect_backoff_seconds").unwrap().as_array().unwrap();
+        let backoff = playback
+            .get("reconnect_backoff_seconds")
+            .unwrap()
+            .as_array()
+            .unwrap();
         let backoff_vals: Vec<i64> = backoff.iter().map(|v| v.as_integer().unwrap()).collect();
         assert_eq!(backoff_vals, vec![3, 6, 12]);
 

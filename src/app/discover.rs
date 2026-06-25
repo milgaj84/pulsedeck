@@ -65,11 +65,10 @@ impl App {
                     &self.library.settings.favorites,
                 );
                 let library_urls = self.library_url_set();
-                let results = recommend(&profile, &candidates, &library_urls, &self.config.discover);
+                let results =
+                    recommend(&profile, &candidates, &library_urls, &self.config.discover);
                 if results.is_empty() {
-                    self.set_info_notice(
-                        "No matches found — try starring more stations",
-                    );
+                    self.set_info_notice("No matches found — try starring more stations");
                 }
                 self.discover_results = results;
                 self.discover_cursor = 0;
@@ -168,9 +167,18 @@ mod tests {
             "Rock",
         )]));
         app.discover_results = vec![
-            ScoredStation { station: station("Disco A", "http://disco-a", "Disco"), score: 3 },
-            ScoredStation { station: station("Disco B", "http://disco-b", "Disco"), score: 2 },
-            ScoredStation { station: station("Disco C", "http://disco-c", "Disco"), score: 1 },
+            ScoredStation {
+                station: station("Disco A", "http://disco-a", "Disco"),
+                score: 3,
+            },
+            ScoredStation {
+                station: station("Disco B", "http://disco-b", "Disco"),
+                score: 2,
+            },
+            ScoredStation {
+                station: station("Disco C", "http://disco-c", "Disco"),
+                score: 1,
+            },
         ];
         app.discover_cursor = 0;
         app

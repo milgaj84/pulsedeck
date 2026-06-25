@@ -243,6 +243,13 @@ pub fn normal_mode_defaults() -> Vec<KeyBinding> {
             Action::ToggleMiniMode,
             mode.clone(),
         ),
+        // Library sort
+        bind(
+            KeySpec::Char('S'),
+            vec![],
+            Action::CycleSortMode,
+            mode.clone(),
+        ),
     ]
 }
 

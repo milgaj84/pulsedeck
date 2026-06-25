@@ -888,7 +888,9 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Helper: build an `EngineLoop` with custom `DeviceRecoveryConfig`.
-    fn make_engine_with_recovery(config: DeviceRecoveryConfig) -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
+    fn make_engine_with_recovery(
+        config: DeviceRecoveryConfig,
+    ) -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
         let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::<f32>::new()));
         let engine = EngineLoop::new(status_tx, sample_buffer, config);
@@ -949,9 +951,9 @@ mod tests {
         // matters is that the engine did NOT immediately give up.
         let statuses = drain_status(&status_rx);
         let gave_up_immediately = matches!(engine.state, EngineState::Failed { .. })
-            && statuses.iter().any(|s| {
-                matches!(s, AudioStatus::Error(msg) if msg.contains("output device lost"))
-            });
+            && statuses.iter().any(
+                |s| matches!(s, AudioStatus::Error(msg) if msg.contains("output device lost")),
+            );
         assert!(
             !gave_up_immediately,
             "engine should attempt recovery when retries (2) < max_attempts (4)"

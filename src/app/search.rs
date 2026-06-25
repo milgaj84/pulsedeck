@@ -155,7 +155,9 @@ impl App {
         let pushed = self.push_search_query_to_history();
         if pushed {
             if let Some(dir) = &self.config_dir {
-                let _ = self.search_history.save(&dir.join(lifecycle::SEARCH_HISTORY_FILE));
+                let _ = self
+                    .search_history
+                    .save(&dir.join(lifecycle::SEARCH_HISTORY_FILE));
             }
         }
 
@@ -877,9 +879,15 @@ mod tests {
         app.update(Action::SearchConfirm);
 
         let path = dir.join("search_history.json");
-        assert!(path.exists(), "search_history.json should be written after confirm");
+        assert!(
+            path.exists(),
+            "search_history.json should be written after confirm"
+        );
         let contents = std::fs::read_to_string(&path).unwrap();
-        assert!(contents.contains("jazz"), "file should contain the pushed query");
+        assert!(
+            contents.contains("jazz"),
+            "file should contain the pushed query"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -900,7 +908,10 @@ mod tests {
         app.update(Action::SearchConfirm);
 
         let path = dir.join("search_history.json");
-        assert!(!path.exists(), "search_history.json should NOT be written for rejected query");
+        assert!(
+            !path.exists(),
+            "search_history.json should NOT be written for rejected query"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -927,7 +938,10 @@ mod tests {
 
         // No file should have been written (audition does NOT persist)
         let path = dir.join("search_history.json");
-        assert!(!path.exists(), "search_history.json should NOT be written after audition");
+        assert!(
+            !path.exists(),
+            "search_history.json should NOT be written after audition"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

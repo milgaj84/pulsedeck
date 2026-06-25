@@ -4,6 +4,7 @@ pub mod hot_reload;
 pub mod io;
 pub mod parse;
 pub mod serialize;
+pub mod validate;
 
 /// Audio output settings.
 #[derive(Debug, Clone, PartialEq)]

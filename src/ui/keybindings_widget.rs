@@ -56,8 +56,7 @@ fn overlay_block() -> Block<'static> {
 fn build_grouped_lines(bindings: &[KeyBinding]) -> Vec<DisplayLine> {
     let mut lines = Vec::new();
     for mode in MODE_ORDER {
-        let mode_bindings: Vec<&KeyBinding> =
-            bindings.iter().filter(|b| &b.mode == mode).collect();
+        let mode_bindings: Vec<&KeyBinding> = bindings.iter().filter(|b| &b.mode == mode).collect();
         if mode_bindings.is_empty() {
             continue;
         }
@@ -98,9 +97,7 @@ fn build_visible_items(
                     .fg(theme::highlight())
                     .add_modifier(Modifier::BOLD),
             )),
-            DisplayLine::Binding(text) => {
-                ListItem::new(Span::styled(text.clone(), theme::text()))
-            }
+            DisplayLine::Binding(text) => ListItem::new(Span::styled(text.clone(), theme::text())),
         })
         .collect()
 }
@@ -142,7 +139,10 @@ mod tests {
         let buffer = terminal.backend().buffer().clone();
         let content = buffer_to_string(&buffer);
         assert!(content.contains("Keybindings"), "Title should appear");
-        assert!(content.contains("Normal"), "Normal mode header should appear");
+        assert!(
+            content.contains("Normal"),
+            "Normal mode header should appear"
+        );
     }
 
     #[test]
@@ -213,7 +213,12 @@ mod tests {
         let bindings = vec![
             binding(KeySpec::Char('a'), vec![], Action::Quit, InputMode::Normal),
             binding(KeySpec::Char('b'), vec![], Action::Stop, InputMode::Normal),
-            binding(KeySpec::Char('c'), vec![], Action::VolumeUp, InputMode::Normal),
+            binding(
+                KeySpec::Char('c'),
+                vec![],
+                Action::VolumeUp,
+                InputMode::Normal,
+            ),
         ];
 
         let lines = build_grouped_lines(&bindings);

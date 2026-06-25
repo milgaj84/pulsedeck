@@ -115,10 +115,7 @@ fn exclusion_diagnostics_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
 
     let mut lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            "── Discover Exclusions ──",
-            theme::cyan(),
-        )),
+        Line::from(Span::styled("── Discover Exclusions ──", theme::cyan())),
         Line::from(Span::styled(
             "Exclusion lists may be filtering all discover candidates",
             theme::dim(),
@@ -216,8 +213,11 @@ mod tests {
     #[test]
     fn test_exclusion_section_shown_when_empty_results_and_exclusions_present() {
         let mut app = App::new(Library::in_memory(vec![]));
-        app.config.discover.exclude_tags =
-            vec!["politics".to_string(), "news".to_string(), "sports".to_string()];
+        app.config.discover.exclude_tags = vec![
+            "politics".to_string(),
+            "news".to_string(),
+            "sports".to_string(),
+        ];
         app.config.discover.exclude_countries = vec!["US".to_string(), "GB".to_string()];
 
         let model = UiModel::from(&app);

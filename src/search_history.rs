@@ -82,8 +82,7 @@ impl SearchHistoryRing {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(&file)
-            .map_err(std::io::Error::other)?;
+        let json = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 
@@ -188,11 +187,7 @@ mod tests {
 
     #[test]
     fn test_from_entries_deduplicates() {
-        let entries = vec![
-            "jazz".to_string(),
-            "lofi".to_string(),
-            "jazz".to_string(),
-        ];
+        let entries = vec!["jazz".to_string(), "lofi".to_string(), "jazz".to_string()];
         let ring = SearchHistoryRing::from_entries(entries);
         assert_eq!(ring.len(), 2);
         assert_eq!(ring.get(0), Some("lofi"));

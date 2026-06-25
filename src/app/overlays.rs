@@ -67,6 +67,9 @@ impl App {
         if self.ui.overlays.active == ActiveOverlay::None {
             false
         } else {
+            if self.ui.overlays.active == ActiveOverlay::Settings {
+                self.settings_undo.clear();
+            }
             self.ui.overlays.active = ActiveOverlay::None;
             if self.ui.input_mode == InputMode::SleepTimer {
                 self.ui.input_mode = InputMode::Normal;
@@ -90,7 +93,9 @@ impl App {
 
     pub(super) fn handle_keybindings_overlay_action(&mut self, action: Action) {
         match action {
-            Action::Quit => { self.close_any_overlay(); }
+            Action::Quit => {
+                self.close_any_overlay();
+            }
             Action::Tick => self.tick(),
             _ => {}
         }
