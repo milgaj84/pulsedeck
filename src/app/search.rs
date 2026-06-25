@@ -124,10 +124,12 @@ impl App {
         }
     }
 
-    fn push_search_query_to_history(&mut self) {
+    fn push_search_query_to_history(&mut self) -> bool {
         let trimmed = self.search.query.trim();
         if !trimmed.is_empty() {
-            self.search_history.push(trimmed);
+            self.search_history.push(trimmed)
+        } else {
+            false
         }
     }
 
@@ -150,7 +152,12 @@ impl App {
     }
 
     pub(super) fn confirm_search(&mut self) {
-        self.push_search_query_to_history();
+        let pushed = self.push_search_query_to_history();
+        if pushed {
+            if let Some(dir) = &self.config_dir {
+                let _ = self.search_history.save(&dir.join(lifecycle::SEARCH_HISTORY_FILE));
+            }
+        }
 
         // Add the selected search result to library and play it.
         let played = if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
@@ -194,7 +201,8 @@ impl App {
     }
 
     pub(super) fn audition_search_result(&mut self) {
-        self.push_search_query_to_history();
+        // Push to in-memory ring only; audition does not persist to disk.
+        let _ = self.push_search_query_to_history();
 
         if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
             self.playback.reconnect.disarm();
@@ -378,7 +386,9 @@ mod tests {
     }
 
     fn test_app() -> App {
-        App::new(Library::in_memory(vec![]))
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.search_history = crate::search_history::SearchHistoryRing::new();
+        app
     }
 
     fn notice_text(app: &App) -> Option<&str> {
@@ -850,6 +860,77 @@ mod tests {
 
         assert!(app.search_history.is_empty());
     }
+
+    #[test]
+    fn test_confirm_search_persists_history_to_disk() {
+        let dir = std::env::temp_dir().join("pulsedeck_test_confirm_persists");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut app = test_app();
+        app.config_dir = Some(dir.clone());
+        app.update(Action::EnterSearch);
+        app.search.query = "jazz".to_string();
+        app.search.results = vec![station("Jazz FM", "http://jazz")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchConfirm);
+
+        let path = dir.join("search_history.json");
+        assert!(path.exists(), "search_history.json should be written after confirm");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("jazz"), "file should contain the pushed query");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_confirm_rejected_query_does_not_persist() {
+        let dir = std::env::temp_dir().join("pulsedeck_test_confirm_rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut app = test_app();
+        app.config_dir = Some(dir.clone());
+        app.update(Action::EnterSearch);
+        app.search.query = "a".to_string(); // too short, push will reject
+        app.search.results = vec![station("Station", "http://station")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchConfirm);
+
+        let path = dir.join("search_history.json");
+        assert!(!path.exists(), "search_history.json should NOT be written for rejected query");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_audition_pushes_to_ring_but_does_not_persist() {
+        let dir = std::env::temp_dir().join("pulsedeck_test_audition_no_persist");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut app = test_app();
+        app.config_dir = Some(dir.clone());
+        app.search_history = crate::search_history::SearchHistoryRing::new();
+        app.update(Action::EnterSearch);
+        app.search.query = "lofi".to_string();
+        app.search.results = vec![station("Lofi Radio", "http://lofi")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchAudition);
+
+        // Ring should contain the query (pushed to memory)
+        assert_eq!(app.search_history.len(), 1);
+        assert_eq!(app.search_history.get(0), Some("lofi"));
+
+        // No file should have been written (audition does NOT persist)
+        let path = dir.join("search_history.json");
+        assert!(!path.exists(), "search_history.json should NOT be written after audition");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
@@ -860,7 +941,9 @@ mod property_tests {
     use proptest::prelude::*;
 
     fn test_app() -> App {
-        App::new(Library::in_memory(vec![]))
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.search_history = crate::search_history::SearchHistoryRing::new();
+        app
     }
 
     // Feature: v090-features, Property 10: Search history Up-arrow cycling

@@ -2,6 +2,15 @@ use super::*;
 use crate::audio::AudioEngine;
 use crate::elapsed_timer::ElapsedTimer;
 
+/// Groups playback configuration parameters for PlaybackRuntime construction.
+#[derive(Debug, Clone)]
+pub struct PlaybackOptions {
+    pub output_device: String,
+    pub metadata_enabled: bool,
+    pub reconnect_max_attempts: u8,
+    pub reconnect_backoff_seconds: Vec<u64>,
+}
+
 pub struct PlaybackRuntime {
     pub view: PlaybackView,
     pub volume: u8,
@@ -17,22 +26,22 @@ pub struct PlaybackRuntime {
 impl PlaybackRuntime {
     pub(super) fn new(
         ui_state: &super::ui_state::UiState,
-        output_device: String,
-        metadata_enabled: bool,
+        options: PlaybackOptions,
         audio: AudioEngine,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-        reconnect_max_attempts: u8,
-        reconnect_backoff_seconds: Vec<u64>,
     ) -> Self {
         Self {
             view: PlaybackView::default(),
             volume: ui_state.volume(),
             muted: ui_state.muted(),
-            reconnect: Reconnect::new(reconnect_max_attempts, reconnect_backoff_seconds),
+            reconnect: Reconnect::new(
+                options.reconnect_max_attempts,
+                options.reconnect_backoff_seconds,
+            ),
             diagnostics: PlaybackDiagnostics::new(
-                output_device,
-                metadata_enabled,
-                reconnect_max_attempts,
+                options.output_device,
+                options.metadata_enabled,
+                options.reconnect_max_attempts,
             ),
             sleep_timer: SleepTimer::default(),
             audio,
@@ -77,17 +86,16 @@ mod tests {
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();
 
-        let runtime = PlaybackRuntime::new(
-            &ui_state,
-            crate::audio::output_device_display_name(
+        let options = PlaybackOptions {
+            output_device: crate::audio::output_device_display_name(
                 library.settings.output_device_name.as_deref(),
             ),
-            library.settings.stream_metadata_enabled,
-            audio,
-            sample_buffer,
-            3,
-            vec![3, 6, 12],
-        );
+            metadata_enabled: library.settings.stream_metadata_enabled,
+            reconnect_max_attempts: 3,
+            reconnect_backoff_seconds: vec![3, 6, 12],
+        };
+
+        let runtime = PlaybackRuntime::new(&ui_state, options, audio, sample_buffer);
 
         assert_eq!(runtime.volume, 37);
         assert!(runtime.muted);
@@ -115,15 +123,13 @@ mod property_tests {
         );
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();
-        PlaybackRuntime::new(
-            &ui_state,
-            "Test".to_string(),
-            false,
-            audio,
-            sample_buffer,
-            3,
-            vec![3, 6, 12],
-        )
+        let options = PlaybackOptions {
+            output_device: "Test".to_string(),
+            metadata_enabled: false,
+            reconnect_max_attempts: 3,
+            reconnect_backoff_seconds: vec![3, 6, 12],
+        };
+        PlaybackRuntime::new(&ui_state, options, audio, sample_buffer)
     }
 
     proptest! {

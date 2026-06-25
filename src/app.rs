@@ -47,7 +47,7 @@ pub use playback::PlaybackView;
 pub use playback_error::playback_error_action_hint;
 #[cfg(test)]
 pub(crate) use playback_error::{classify_playback_error, PlaybackErrorKind};
-pub use playback_runtime::PlaybackRuntime;
+pub use playback_runtime::{PlaybackOptions, PlaybackRuntime};
 pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};

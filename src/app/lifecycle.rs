@@ -170,7 +170,7 @@ fn build_config_watcher() -> ConfigWatcher {
     ConfigWatcher::new(path)
 }
 
-const SEARCH_HISTORY_FILE: &str = "search_history.json";
+pub(super) const SEARCH_HISTORY_FILE: &str = "search_history.json";
 
 /// Load search history ring from the config directory.
 /// Returns an empty ring if no config directory or file is available.
@@ -201,12 +201,14 @@ impl App {
         let ui = UiRuntimeState::from_ui_state(&parts.ui_state);
         let playback = PlaybackRuntime::new(
             &parts.ui_state,
-            diagnostics_output_device,
-            diagnostics_metadata_enabled,
+            PlaybackOptions {
+                output_device: diagnostics_output_device,
+                metadata_enabled: diagnostics_metadata_enabled,
+                reconnect_max_attempts: config.playback.reconnect_max_attempts,
+                reconnect_backoff_seconds: config.playback.reconnect_backoff_seconds.clone(),
+            },
             parts.audio,
             parts.sample_buffer,
-            config.playback.reconnect_max_attempts,
-            config.playback.reconnect_backoff_seconds.clone(),
         );
 
         let keybinding_registry = load_keybinding_registry();
@@ -340,13 +342,19 @@ impl App {
         }
     }
 
-    /// Apply hot-reloadable config fields (ui, audio.default_volume, playback).
+    /// Apply hot-reloadable config fields (ui, audio.default_volume, playback, discover).
     /// Does NOT apply keybindings (requires restart).
     fn apply_hot_reload(&mut self, new_config: AppConfig, new_preserved: toml::Value) {
         self.config.ui = new_config.ui.clone();
         self.config.audio.default_volume = new_config.audio.default_volume;
         self.config.playback = new_config.playback.clone();
+        self.config.discover = new_config.discover.clone();
         self.config_preserved = new_preserved;
+
+        self.playback.reconnect.update_params(
+            self.config.playback.reconnect_max_attempts,
+            self.config.playback.reconnect_backoff_seconds.clone(),
+        );
 
         self.library.settings.theme = new_config.ui.theme.clone();
         self.library.settings.notifications_enabled = new_config.ui.notifications_enabled;
@@ -1251,10 +1259,54 @@ mod tests {
 
     #[test]
     fn test_app_initializes_with_search_history_ring() {
-        let app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+        app.search_history = crate::search_history::SearchHistoryRing::new();
 
         assert!(app.search_history.is_empty());
         assert_eq!(app.search_history.len(), 0);
+    }
+
+    /// **Validates: Requirements 2.1, 2.3**
+    #[test]
+    fn hot_reload_propagates_discover_config() {
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+
+        let mut new_config = app.config.clone();
+        new_config.discover.genre_weight = 10;
+        new_config.discover.tag_weight = 5;
+        new_config.discover.country_weight = 8;
+        new_config.discover.exclude_tags = vec!["rock".to_string(), "metal".to_string()];
+        new_config.discover.exclude_countries = vec!["XX".to_string()];
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        app.apply_hot_reload(new_config.clone(), preserved);
+
+        assert_eq!(app.config.discover, new_config.discover);
+    }
+
+    /// **Validates: Requirements 2.2, 2.4**
+    #[test]
+    fn hot_reload_updates_reconnect_params() {
+        let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
+
+        let mut new_config = app.config.clone();
+        new_config.playback.reconnect_max_attempts = 7;
+        new_config.playback.reconnect_backoff_seconds = vec![1, 2, 4, 8];
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        app.apply_hot_reload(new_config, preserved);
+
+        assert_eq!(app.playback.reconnect.max(), 7);
+        // Verify the new backoff is used: first backoff should be 1s
+        let now = std::time::Instant::now();
+        app.playback
+            .reconnect
+            .arm("http://test".to_string(), now);
+        let t1 = now + Duration::from_secs(1);
+        assert_eq!(
+            app.playback.reconnect.take_due(t1),
+            Some("http://test".to_string())
+        );
     }
 }
 
@@ -1313,6 +1365,97 @@ mod cooldown_proptests {
             let t2 = t1 + Duration::from_millis(gap_ms);
             prop_assert!(!cooldown.may_notify(t2),
                 "After record at t1, may_notify at t1+{}ms should be false", gap_ms);
+        }
+    }
+}
+
+#[cfg(test)]
+mod hot_reload_proptests {
+    use super::*;
+    use crate::audio::AudioEngine;
+    use crate::config_toml::{AppConfig, DiscoverConfig};
+    use crate::favorites::Library;
+    use proptest::prelude::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    fn arb_discover_config() -> impl Strategy<Value = DiscoverConfig> {
+        (
+            0u32..=10,
+            0u32..=10,
+            0u32..=10,
+            proptest::collection::vec("[a-z]{1,10}", 0..=5),
+            proptest::collection::vec("[A-Z]{2,3}", 0..=3),
+        )
+            .prop_map(
+                |(genre_weight, tag_weight, country_weight, exclude_tags, exclude_countries)| {
+                    DiscoverConfig {
+                        genre_weight,
+                        tag_weight,
+                        country_weight,
+                        exclude_tags,
+                        exclude_countries,
+                    }
+                },
+            )
+    }
+
+    fn arb_reconnect_params() -> impl Strategy<Value = (u8, Vec<u64>)> {
+        (
+            1u8..=10,
+            proptest::collection::vec(1u64..=60, 1..=10),
+        )
+    }
+
+    // Feature: v091-polish, Property 1: Hot-reload propagates discover and reconnect fields
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 2.1, 2.2**
+        #[test]
+        fn prop_hot_reload_propagates_discover_and_reconnect(
+            discover in arb_discover_config(),
+            reconnect in arb_reconnect_params(),
+        ) {
+            let (max_attempts, backoff_seconds) = reconnect;
+
+            let parts = AppParts {
+                library: Library::in_memory(vec![]),
+                ui_state: super::super::ui_state::UiState::from_app_values(
+                    50,
+                    false,
+                    LayoutMode::Split,
+                    VisualizerMode::SimOscilloscope,
+                    DisplayMode::Normal,
+                ),
+                ui_state_warning: None,
+                history: crate::history::History::default(),
+                history_warning: None,
+                audio: AudioEngine::disconnected_for_test(),
+                sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
+                config: AppConfig::default(),
+                config_preserved: toml::Value::Table(toml::map::Map::new()),
+                config_warnings: Vec::new(),
+                config_loaded_from_file: false,
+            };
+            let mut app = App::from_parts(parts);
+
+            let mut new_config = AppConfig::default();
+            new_config.discover = discover.clone();
+            new_config.playback.reconnect_max_attempts = max_attempts;
+            new_config.playback.reconnect_backoff_seconds = backoff_seconds.clone();
+
+            let new_preserved = toml::Value::Table(toml::map::Map::new());
+            app.apply_hot_reload(new_config, new_preserved);
+
+            prop_assert_eq!(&app.config.discover, &discover);
+            prop_assert_eq!(
+                app.config.playback.reconnect_max_attempts, max_attempts
+            );
+            prop_assert_eq!(
+                &app.config.playback.reconnect_backoff_seconds, &backoff_seconds
+            );
+            prop_assert_eq!(app.playback.reconnect.max(), max_attempts);
         }
     }
 }

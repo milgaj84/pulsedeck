@@ -416,6 +416,8 @@ mod tests {
     #[test]
     fn settings_toggle_save_history() {
         let mut app = test_app();
+        app.library.settings.save_history = false;
+        app.config.playback.save_history = false;
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::SaveHistory.index();
         assert!(!app.library.settings.save_history);

@@ -534,6 +534,84 @@ mod tests {
     }
 
     #[test]
+    fn test_config_show_contains_discover_section_with_defaults() {
+        let config = crate::config_toml::AppConfig::default();
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output =
+            crate::config_toml::serialize::serialize_toml(&config, &preserved);
+
+        // Section header
+        assert!(output.contains("[discover]"));
+        // Fields with default values
+        assert!(output.contains("genre_weight = 3"));
+        assert!(output.contains("tag_weight = 1"));
+        assert!(output.contains("country_weight = 1"));
+        assert!(output.contains("exclude_tags = []"));
+        assert!(output.contains("exclude_countries = []"));
+    }
+
+    #[test]
+    fn test_config_show_contains_playback_section_with_defaults() {
+        let config = crate::config_toml::AppConfig::default();
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output =
+            crate::config_toml::serialize::serialize_toml(&config, &preserved);
+
+        // Section header
+        assert!(output.contains("[playback]"));
+        // Reconnect and device recovery fields with defaults
+        assert!(output.contains("reconnect_max_attempts = 3"));
+        assert!(output.contains("reconnect_backoff_seconds"));
+        assert!(output.contains("device_recovery_attempts = 2"));
+        assert!(output.contains("device_recovery_delay_ms = 1000"));
+        // Verify backoff array contains expected values
+        let reparsed: toml::Value = output.parse().unwrap();
+        let playback = reparsed.get("playback").unwrap().as_table().unwrap();
+        let backoff = playback.get("reconnect_backoff_seconds").unwrap().as_array().unwrap();
+        let backoff_vals: Vec<i64> = backoff.iter().map(|v| v.as_integer().unwrap()).collect();
+        assert_eq!(backoff_vals, vec![3, 6, 12]);
+    }
+
+    #[test]
+    fn test_config_show_no_file_emits_all_sections_with_defaults() {
+        let temp_dir = unique_temp_dir("pulsedeck_config_show_all_sections");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let result = crate::config_toml::io::load_config(&temp_dir);
+        let output =
+            crate::config_toml::serialize::serialize_toml(&result.config, &result.preserved);
+
+        // Verify all section headers present
+        assert!(output.contains("[audio]"));
+        assert!(output.contains("[ui]"));
+        assert!(output.contains("[playback]"));
+        assert!(output.contains("[keybindings]"));
+        assert!(output.contains("[discover]"));
+
+        // Discover defaults
+        assert!(output.contains("genre_weight = 3"));
+        assert!(output.contains("tag_weight = 1"));
+        assert!(output.contains("country_weight = 1"));
+        assert!(output.contains("exclude_tags = []"));
+        assert!(output.contains("exclude_countries = []"));
+
+        // Playback reconnect/recovery defaults
+        assert!(output.contains("reconnect_max_attempts = 3"));
+        assert!(output.contains("reconnect_backoff_seconds"));
+        assert!(output.contains("device_recovery_attempts = 2"));
+        assert!(output.contains("device_recovery_delay_ms = 1000"));
+
+        // Verify backoff array values via re-parse
+        let reparsed: toml::Value = output.parse().unwrap();
+        let playback = reparsed.get("playback").unwrap().as_table().unwrap();
+        let backoff = playback.get("reconnect_backoff_seconds").unwrap().as_array().unwrap();
+        let backoff_vals: Vec<i64> = backoff.iter().map(|v| v.as_integer().unwrap()).collect();
+        assert_eq!(backoff_vals, vec![3, 6, 12]);
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn test_config_show_valid_file_prints_toml() {
         let temp_dir = unique_temp_dir("pulsedeck_config_show_valid");
         std::fs::create_dir_all(&temp_dir).unwrap();

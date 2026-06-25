@@ -4,6 +4,29 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.9.1] - Unreleased
+
+### Fixed
+- **Search history persists on push**: Search queries now save to `search_history.json` immediately after each SearchConfirm action. A crash no longer loses the session's search history.
+- **Unicode truncation in exclusion lists**: `normalize_entry` now truncates by character count instead of byte length, preventing panics or invalid strings with multi-byte characters like emoji or Greek text.
+
+### Improved
+- **Config hot-reload for discover and reconnect**: Changes to `[discover]` weights/exclusions and `[playback]` reconnect parameters now take effect live without restarting. The Reconnect module updates its limits via `update_params()` preserving in-flight state.
+- **Search history "↑ history" hint**: A dim "↑ history" hint appears in the search bar when the input is empty and the history ring has entries, making the feature discoverable.
+- **Mini mode buffer animation**: The connecting indicator now rotates (◐ ◓ ◑ ◒) on each tick while buffering, giving clear visual feedback that the app hasn't frozen.
+- **Discover "why excluded" in Doctor**: When discover results are empty and exclusion lists are configured, the Playback Doctor now shows which tags and countries are active, helping debug overly aggressive filtering.
+- **CLI `config show` includes new sections**: Verified that `[discover]` and all new `[playback]` fields are emitted with defaults.
+
+### Internal
+- 1248 tests pass, zero failures.
+- Extracted `PlaybackOptions` struct to reduce `PlaybackRuntime::new()` from 7 to 4 arguments, resolving the Clippy `too_many_arguments` warning.
+- Verified no dead references to removed `MAX_ATTEMPTS`/`BACKOFFS` constants remain.
+- Cleaned up stale proptest regression files (all seeds passed — bugs previously fixed).
+- 5 new property-based tests: hot-reload propagation, normalize_entry character-count truncation, normalize_entry boundary preservation, buffer animation determinism, buffer animation with percentage.
+- Fixed environment-dependent test failures caused by loading real user config files during tests.
+
+---
+
 ## [0.9.0] - Unreleased
 
 ### Added

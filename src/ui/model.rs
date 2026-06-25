@@ -44,6 +44,10 @@ pub struct UiModel<'a> {
     pub volume_flash_active: bool,
     pub discover_results: &'a [ScoredStation],
     pub discover_cursor: usize,
+    pub discover_results_empty: bool,
+    pub exclude_tags: Vec<String>,
+    pub exclude_countries: Vec<String>,
+    pub search_history_empty: bool,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -131,6 +135,10 @@ impl<'a> From<&'a App> for UiModel<'a> {
             volume_flash_active: app.ui.volume_flash_remaining > Duration::ZERO,
             discover_results: &app.discover_results,
             discover_cursor: app.discover_cursor,
+            discover_results_empty: app.discover_results.is_empty(),
+            exclude_tags: app.config.discover.exclude_tags.clone(),
+            exclude_countries: app.config.discover.exclude_countries.clone(),
+            search_history_empty: app.search_history.is_empty(),
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }
@@ -300,5 +308,35 @@ mod tests {
         let model = UiModel::from(&app);
 
         assert_eq!(model.elapsed_display, None);
+    }
+
+    #[test]
+    fn ui_model_populates_discover_exclusion_diagnostics_empty_results() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.config.discover.exclude_tags = vec!["politics".to_string(), "news".to_string()];
+        app.config.discover.exclude_countries = vec!["US".to_string()];
+
+        let model = UiModel::from(&app);
+
+        assert!(model.discover_results_empty);
+        assert_eq!(model.exclude_tags, vec!["politics", "news"]);
+        assert_eq!(model.exclude_countries, vec!["US"]);
+    }
+
+    #[test]
+    fn ui_model_populates_discover_exclusion_diagnostics_with_results() {
+        use crate::recommend::ScoredStation;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.config.discover.exclude_tags = vec!["ads".to_string()];
+        app.discover_results = vec![ScoredStation {
+            station: Station::basic("Test", "http://test", "Jazz", "DE", 128),
+            score: 5,
+        }];
+
+        let model = UiModel::from(&app);
+
+        assert!(!model.discover_results_empty);
+        assert_eq!(model.exclude_tags, vec!["ads"]);
     }
 }

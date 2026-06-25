@@ -60,6 +60,13 @@ impl Reconnect {
     pub fn max(&self) -> u8 {
         self.max_attempts
     }
+
+    /// Update max_attempts and backoff_seconds without resetting in-flight state.
+    /// Preserves `armed_url`, `attempts`, and `next_attempt_at`.
+    pub fn update_params(&mut self, max_attempts: u8, backoff_seconds: Vec<u64>) {
+        self.max_attempts = max_attempts;
+        self.backoff_seconds = backoff_seconds;
+    }
 }
 
 impl Default for Reconnect {
@@ -322,6 +329,46 @@ mod tests {
 
         assert!(rec.exhausted());
         assert_eq!(rec.attempts, 5);
+    }
+
+    /// **Validates: Requirements 2.4**
+    #[test]
+    fn test_update_params_changes_max_and_backoff() {
+        let mut rec = Reconnect::new(3, vec![3, 6, 12]);
+        assert_eq!(rec.max(), 3);
+
+        rec.update_params(5, vec![1, 2, 4]);
+
+        assert_eq!(rec.max(), 5);
+
+        // Verify new backoff is used: first backoff should be 1s
+        let now = Instant::now();
+        rec.arm("http://test".to_string(), now);
+        let t1 = now + Duration::from_secs(1);
+        assert_eq!(rec.take_due(t1), Some("http://test".to_string()));
+    }
+
+    /// **Validates: Requirements 2.4**
+    #[test]
+    fn test_update_params_preserves_armed_url_and_attempts() {
+        let mut rec = Reconnect::new(3, vec![3, 6, 12]);
+        let now = Instant::now();
+        let url = "http://armed".to_string();
+
+        // Arm a URL and make one attempt
+        rec.arm(url.clone(), now);
+        let t1 = now + Duration::from_secs(3);
+        assert_eq!(rec.take_due(t1), Some(url.clone()));
+        assert_eq!(rec.attempt(), 1);
+
+        // Update params
+        rec.update_params(5, vec![1, 2, 4]);
+
+        // armed_url and attempts should be preserved
+        assert_eq!(rec.attempt(), 1);
+        // Re-arm same URL to verify armed_url was preserved (attempts won't reset)
+        rec.arm(url.clone(), t1);
+        assert_eq!(rec.attempt(), 1); // still 1, same URL means no reset
     }
 
     /// **Validates: Requirements 3.1, 3.2**

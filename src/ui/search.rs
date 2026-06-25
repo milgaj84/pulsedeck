@@ -22,7 +22,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         .unwrap_or(false);
 
     let api_indicator = match &app.search.status {
-        SearchStatus::WaitingForInput => Span::styled("  Type 2+ chars to search", theme::dim()),
+        SearchStatus::WaitingForInput => waiting_for_input_indicator(app),
         SearchStatus::Debouncing { query } => {
             Span::styled(debounce_indicator_text(query, app.tick_count), theme::dim())
         }
@@ -66,6 +66,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let search_bar = Paragraph::new(vec![line]).style(Style::default().bg(theme::surface_color()));
 
     frame.render_widget(search_bar, area);
+}
+
+fn waiting_for_input_indicator(app: &UiModel<'_>) -> Span<'static> {
+    if app.search.query.is_empty() && !app.search_history_empty {
+        Span::styled("  ↑ history", theme::dim())
+    } else {
+        Span::styled("  Type 2+ chars to search", theme::dim())
+    }
 }
 
 fn highlighted_result_explanation(app: &UiModel<'_>) -> Option<String> {
@@ -210,5 +218,53 @@ mod tests {
 
         assert!(compact_explanation_label(&long).ends_with('…'));
         assert!(compact_explanation_label("Exact tag").contains("Exact tag"));
+    }
+
+    #[test]
+    fn test_search_hint_shown_when_empty_input_and_history_available() {
+        use crate::app::App;
+        use crate::favorites::Library;
+        use crate::ui::model::UiModel;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.search_history.push("jazz");
+        app.search.query.clear();
+
+        let model = UiModel::from(&app);
+        let indicator = waiting_for_input_indicator(&model);
+
+        assert_eq!(indicator.content, "  ↑ history");
+    }
+
+    #[test]
+    fn test_search_hint_hidden_when_input_non_empty() {
+        use crate::app::App;
+        use crate::favorites::Library;
+        use crate::ui::model::UiModel;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.search_history.push("jazz");
+        app.search.query = "lo".to_string();
+
+        let model = UiModel::from(&app);
+        let indicator = waiting_for_input_indicator(&model);
+
+        assert_eq!(indicator.content, "  Type 2+ chars to search");
+    }
+
+    #[test]
+    fn test_search_hint_hidden_when_history_empty() {
+        use crate::app::App;
+        use crate::favorites::Library;
+        use crate::search_history::SearchHistoryRing;
+        use crate::ui::model::UiModel;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.search_history = SearchHistoryRing::new();
+
+        let model = UiModel::from(&app);
+        let indicator = waiting_for_input_indicator(&model);
+
+        assert_eq!(indicator.content, "  Type 2+ chars to search");
     }
 }

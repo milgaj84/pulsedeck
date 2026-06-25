@@ -12,13 +12,21 @@ use crate::ui::model::UiModel;
 const SEPARATOR: &str = " ";
 const ELLIPSIS: char = '…';
 
+/// Animation frames for the connecting state indicator, cycled by tick_count.
+const CONNECTING_FRAMES: [char; 4] = ['◐', '◓', '◑', '◒'];
+
+/// Return the animated connecting indicator character for the given tick.
+pub fn animated_connecting_indicator(tick_count: u64) -> char {
+    CONNECTING_FRAMES[(tick_count % 4) as usize]
+}
+
 /// Minimum terminal width for showing elapsed time in mini mode.
 const MINI_ELAPSED_MIN_WIDTH: u16 = 40;
 
 /// Render the mini mode compact display.
 /// Single-line when height < 3 rows; two-line when height >= 3.
 pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
-    let state_char = state_indicator(&app.player.state);
+    let state_char = connecting_aware_indicator(&app.player.state, app.tick_count);
     let buffer_text = buffer_percent_display(&app.player.state, app.player.buffer_percent);
     let station_name = station_name_text(app);
     let track_title = track_title_text(app);
@@ -53,6 +61,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
                 volume_flash_active,
             },
         );
+    }
+}
+
+/// Return the appropriate state indicator, using animated frames for Connecting.
+fn connecting_aware_indicator(state: &PlaybackState, tick_count: u64) -> char {
+    match state {
+        PlaybackState::Connecting => animated_connecting_indicator(tick_count),
+        other => state_indicator(other),
     }
 }
 
@@ -654,6 +670,63 @@ mod tests {
         let parts = compose_parts('◌', Some("42%"), "Very Long Station Name", None, None, "", 20);
         assert!(parts.station.chars().count() <= 15);
     }
+
+    #[test]
+    fn test_animated_connecting_indicator_sequence() {
+        assert_eq!(animated_connecting_indicator(0), '◐');
+        assert_eq!(animated_connecting_indicator(1), '◓');
+        assert_eq!(animated_connecting_indicator(2), '◑');
+        assert_eq!(animated_connecting_indicator(3), '◒');
+        assert_eq!(animated_connecting_indicator(4), '◐'); // wraps
+    }
+
+    #[test]
+    fn test_animated_connecting_indicator_deterministic() {
+        for tick in 0..100u64 {
+            let first = animated_connecting_indicator(tick);
+            let second = animated_connecting_indicator(tick);
+            assert_eq!(first, second, "Same tick must always return the same char");
+        }
+    }
+
+    #[test]
+    fn test_render_connecting_uses_animated_indicator() {
+        // At different tick counts, the indicator char changes
+        let char_at_0 = connecting_aware_indicator(&PlaybackState::Connecting, 0);
+        let char_at_1 = connecting_aware_indicator(&PlaybackState::Connecting, 1);
+        let char_at_2 = connecting_aware_indicator(&PlaybackState::Connecting, 2);
+        let char_at_3 = connecting_aware_indicator(&PlaybackState::Connecting, 3);
+
+        assert_eq!(char_at_0, '◐');
+        assert_eq!(char_at_1, '◓');
+        assert_eq!(char_at_2, '◑');
+        assert_eq!(char_at_3, '◒');
+        // Verify they're all different (animation rotates)
+        assert_ne!(char_at_0, char_at_1);
+        assert_ne!(char_at_1, char_at_2);
+        assert_ne!(char_at_2, char_at_3);
+    }
+
+    #[test]
+    fn test_animated_indicator_with_buffer_percent() {
+        // When tick=0 and buffer_percent=42, the combined display is "◐" + "42%"
+        let indicator = connecting_aware_indicator(&PlaybackState::Connecting, 0);
+        let buffer = buffer_percent_display(&PlaybackState::Connecting, 42);
+
+        assert_eq!(indicator, '◐');
+        assert_eq!(buffer, Some("42%".to_string()));
+        // The composed line would show "◐42%" (indicator char followed by buffer text)
+        let combined = format!("{}{}", indicator, buffer.unwrap());
+        assert_eq!(combined, "◐42%");
+    }
+
+    #[test]
+    fn test_connecting_aware_indicator_non_connecting_uses_static() {
+        // Non-connecting states still use the static indicators
+        assert_eq!(connecting_aware_indicator(&PlaybackState::Playing, 0), '▶');
+        assert_eq!(connecting_aware_indicator(&PlaybackState::Paused, 5), '⏸');
+        assert_eq!(connecting_aware_indicator(&PlaybackState::Stopped, 99), '■');
+    }
 }
 
 #[cfg(test)]
@@ -737,6 +810,63 @@ mod property_tests {
                 total_width,
                 width
             );
+        }
+    }
+
+    // Feature: v091-polish, Property 4: Buffer animation sequence determinism
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 5.1, 5.2**
+        #[test]
+        fn prop_buffer_animation_sequence_determinism(tick in proptest::num::u64::ANY) {
+            // animated_connecting_indicator(tick) must equal CONNECTING_FRAMES[(tick % 4)]
+            let result = animated_connecting_indicator(tick);
+            let expected = CONNECTING_FRAMES[(tick % 4) as usize];
+            prop_assert_eq!(
+                result, expected,
+                "tick={}: got '{}', expected '{}'", tick, result, expected
+            );
+
+            // tick + 1 must be the next char in the cycle
+            let next_tick = tick.wrapping_add(1);
+            let next_result = animated_connecting_indicator(next_tick);
+            let next_expected = CONNECTING_FRAMES[(next_tick % 4) as usize];
+            prop_assert_eq!(
+                next_result, next_expected,
+                "tick+1={}: got '{}', expected '{}'", next_tick, next_result, next_expected
+            );
+        }
+    }
+
+    // Feature: v091-polish, Property 5: Buffer animation with percentage combines indicator and format
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 5.3**
+        #[test]
+        fn prop_buffer_animation_with_percentage(
+            tick in proptest::num::u64::ANY,
+            buffer_percent in 1u8..=100,
+        ) {
+            // buffer_percent_display for Connecting with percent > 0 returns Some("{percent}%")
+            let display = buffer_percent_display(&PlaybackState::Connecting, buffer_percent);
+            let expected_display = format!("{}%", buffer_percent);
+            prop_assert_eq!(
+                display.as_deref(),
+                Some(expected_display.as_str()),
+                "buffer_percent_display({}) should be Some(\"{}%\")", buffer_percent, buffer_percent
+            );
+
+            // animated_connecting_indicator(tick) returns CONNECTING_FRAMES[(tick % 4)]
+            let indicator = animated_connecting_indicator(tick);
+            let expected_indicator = CONNECTING_FRAMES[(tick % 4) as usize];
+            prop_assert_eq!(indicator, expected_indicator);
+
+            // The combined output is indicator + percentage
+            let combined = format!("{}{}", indicator, display.unwrap());
+            prop_assert!(combined.starts_with(expected_indicator));
+            prop_assert!(combined.ends_with('%'));
         }
     }
 }

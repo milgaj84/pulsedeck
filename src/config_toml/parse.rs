@@ -394,8 +394,13 @@ fn normalize_entry(raw: &str, normalization: &Normalization, max_chars: usize) -
         Normalization::Lower => trimmed.to_lowercase(),
         Normalization::Upper => trimmed.to_uppercase(),
     };
-    let truncated = if normalized.len() > max_chars {
-        normalized[..max_chars].trim_end().to_string()
+    let truncated = if normalized.chars().count() > max_chars {
+        normalized
+            .chars()
+            .take(max_chars)
+            .collect::<String>()
+            .trim_end()
+            .to_string()
     } else {
         normalized
     };
@@ -1063,6 +1068,52 @@ exclude_countries = ["US", "", "  ", "GB"]
 
         assert_eq!(result.config.discover.exclude_countries[0].len(), 10);
     }
+
+    // --- normalize_entry Unicode truncation tests ---
+
+    #[test]
+    fn test_normalize_entry_multibyte_truncated_at_char_boundary() {
+        let result = normalize_entry("αβγδεζηθικ_extra", &Normalization::Lower, 10);
+        assert_eq!(result, "αβγδεζηθικ");
+        assert_eq!(result.chars().count(), 10);
+    }
+
+    #[test]
+    fn test_normalize_entry_at_exact_limit_preserved() {
+        let input: String = "a".repeat(100);
+        let result = normalize_entry(&input, &Normalization::Lower, 100);
+        assert_eq!(result, input);
+        assert_eq!(result.chars().count(), 100);
+    }
+
+    #[test]
+    fn test_normalize_entry_below_limit_preserved() {
+        let input: String = "a".repeat(50);
+        let result = normalize_entry(&input, &Normalization::Lower, 100);
+        assert_eq!(result, input);
+        assert_eq!(result.chars().count(), 50);
+    }
+
+    #[test]
+    fn test_normalize_entry_trailing_whitespace_after_truncation_trimmed() {
+        // Place spaces at positions 99 and 100 (0-indexed chars), so truncation at 100
+        // leaves trailing space that gets trimmed.
+        let mut input: String = "a".repeat(99);
+        input.push_str("  extra");
+        let result = normalize_entry(&input, &Normalization::Lower, 100);
+        assert_eq!(result, "a".repeat(99));
+        assert!(!result.ends_with(' '));
+    }
+
+    #[test]
+    fn test_normalize_entry_emoji_truncation() {
+        let input = "🎵🎶🎸🎹🎺🎻🥁🎤🎧🎼_extra";
+        let result = normalize_entry(input, &Normalization::Lower, 10);
+        assert_eq!(result.chars().count(), 10);
+        assert_eq!(result, "🎵🎶🎸🎹🎺🎻🥁🎤🎧🎼");
+        // Ensure valid UTF-8 (would panic on construction if not)
+        let _ = result.as_bytes();
+    }
 }
 
 #[cfg(test)]
@@ -1517,6 +1568,78 @@ mod property_tests {
                 prop_assert!(country.len() <= 10,
                     "exclude_countries entry length {} exceeds 10", country.len());
             }
+        }
+    }
+
+    /// Generate a random UTF-8 string of up to 150 chars for truncation testing.
+    fn arb_utf8_string() -> impl Strategy<Value = String> {
+        proptest::collection::vec(proptest::char::any(), 1..=150)
+            .prop_map(|chars| chars.into_iter().collect::<String>())
+    }
+
+    // Feature: v091-polish, Property 2: normalize_entry character-count truncation invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 3.1, 3.3, 3.5**
+        #[test]
+        fn prop_normalize_entry_truncation_invariant(
+            input in arb_utf8_string(),
+            max_chars in prop_oneof![Just(10usize), Just(100usize)],
+        ) {
+            let output = normalize_entry(&input, &Normalization::Lower, max_chars);
+
+            // Output char count must not exceed max_chars
+            prop_assert!(
+                output.chars().count() <= max_chars,
+                "output chars().count() {} exceeds max_chars {} for input '{}'",
+                output.chars().count(), max_chars, input
+            );
+
+            // Output must be valid UTF-8 (always true in Rust, but let's confirm no panic)
+            let _ = output.as_bytes();
+
+            // If output is non-empty, it must have no trailing whitespace
+            if !output.is_empty() {
+                prop_assert!(
+                    !output.ends_with(char::is_whitespace),
+                    "output '{}' has trailing whitespace", output
+                );
+            }
+        }
+    }
+
+    /// Generate a non-whitespace string whose char count is within 1..=max_chars.
+    fn arb_short_non_whitespace(max_chars: usize) -> impl Strategy<Value = String> {
+        proptest::collection::vec(
+            proptest::char::any().prop_filter("non-whitespace", |c| !c.is_whitespace()),
+            1..=max_chars,
+        )
+        .prop_map(|chars| chars.into_iter().collect::<String>())
+    }
+
+    // Feature: v091-polish, Property 3: normalize_entry preserves entries at or below character limit
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 3.4**
+        #[test]
+        fn prop_normalize_entry_preserves_short_entries(
+            max_chars in prop_oneof![Just(10usize), Just(100usize)],
+            input in arb_short_non_whitespace(100),
+        ) {
+            // Only test inputs whose trimmed+lowercased form fits within max_chars
+            let expected = input.trim().to_lowercase();
+            prop_assume!(expected.chars().count() <= max_chars);
+            prop_assume!(!expected.is_empty());
+
+            let output = normalize_entry(&input, &Normalization::Lower, max_chars);
+
+            prop_assert_eq!(
+                &output, &expected,
+                "Entry at or below limit should be preserved: input='{}', expected='{}', got='{}'",
+                input, expected, output
+            );
         }
     }
 }

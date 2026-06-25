@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         _ => "r retry  s stop  , output  / search  Esc close",
     };
 
-    let lines = vec![
+    let mut lines = vec![
         row("State", playback_state_label(&app.player.state)),
         row("Station", station),
         row("Track", track),
@@ -85,12 +85,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             "Last recovery",
             app.diagnostics.last_recovery.as_deref().unwrap_or("N/A"),
         ),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Actions: ", theme::dim()),
-            Span::styled(action_hint.to_string(), theme::cyan()),
-        ]),
     ];
+
+    lines.extend(exclusion_diagnostics_lines(app));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Actions: ", theme::dim()),
+        Span::styled(action_hint.to_string(), theme::cyan()),
+    ]));
 
     frame.render_widget(
         Paragraph::new(lines)
@@ -102,6 +105,37 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
 fn doctor_area_is_compact(area: Rect) -> bool {
     area.width < MIN_DOCTOR_WIDTH || area.height < MIN_DOCTOR_HEIGHT
+}
+
+fn exclusion_diagnostics_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
+    let has_exclusions = !app.exclude_tags.is_empty() || !app.exclude_countries.is_empty();
+    if !app.discover_results_empty || !has_exclusions {
+        return vec![];
+    }
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "── Discover Exclusions ──",
+            theme::cyan(),
+        )),
+        Line::from(Span::styled(
+            "Exclusion lists may be filtering all discover candidates",
+            theme::dim(),
+        )),
+    ];
+
+    if !app.exclude_tags.is_empty() {
+        let tags = app.exclude_tags.join(", ");
+        lines.push(row("Tags", &tags));
+    }
+
+    if !app.exclude_countries.is_empty() {
+        let countries = app.exclude_countries.join(", ");
+        lines.push(row("Countries", &countries));
+    }
+
+    lines
 }
 
 fn row(label: &'static str, value: &str) -> Line<'static> {
@@ -136,6 +170,10 @@ fn decoder_state_label(state: &DecoderState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
+    use crate::favorites::Library;
+    use crate::radio::Station;
+    use crate::recommend::ScoredStation;
 
     #[test]
     fn doctor_overlay_rejects_tiny_area() {
@@ -173,5 +211,58 @@ mod tests {
         assert_eq!(decoder_state_label(&DecoderState::Playing), "Playing");
         assert_eq!(decoder_state_label(&DecoderState::Ended), "Ended");
         assert_eq!(decoder_state_label(&DecoderState::Failed), "Failed");
+    }
+
+    #[test]
+    fn test_exclusion_section_shown_when_empty_results_and_exclusions_present() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.config.discover.exclude_tags =
+            vec!["politics".to_string(), "news".to_string(), "sports".to_string()];
+        app.config.discover.exclude_countries = vec!["US".to_string(), "GB".to_string()];
+
+        let model = UiModel::from(&app);
+        let lines = exclusion_diagnostics_lines(&model);
+
+        assert!(!lines.is_empty(), "section should be rendered");
+
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(text.contains("Discover Exclusions"));
+        assert!(text.contains("Exclusion lists may be filtering all discover candidates"));
+        assert!(text.contains("politics, news, sports"));
+        assert!(text.contains("US, GB"));
+    }
+
+    #[test]
+    fn test_exclusion_section_hidden_when_results_non_empty() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.config.discover.exclude_tags = vec!["politics".to_string()];
+        app.config.discover.exclude_countries = vec!["US".to_string()];
+        app.discover_results = vec![ScoredStation {
+            station: Station::basic("Test", "http://test", "Jazz", "DE", 128),
+            score: 5,
+        }];
+
+        let model = UiModel::from(&app);
+        let lines = exclusion_diagnostics_lines(&model);
+
+        assert!(lines.is_empty(), "section should not be rendered");
+    }
+
+    #[test]
+    fn test_exclusion_section_hidden_when_no_exclusions() {
+        let app = App::new(Library::in_memory(vec![]));
+
+        let model = UiModel::from(&app);
+        let lines = exclusion_diagnostics_lines(&model);
+
+        assert!(
+            lines.is_empty(),
+            "section should not be rendered when no exclusions configured"
+        );
     }
 }
