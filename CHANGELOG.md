@@ -4,27 +4,6 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.8.0] - Unreleased
-
-### Added
-- **Station recommendations ("Discover")**: A new "Discover stations" command in the command palette builds a favorites profile from your starred stations' genres, tags, and country, then scores candidate stations with a weighted similarity formula. Results are ranked by relevance with tie-breaking by votes and popularity.
-- **Scrobble integration**: Now-playing notifications and 30-second scrobble submissions to Last.fm or ListenBrainz. Opt-in via `[scrobble]` section in `pulsedeck.toml`. Includes a retry queue (max 50) for transient failures, ICY StreamTitle parsing into artist/title fields, and trait-abstracted client for testability.
-- **Keybinding customization**: Place a `keybindings.json` file in your config directory to remap any key combination to any action. Supports all input modes (Normal, Search, CommandPalette, SleepTimer, LibraryFilter), parameterized actions, and mode-specific bindings. Invalid entries are skipped with warnings; malformed files fall back to defaults.
-- **Unified configuration file (`pulsedeck.toml`)**: Centralizes settings previously scattered across `library.json` and `ui-state.json`. Sections: `[audio]` (output_device, default_volume), `[ui]` (theme, notifications, stream_metadata), `[playback]` (autoplay_last, save_history), `[scrobble]` (enabled, service, api_key), `[keybindings]` (path). Backward-compatible migration from `library.json` on first load. Unknown keys/sections are preserved across saves.
-
-### Changed
-- **Config loading at startup**: App now loads `pulsedeck.toml` first (with `library.json` fallback for migration), applying volume, theme, notifications, scrobble enablement, and audio output from the unified config.
-- **Event dispatch**: Key events are now resolved through the keybinding registry first, falling through to hardcoded tables only when no custom match exists.
-
-### Internal
-- 979 tests pass, zero failures.
-- 4 new domain modules: `src/recommend.rs`, `src/scrobble/` (mod, tracker), `src/keybindings/` (mod, registry), `src/config_toml/` (mod, parse, serialize, io).
-- 16 property-based tests (proptest, 100 cases each) covering: scoring formula, recommendation output invariants, profile aggregation, TrackMetadata round-trip, now-playing transitions, 30-second threshold, retry queue bounds, disabled scrobbler, keybinding serialization round-trip, custom binding precedence, mode isolation, TOML round-trip, unknown key preservation, volume clamping, theme validation, missing-field defaults.
-- Strict domain/UI separation maintained: all new modules compile and test without UI dependencies.
-- `toml = "0.8"` added as a runtime dependency for TOML parsing/serialization.
-
----
-
 ## [0.8.1] - Unreleased
 
 ### Added
@@ -46,6 +25,27 @@ All notable changes to the PulseDeck project will be documented in this file.
 - 4 new Action variants: `DiscoverNext`, `DiscoverPrev`, `DiscoverSelect`, `DiscoverDismiss`.
 - `ScrobbleService::display_name()` method added for UI-layer service name rendering.
 - `ScrobbleStatus` struct in `src/ui/model.rs` exposes scrobble state to help overlay.
+
+---
+
+## [0.8.0] - Unreleased
+
+### Added
+- **Station recommendations ("Discover")**: A new "Discover stations" command in the command palette builds a favorites profile from your starred stations' genres, tags, and country, then scores candidate stations with a weighted similarity formula. Results are ranked by relevance with tie-breaking by votes and popularity.
+- **Scrobble integration**: Now-playing notifications and 30-second scrobble submissions to Last.fm or ListenBrainz. Opt-in via `[scrobble]` section in `pulsedeck.toml`. Includes a retry queue (max 50) for transient failures, ICY StreamTitle parsing into artist/title fields, and trait-abstracted client for testability.
+- **Keybinding customization**: Place a `keybindings.json` file in your config directory to remap any key combination to any action. Supports all input modes (Normal, Search, CommandPalette, SleepTimer, LibraryFilter), parameterized actions, and mode-specific bindings. Invalid entries are skipped with warnings; malformed files fall back to defaults.
+- **Unified configuration file (`pulsedeck.toml`)**: Centralizes settings previously scattered across `library.json` and `ui-state.json`. Sections: `[audio]` (output_device, default_volume), `[ui]` (theme, notifications, stream_metadata), `[playback]` (autoplay_last, save_history), `[scrobble]` (enabled, service, api_key), `[keybindings]` (path). Backward-compatible migration from `library.json` on first load. Unknown keys/sections are preserved across saves.
+
+### Changed
+- **Config loading at startup**: App now loads `pulsedeck.toml` first (with `library.json` fallback for migration), applying volume, theme, notifications, scrobble enablement, and audio output from the unified config.
+- **Event dispatch**: Key events are now resolved through the keybinding registry first, falling through to hardcoded tables only when no custom match exists.
+
+### Internal
+- 979 tests pass, zero failures.
+- 4 new domain modules: `src/recommend.rs`, `src/scrobble/` (mod, tracker), `src/keybindings/` (mod, registry), `src/config_toml/` (mod, parse, serialize, io).
+- 16 property-based tests (proptest, 100 cases each) covering: scoring formula, recommendation output invariants, profile aggregation, TrackMetadata round-trip, now-playing transitions, 30-second threshold, retry queue bounds, disabled scrobbler, keybinding serialization round-trip, custom binding precedence, mode isolation, TOML round-trip, unknown key preservation, volume clamping, theme validation, missing-field defaults.
+- Strict domain/UI separation maintained: all new modules compile and test without UI dependencies.
+- `toml = "0.8"` added as a runtime dependency for TOML parsing/serialization.
 
 ---
 
