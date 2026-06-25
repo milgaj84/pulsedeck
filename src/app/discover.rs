@@ -5,16 +5,19 @@ use crate::recommend::{
 };
 use std::collections::HashSet;
 
-/// Build a comma-separated tag query string from the profile's top genres and tags.
+/// Build a tag query string from the profile's single most popular genre or tag.
+/// Radio Browser's tag: parameter works best with a single value.
 fn build_discover_tag_query(profile: &FavoritesProfile) -> String {
     let top_genres = select_top_genres(profile);
     let top_tags = select_top_tags(profile);
-    let combined: Vec<&str> = top_genres
+
+    // Pick the single highest-count genre, falling back to the highest-count tag
+    top_genres
         .iter()
-        .chain(top_tags.iter())
-        .map(|s| s.as_str())
-        .collect();
-    combined.join(",")
+        .next()
+        .or_else(|| top_tags.iter().next())
+        .cloned()
+        .unwrap_or_default()
 }
 
 impl App {
