@@ -91,6 +91,7 @@ mod property_tests {
                         last_success_at: Some(format!("{}", now_epoch.saturating_sub(100 * 86400))),
                         last_failure_at: Some(format!("{}", now_epoch.saturating_sub(50 * 86400))),
                         failure_count: Some(5),
+                        success_count: None,
                         last_error_summary: String::new(),
                     };
                 } else if i % 3 == 1 {
@@ -99,6 +100,7 @@ mod property_tests {
                         last_success_at: Some(format!("{}", now_epoch.saturating_sub(86400))),
                         last_failure_at: None,
                         failure_count: None,
+                        success_count: None,
                         last_error_summary: String::new(),
                     };
                 }
@@ -129,6 +131,7 @@ mod tests {
             last_success_at: Some("2024-06-01T00:00:00Z".to_string()),
             last_failure_at: None,
             failure_count: None,
+            success_count: None,
             last_error_summary: String::new(),
         }
     }
@@ -138,6 +141,7 @@ mod tests {
             last_success_at: Some("2024-01-01T00:00:00Z".to_string()),
             last_failure_at: Some(last_failure_at.to_string()),
             failure_count: Some(5),
+            success_count: None,
             last_error_summary: "connection refused".to_string(),
         }
     }

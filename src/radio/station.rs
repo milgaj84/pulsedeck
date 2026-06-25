@@ -43,6 +43,8 @@ pub struct StationHealth {
     pub last_failure_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success_count: Option<u32>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub last_error_summary: String,
 }
@@ -52,6 +54,7 @@ impl StationHealth {
         self.last_success_at.is_none()
             && self.last_failure_at.is_none()
             && self.failure_count.unwrap_or(0) == 0
+            && self.success_count.unwrap_or(0) == 0
             && self.last_error_summary.is_empty()
     }
 }

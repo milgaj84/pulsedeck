@@ -1445,6 +1445,7 @@ mod tests {
             last_success_at: Some("1700000000".to_string()), // old success
             last_failure_at: Some("1700100000".to_string()), // ~40 days before "now"
             failure_count: Some(5),
+            success_count: None,
             last_error_summary: "timeout".to_string(),
         };
 

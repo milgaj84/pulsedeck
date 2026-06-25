@@ -241,6 +241,8 @@ impl Library {
             .find(|station| station_url_matches(&station.url, url))
         {
             station.health.last_success_at = Some(now);
+            station.health.success_count =
+                Some(station.health.success_count.unwrap_or(0) + 1);
             station.health.last_error_summary.clear();
             return true;
         }

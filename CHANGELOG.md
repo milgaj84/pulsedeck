@@ -4,6 +4,23 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.10.2] - Unreleased
+
+### Added
+- **Playback Doctor auto-suggestions**: The Doctor overlay now shows context-aware recovery hints based on diagnostic state (output device errors, unreachable streams, exhausted retries, metadata failures). A pure `suggest_actions()` function inspects `PlaybackDiagnostics` and returns actionable hints like "Try a different output device" or "Station may be offline — check health dot".
+- **Health classifier confidence levels**: Station health classifications now carry a confidence score (0.0–1.0) based on how many data points (successes + failures) back the classification. A station with 1 success is "Healthy (low confidence)" vs. one with 50 successes being "Healthy (high confidence)". Confidence is displayed in Station Details alongside the health level.
+- **Success count tracking**: `StationHealth` now tracks `success_count` alongside `failure_count`, incremented on each successful connection. Backward-compatible with existing `library.json` files.
+
+### Internal
+- 1352 tests pass, zero clippy warnings.
+- New module: `src/app/doctor_suggestions.rs`.
+- New types: `HealthClassification`, `calculate_confidence()`, `confidence_label()`, `classify_health_with_confidence()`.
+- `StationHealth` gains `success_count: Option<u32>` field (serde-defaulted for backward compat).
+- Playback Doctor UI renders "Suggestions" section with 💡-prefixed hints when conditions are detected.
+- Station Details "Health" section gains a "Confidence" row.
+
+---
+
 ## [0.10.1] - Unreleased
 
 ### Added

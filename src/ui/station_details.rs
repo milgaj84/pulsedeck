@@ -1,4 +1,4 @@
-use crate::radio::health_classifier::{classify_health, HealthLevel};
+use crate::radio::health_classifier::{classify_health, confidence_label, HealthLevel};
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -150,6 +150,7 @@ fn station_detail_sections(app: &UiModel<'_>) -> Vec<DetailSection> {
             rows: vec![
                 detail_data("Last check", last_check),
                 detail_data("Local health", local_health_label(station).as_str()),
+                detail_data("Confidence", health_confidence_label(station).as_str()),
                 detail_data("Votes", option_count_label(station.votes).as_str()),
                 detail_data("Clicks", option_count_label(station.click_count).as_str()),
             ],
@@ -291,6 +292,15 @@ fn local_health_label(station: &crate::radio::Station) -> String {
         }
         _ => "N/A".to_string(),
     }
+}
+
+fn health_confidence_label(station: &crate::radio::Station) -> String {
+    use crate::radio::health_classifier::calculate_confidence;
+    let confidence = calculate_confidence(&station.health);
+    if confidence == 0.0 {
+        return "N/A".to_string();
+    }
+    format!("{:.0}% ({})", confidence * 100.0, confidence_label(confidence))
 }
 
 fn failure_is_after_success(success: &str, failure: &str) -> bool {

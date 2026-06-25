@@ -1,5 +1,6 @@
 mod command_palette;
 mod discover;
+pub mod doctor_suggestions;
 mod favorites_actions;
 mod idle;
 mod library;

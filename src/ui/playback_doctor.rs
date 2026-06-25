@@ -1,3 +1,4 @@
+use crate::app::doctor_suggestions::suggest_actions;
 use crate::app::{DecoderState, PlaybackState};
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
@@ -88,6 +89,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     ];
 
     lines.extend(exclusion_diagnostics_lines(app));
+    lines.extend(suggestion_lines(app));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
@@ -162,6 +164,27 @@ fn decoder_state_label(state: &DecoderState) -> &'static str {
         DecoderState::Ended => "Ended",
         DecoderState::Failed => "Failed",
     }
+}
+
+fn suggestion_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
+    let suggestions = suggest_actions(app.diagnostics);
+    if suggestions.is_empty() {
+        return vec![];
+    }
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("── Suggestions ──", theme::cyan())),
+    ];
+
+    for hint in suggestions {
+        lines.push(Line::from(Span::styled(
+            format!("  💡 {hint}"),
+            theme::text(),
+        )));
+    }
+
+    lines
 }
 
 #[cfg(test)]

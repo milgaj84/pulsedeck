@@ -7,7 +7,16 @@ pub enum HealthLevel {
     Failed,
 }
 
+/// Combined classification result with confidence level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+pub struct HealthClassification {
+    pub level: HealthLevel,
+    pub confidence: f32,
+}
+
 const DECAY_THRESHOLD_SECS: u64 = 7 * 24 * 3600; // 7 days
+const CONFIDENCE_SATURATION: f32 = 10.0;
 
 /// Pure function: classifies a station's reliability from its health record,
 /// applying time-based decay when failures are older than 7 days.
@@ -15,6 +24,37 @@ const DECAY_THRESHOLD_SECS: u64 = 7 * 24 * 3600; // 7 days
 pub fn classify_health(health: &StationHealth, now: &str) -> Option<HealthLevel> {
     let base = classify_base(health);
     apply_decay(base, health.last_failure_at.as_deref(), now)
+}
+
+/// Like `classify_health` but also returns a confidence score.
+#[allow(dead_code)]
+pub fn classify_health_with_confidence(
+    health: &StationHealth,
+    now: &str,
+) -> Option<HealthClassification> {
+    let level = classify_health(health, now)?;
+    Some(HealthClassification {
+        level,
+        confidence: calculate_confidence(health),
+    })
+}
+
+/// Compute confidence as a value in [0.0, 1.0] based on total data points.
+/// More successes + failures = higher confidence in the classification.
+pub fn calculate_confidence(health: &StationHealth) -> f32 {
+    let successes = health.success_count.unwrap_or(0) as f32;
+    let failures = health.failure_count.unwrap_or(0) as f32;
+    let total = successes + failures;
+    (total / CONFIDENCE_SATURATION).min(1.0)
+}
+
+/// Human-readable label for confidence level.
+pub fn confidence_label(confidence: f32) -> &'static str {
+    if confidence >= 0.5 {
+        "high confidence"
+    } else {
+        "low confidence"
+    }
 }
 
 fn classify_base(health: &StationHealth) -> Option<HealthLevel> {
@@ -153,6 +193,7 @@ mod tests {
             last_success_at: last_success_at.map(String::from),
             last_failure_at: last_failure_at.map(String::from),
             failure_count,
+            success_count: None,
             last_error_summary: String::new(),
         }
     }
@@ -387,5 +428,94 @@ mod tests {
     fn parse_iso8601_unix_epoch() {
         let epoch = parse_to_epoch("1970-01-01T00:00:00Z");
         assert_eq!(epoch, Some(0));
+    }
+
+    // --- Confidence tests ---
+
+    #[test]
+    fn confidence_zero_for_empty_health() {
+        let health = StationHealth::default();
+        assert_eq!(calculate_confidence(&health), 0.0);
+    }
+
+    #[test]
+    fn confidence_one_success_is_low() {
+        let health = StationHealth {
+            success_count: Some(1),
+            ..StationHealth::default()
+        };
+        assert_eq!(calculate_confidence(&health), 0.1);
+    }
+
+    #[test]
+    fn confidence_five_data_points_is_half() {
+        let health = StationHealth {
+            success_count: Some(3),
+            failure_count: Some(2),
+            ..StationHealth::default()
+        };
+        assert_eq!(calculate_confidence(&health), 0.5);
+    }
+
+    #[test]
+    fn confidence_ten_data_points_saturates() {
+        let health = StationHealth {
+            success_count: Some(8),
+            failure_count: Some(2),
+            ..StationHealth::default()
+        };
+        assert_eq!(calculate_confidence(&health), 1.0);
+    }
+
+    #[test]
+    fn confidence_above_ten_still_capped() {
+        let health = StationHealth {
+            success_count: Some(50),
+            failure_count: Some(10),
+            ..StationHealth::default()
+        };
+        assert_eq!(calculate_confidence(&health), 1.0);
+    }
+
+    #[test]
+    fn confidence_label_high_at_half() {
+        assert_eq!(confidence_label(0.5), "high confidence");
+        assert_eq!(confidence_label(1.0), "high confidence");
+    }
+
+    #[test]
+    fn confidence_label_low_below_half() {
+        assert_eq!(confidence_label(0.0), "low confidence");
+        assert_eq!(confidence_label(0.49), "low confidence");
+    }
+
+    #[test]
+    fn classify_with_confidence_returns_both() {
+        let health = StationHealth {
+            last_success_at: Some("2024-01-02T00:00:00Z".to_string()),
+            success_count: Some(10),
+            ..StationHealth::default()
+        };
+        let result = classify_health_with_confidence(&health, NOW_RECENT).unwrap();
+        assert_eq!(result.level, HealthLevel::Healthy);
+        assert_eq!(result.confidence, 1.0);
+    }
+
+    #[test]
+    fn classify_with_confidence_low_data() {
+        let health = StationHealth {
+            last_success_at: Some("2024-01-02T00:00:00Z".to_string()),
+            success_count: Some(1),
+            ..StationHealth::default()
+        };
+        let result = classify_health_with_confidence(&health, NOW_RECENT).unwrap();
+        assert_eq!(result.level, HealthLevel::Healthy);
+        assert_eq!(result.confidence, 0.1);
+    }
+
+    #[test]
+    fn classify_with_confidence_none_for_empty() {
+        let health = StationHealth::default();
+        assert_eq!(classify_health_with_confidence(&health, NOW_RECENT), None);
     }
 }
