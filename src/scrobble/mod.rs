@@ -1,5 +1,7 @@
 // Scrobble integration — track metadata parsing and scrobble event logic.
 
+pub mod lastfm;
+pub mod listenbrainz;
 pub mod tracker;
 
 /// Errors that can occur when submitting scrobble data to an external service.

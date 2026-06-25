@@ -83,16 +83,77 @@ pub fn build_favorites_profile(
 }
 
 const MAX_RECOMMENDATIONS: usize = 25;
+const PREFILTER_THRESHOLD: usize = 1000;
+const MAX_TOP_GENRES: usize = 5;
+const MAX_TOP_TAGS: usize = 10;
+
+/// Select top genres from profile by occurrence count (up to 5, ties at boundary included).
+fn select_top_genres(profile: &FavoritesProfile) -> HashSet<String> {
+    select_top_n(&profile.genres, MAX_TOP_GENRES)
+}
+
+/// Select top tags from profile by occurrence count (up to 10, ties at boundary included).
+fn select_top_tags(profile: &FavoritesProfile) -> HashSet<String> {
+    select_top_n(&profile.tags, MAX_TOP_TAGS)
+}
+
+/// Generic top-N selection with tie inclusion at the boundary.
+fn select_top_n(counts: &HashMap<String, u32>, limit: usize) -> HashSet<String> {
+    if counts.is_empty() {
+        return HashSet::new();
+    }
+    let mut entries: Vec<(&String, &u32)> = counts.iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(a.1));
+
+    let boundary_count = if entries.len() > limit {
+        *entries[limit - 1].1
+    } else {
+        0 // include all when fewer entries than limit
+    };
+
+    entries
+        .into_iter()
+        .filter(|(_, count)| **count >= boundary_count)
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
+/// Retain candidates whose genre or tags overlap with the top genres/tags.
+fn prefilter_candidates<'a>(
+    candidates: &'a [Station],
+    top_genres: &HashSet<String>,
+    top_tags: &HashSet<String>,
+) -> Vec<&'a Station> {
+    candidates
+        .iter()
+        .filter(|station| {
+            let genre = station.genre.trim().to_ascii_lowercase();
+            if top_genres.contains(&genre) {
+                return true;
+            }
+            station
+                .tags
+                .iter()
+                .any(|t| top_tags.contains(&t.trim().to_ascii_lowercase()))
+        })
+        .collect()
+}
 
 /// Produce a ranked recommendation list (max 25 items, descending score).
 /// Excludes stations whose URL is already in `library_urls`.
+/// Applies pre-filter when candidates exceed 1000 and profile has genres or tags.
 pub fn recommend(
     profile: &FavoritesProfile,
     candidates: &[Station],
     library_urls: &HashSet<String>,
 ) -> Vec<Station> {
-    let mut scored: Vec<(u32, &Station)> = candidates
-        .iter()
+    let effective_candidates = maybe_prefilter(profile, candidates);
+    let iter: Box<dyn Iterator<Item = &Station>> = match &effective_candidates {
+        Some(filtered) => Box::new(filtered.iter().copied()),
+        None => Box::new(candidates.iter()),
+    };
+
+    let mut scored: Vec<(u32, &Station)> = iter
         .filter(|s| !library_urls.contains(&normalized_station_url(&s.url)))
         .map(|s| (score_station(profile, s), s))
         .filter(|(score, _)| *score > 0)
@@ -109,6 +170,22 @@ pub fn recommend(
         .take(MAX_RECOMMENDATIONS)
         .map(|(_, s)| s.clone())
         .collect()
+}
+
+/// Apply pre-filter if candidates exceed threshold and profile has genres or tags.
+fn maybe_prefilter<'a>(
+    profile: &FavoritesProfile,
+    candidates: &'a [Station],
+) -> Option<Vec<&'a Station>> {
+    if candidates.len() <= PREFILTER_THRESHOLD {
+        return None;
+    }
+    if profile.genres.is_empty() && profile.tags.is_empty() {
+        return None;
+    }
+    let top_genres = select_top_genres(profile);
+    let top_tags = select_top_tags(profile);
+    Some(prefilter_candidates(candidates, &top_genres, &top_tags))
 }
 
 fn votes_of(station: &Station) -> u32 {
@@ -388,6 +465,212 @@ mod tests {
         let result = recommend(&profile, &candidates, &library);
 
         assert!(result.is_empty());
+    }
+
+    // --- select_top_genres tests ---
+
+    #[test]
+    fn select_top_genres_returns_up_to_5() {
+        let profile = FavoritesProfile {
+            genres: [("rock", 10), ("jazz", 8), ("pop", 6), ("metal", 4), ("blues", 2)]
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
+            tags: HashMap::new(),
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_top_genres(&profile);
+
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn select_top_genres_includes_ties_at_boundary() {
+        let profile = FavoritesProfile {
+            genres: [
+                ("rock", 10),
+                ("jazz", 8),
+                ("pop", 6),
+                ("metal", 4),
+                ("blues", 4), // tied at boundary
+                ("classical", 4), // tied at boundary
+                ("ambient", 1),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), *v))
+            .collect(),
+            tags: HashMap::new(),
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_top_genres(&profile);
+
+        // Top 5 by count: rock(10), jazz(8), pop(6), metal(4), blues(4), classical(4)
+        // The 5th position has count=4, so all with count>=4 are included (6 total)
+        assert!(result.contains("rock"));
+        assert!(result.contains("jazz"));
+        assert!(result.contains("pop"));
+        assert!(result.contains("metal"));
+        assert!(result.contains("blues"));
+        assert!(result.contains("classical"));
+        assert!(!result.contains("ambient"));
+        assert_eq!(result.len(), 6);
+    }
+
+    #[test]
+    fn select_top_genres_empty_profile() {
+        let profile = empty_profile();
+        let result = select_top_genres(&profile);
+        assert!(result.is_empty());
+    }
+
+    // --- select_top_tags tests ---
+
+    #[test]
+    fn select_top_tags_returns_up_to_10() {
+        let profile = FavoritesProfile {
+            genres: HashMap::new(),
+            tags: (0..10)
+                .map(|i| (format!("tag{i}"), 10 - i as u32))
+                .collect(),
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_top_tags(&profile);
+
+        assert_eq!(result.len(), 10);
+    }
+
+    #[test]
+    fn select_top_tags_includes_ties_at_boundary() {
+        let profile = FavoritesProfile {
+            genres: HashMap::new(),
+            tags: {
+                let mut tags: HashMap<String, u32> = (0..10)
+                    .map(|i| (format!("tag{i}"), 20 - i as u32))
+                    .collect();
+                // tag9 has count 11, add tag10 and tag11 also with count 11
+                tags.insert("tag10".to_string(), 11);
+                tags.insert("tag11".to_string(), 11);
+                tags.insert("tag_low".to_string(), 1);
+                tags
+            },
+            country_codes: HashMap::new(),
+        };
+
+        let result = select_top_tags(&profile);
+
+        // The 10th position has count=11, so all with count>=11 are included
+        assert!(result.contains("tag10"));
+        assert!(result.contains("tag11"));
+        assert!(!result.contains("tag_low"));
+    }
+
+    // --- prefilter_candidates tests ---
+
+    #[test]
+    fn prefilter_candidates_retains_genre_match() {
+        let candidates = vec![
+            make_station("http://a", "Rock", vec![], "US"),
+            make_station("http://b", "Jazz", vec![], "US"),
+        ];
+        let top_genres: HashSet<String> = ["rock".to_string()].into();
+        let top_tags: HashSet<String> = HashSet::new();
+
+        let result = prefilter_candidates(&candidates, &top_genres, &top_tags);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].url, "http://a");
+    }
+
+    #[test]
+    fn prefilter_candidates_retains_tag_match() {
+        let candidates = vec![
+            make_station("http://a", "Classical", vec!["guitar"], "US"),
+            make_station("http://b", "Classical", vec!["piano"], "US"),
+        ];
+        let top_genres: HashSet<String> = HashSet::new();
+        let top_tags: HashSet<String> = ["guitar".to_string()].into();
+
+        let result = prefilter_candidates(&candidates, &top_genres, &top_tags);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].url, "http://a");
+    }
+
+    #[test]
+    fn prefilter_candidates_case_insensitive() {
+        let candidates = vec![make_station("http://a", "ROCK", vec!["Guitar"], "US")];
+        let top_genres: HashSet<String> = ["rock".to_string()].into();
+        let top_tags: HashSet<String> = ["guitar".to_string()].into();
+
+        let result = prefilter_candidates(&candidates, &top_genres, &top_tags);
+
+        assert_eq!(result.len(), 1);
+    }
+
+    // --- recommend pre-filter integration tests ---
+
+    #[test]
+    fn recommend_no_prefilter_at_or_below_threshold() {
+        let profile = profile_with(&["rock"], &[], &[]);
+        // Exactly 1000 candidates — no pre-filter, all scored
+        let mut candidates: Vec<Station> = (0..1000)
+            .map(|i| make_station(&format!("http://s{i}"), "Jazz", vec![], ""))
+            .collect();
+        // Add one rock station that would match
+        candidates[999] = make_station("http://rock", "Rock", vec![], "");
+        let library = HashSet::new();
+
+        let result = recommend(&profile, &candidates, &library);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].url, "http://rock");
+    }
+
+    #[test]
+    fn recommend_prefilter_applied_above_threshold() {
+        let profile = FavoritesProfile {
+            genres: [("rock".to_string(), 5)].into(),
+            tags: HashMap::new(),
+            country_codes: [("US".to_string(), 1)].into(),
+        };
+        // 1001 candidates: only 2 are "rock" genre, 999 are "classical"
+        let mut candidates: Vec<Station> = (0..1001)
+            .map(|i| make_station(&format!("http://s{i}"), "Classical", vec![], "US"))
+            .collect();
+        candidates[0] = make_station("http://rock1", "Rock", vec![], "US");
+        candidates[1] = make_station("http://rock2", "Rock", vec![], "US");
+        let library = HashSet::new();
+
+        let result = recommend(&profile, &candidates, &library);
+
+        // Pre-filter keeps only "rock" genre stations (2), then scores them
+        // Country match alone doesn't pass pre-filter (country is not in pre-filter logic)
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|s| s.genre == "Rock"));
+    }
+
+    #[test]
+    fn recommend_empty_profile_skips_prefilter_above_threshold() {
+        // Profile has country_codes but no genres and no tags
+        let profile = FavoritesProfile {
+            genres: HashMap::new(),
+            tags: HashMap::new(),
+            country_codes: [("US".to_string(), 3)].into(),
+        };
+        // 1001 candidates, all with country US → should all score 1 (country match)
+        let candidates: Vec<Station> = (0..1001)
+            .map(|i| make_station(&format!("http://s{i}"), "Rock", vec![], "US"))
+            .collect();
+        let library = HashSet::new();
+
+        let result = recommend(&profile, &candidates, &library);
+
+        // No pre-filter because genres and tags are empty
+        // All 1001 score > 0 (country match), capped at 25
+        assert_eq!(result.len(), 25);
     }
 }
 

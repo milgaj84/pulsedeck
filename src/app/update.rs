@@ -91,6 +91,10 @@ impl App {
             Action::ExportLibrary => self.export_library(),
 
             Action::Discover => self.handle_discover(),
+            Action::DiscoverNext => self.discover_next(),
+            Action::DiscoverPrev => self.discover_prev(),
+            Action::DiscoverSelect => self.discover_select(),
+            Action::DiscoverDismiss => self.discover_dismiss(),
 
             Action::ToggleMiniMode => self.toggle_mini_mode(),
 

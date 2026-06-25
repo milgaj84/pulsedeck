@@ -87,8 +87,14 @@ pub struct App {
     /// Discovery results from the recommendation engine.
     pub discover_results: Vec<Station>,
 
+    /// Selection cursor index into `discover_results`.
+    pub discover_cursor: usize,
+
     /// Scrobble state machine — ticked each app tick, receives track changes.
     pub scrobble_tracker: ScrobbleTracker,
+
+    /// Counter for periodic retry drain (fires every 60 ticks).
+    pub retry_drain_counter: u32,
 
     /// Unified TOML configuration loaded at startup.
     pub config: crate::config_toml::AppConfig,

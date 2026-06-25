@@ -72,8 +72,8 @@ impl KeybindingRegistry {
         };
 
         let mut customs = Vec::new();
-        for entry in entries {
-            match parse_entry(&entry) {
+        for (index, entry) in entries.iter().enumerate() {
+            match parse_entry(entry, index) {
                 Ok(binding) => customs.push(binding),
                 Err(reason) => warnings.push(reason),
             }
@@ -114,14 +114,14 @@ fn parse_json_entries(json: &[u8]) -> Result<Vec<RawEntry>, String> {
     serde_json::from_slice::<Vec<RawEntry>>(json).map_err(|e| e.to_string())
 }
 
-fn parse_entry(entry: &RawEntry) -> Result<KeyBinding, String> {
+fn parse_entry(entry: &RawEntry, index: usize) -> Result<KeyBinding, String> {
     let key = parse_key_spec(&entry.key)
-        .ok_or_else(|| format!("Invalid key spec: '{}'", entry.key))?;
+        .ok_or_else(|| format!("keybindings.json entry {index}: invalid key '{}'", entry.key))?;
 
-    let modifiers = parse_modifiers(&entry.modifiers)?;
+    let modifiers = parse_modifiers(&entry.modifiers, index)?;
     let action = parse_action_name(&entry.action)
-        .ok_or_else(|| format!("Invalid action name: '{}'", entry.action))?;
-    let mode = parse_input_mode(entry.mode.as_deref())?;
+        .ok_or_else(|| format!("keybindings.json entry {index}: invalid action '{}'", entry.action))?;
+    let mode = parse_input_mode(entry.mode.as_deref(), index)?;
 
     Ok(KeyBinding {
         key,
@@ -131,23 +131,23 @@ fn parse_entry(entry: &RawEntry) -> Result<KeyBinding, String> {
     })
 }
 
-fn parse_modifiers(raw: &[String]) -> Result<Vec<Modifier>, String> {
+fn parse_modifiers(raw: &[String], index: usize) -> Result<Vec<Modifier>, String> {
     raw.iter()
         .map(|m| {
             parse_modifier(m)
-                .ok_or_else(|| format!("Invalid modifier: '{m}'"))
+                .ok_or_else(|| format!("keybindings.json entry {index}: invalid modifiers '{m}'"))
         })
         .collect()
 }
 
-fn parse_input_mode(raw: Option<&str>) -> Result<InputMode, String> {
+fn parse_input_mode(raw: Option<&str>, index: usize) -> Result<InputMode, String> {
     match raw {
         None | Some("Normal") => Ok(InputMode::Normal),
         Some("Search") => Ok(InputMode::Search),
         Some("CommandPalette") => Ok(InputMode::CommandPalette),
         Some("SleepTimer") => Ok(InputMode::SleepTimer),
         Some("LibraryFilter") => Ok(InputMode::LibraryFilter),
-        Some(other) => Err(format!("Invalid mode: '{other}'")),
+        Some(other) => Err(format!("keybindings.json entry {index}: invalid mode '{other}'")),
     }
 }
 
@@ -284,7 +284,10 @@ mod tests {
         assert_eq!(registry.customs.len(), 1);
         assert_eq!(registry.customs[0].action, Action::Quit);
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("Invalid action name"));
+        assert_eq!(
+            warnings[0],
+            "keybindings.json entry 0: invalid action 'nonexistent_action'"
+        );
     }
 
     #[test]
@@ -300,7 +303,10 @@ mod tests {
 
         assert_eq!(registry.customs.len(), 1);
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("Invalid key spec"));
+        assert_eq!(
+            warnings[0],
+            "keybindings.json entry 0: invalid key 'capslock'"
+        );
     }
 
     #[test]
@@ -316,7 +322,10 @@ mod tests {
 
         assert_eq!(registry.customs.len(), 1);
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("Invalid modifier"));
+        assert_eq!(
+            warnings[0],
+            "keybindings.json entry 0: invalid modifiers 'meta'"
+        );
     }
 
     #[test]
@@ -509,6 +518,92 @@ mod tests {
             &InputMode::Normal,
         );
         assert_eq!(result, Some(Action::PlaySelected));
+    }
+
+    // --- warning format tests ---
+
+    #[test]
+    fn test_warning_includes_entry_index() {
+        let json = serde_json::to_vec(&serde_json::json!([
+            {"key": "esc", "modifiers": [], "action": "quit"},
+            {"key": "esc", "modifiers": [], "action": "quit"},
+            {"key": "badkey", "modifiers": [], "action": "quit"}
+        ]))
+        .unwrap();
+
+        let mut warnings = Vec::new();
+        KeybindingRegistry::from_json(&json, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("entry 2:"));
+    }
+
+    #[test]
+    fn test_warning_includes_field_name() {
+        let invalid_key = serde_json::to_vec(&serde_json::json!([
+            {"key": "nope", "modifiers": [], "action": "quit"}
+        ]))
+        .unwrap();
+        let invalid_action = serde_json::to_vec(&serde_json::json!([
+            {"key": "esc", "modifiers": [], "action": "bogus"}
+        ]))
+        .unwrap();
+        let invalid_mode = serde_json::to_vec(&serde_json::json!([
+            {"key": "esc", "modifiers": [], "action": "quit", "mode": "Flying"}
+        ]))
+        .unwrap();
+        let invalid_mod = serde_json::to_vec(&serde_json::json!([
+            {"key": "esc", "modifiers": ["super"], "action": "quit"}
+        ]))
+        .unwrap();
+
+        let mut w = Vec::new();
+        KeybindingRegistry::from_json(&invalid_key, &mut w);
+        assert!(w[0].contains("invalid key"));
+
+        w.clear();
+        KeybindingRegistry::from_json(&invalid_action, &mut w);
+        assert!(w[0].contains("invalid action"));
+
+        w.clear();
+        KeybindingRegistry::from_json(&invalid_mode, &mut w);
+        assert!(w[0].contains("invalid mode"));
+
+        w.clear();
+        KeybindingRegistry::from_json(&invalid_mod, &mut w);
+        assert!(w[0].contains("invalid modifiers"));
+    }
+
+    #[test]
+    fn test_malformed_json_includes_parser_error() {
+        let mut warnings = Vec::new();
+        KeybindingRegistry::from_json(b"[{broken", &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].starts_with("Malformed keybindings JSON:"));
+        // The parser error text should be appended after the prefix
+        assert!(warnings[0].len() > "Malformed keybindings JSON: ".len());
+    }
+
+    #[test]
+    fn test_keybindings_example_file_parses_without_warnings() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir).join("keybindings.example.json");
+        let content = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("Failed to read keybindings.example.json: {e}"));
+
+        let mut warnings = Vec::new();
+        let registry = KeybindingRegistry::from_json(&content, &mut warnings);
+
+        assert!(
+            warnings.is_empty(),
+            "keybindings.example.json produced warnings: {warnings:?}"
+        );
+        assert!(
+            registry.customs.len() >= 5,
+            "Expected at least 5 bindings, got {}",
+            registry.customs.len()
+        );
     }
 }
 

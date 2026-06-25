@@ -11,6 +11,17 @@ pub enum ScrobbleService {
     ListenBrainz,
 }
 
+impl ScrobbleService {
+    /// Human-readable display name for the service.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::LastFm => "Last.fm",
+            Self::ListenBrainz => "ListenBrainz",
+        }
+    }
+}
+
+
 /// Audio output settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioConfig {
@@ -150,6 +161,12 @@ mod tests {
         assert!(!config.enabled);
         assert_eq!(config.service, ScrobbleService::LastFm);
         assert_eq!(config.api_key, "");
+    }
+
+    #[test]
+    fn test_scrobble_service_display_name() {
+        assert_eq!(ScrobbleService::LastFm.display_name(), "Last.fm");
+        assert_eq!(ScrobbleService::ListenBrainz.display_name(), "ListenBrainz");
     }
 
     #[test]

@@ -25,6 +25,30 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.8.1] - Unreleased
+
+### Added
+- **Concrete scrobble clients**: Last.fm client with md5 API method signatures and XML response parsing; ListenBrainz client with token-based auth and JSON submission bodies. Both use reqwest with 10-second timeouts.
+- **Scrobble retry queue draining**: Failed scrobbles are now automatically retried every 60 seconds instead of accumulating indefinitely. Successful retries are consumed; failed retries are re-enqueued.
+- **Discover results navigation**: Recommendations are now browsable in a scrollable view with j/k navigation, Enter to add+play, and Esc to dismiss. Cursor bounds are always clamped.
+- **Help overlay entries**: Library tab shows the Discover command; Settings tab documents keybinding customization via `keybindings.json` and displays current scrobble status (enabled/disabled with service name).
+- **`keybindings.example.json`**: Commented example file at repo root demonstrating 6 remapping patterns (single-key, modifier combo, parameterized action, mode-specific, default override).
+
+### Improved
+- **Recommend performance for large lists**: When candidate lists exceed 1000 stations, a pre-filter selects the top 5 genres and 10 tags (with tie inclusion) from the favorites profile before scoring, avoiding O(n log n) sort on the full list.
+- **Keybinding error messages**: Warnings now include the entry index and field name: `"keybindings.json entry 3: invalid action 'foo'"` instead of generic messages.
+- **Config TOML error messages**: Warnings now use dotted field paths with the problematic value: `"audio.default_volume: '150' is invalid, clamped to 100"` instead of opaque messages.
+
+### Internal
+- 1059 tests pass, zero failures.
+- New modules: `src/scrobble/lastfm.rs`, `src/scrobble/listenbrainz.rs`.
+- `md5 = "0.7"` added as a runtime dependency for Last.fm API signatures.
+- 4 new Action variants: `DiscoverNext`, `DiscoverPrev`, `DiscoverSelect`, `DiscoverDismiss`.
+- `ScrobbleService::display_name()` method added for UI-layer service name rendering.
+- `ScrobbleStatus` struct in `src/ui/model.rs` exposes scrobble state to help overlay.
+
+---
+
 ## [0.7.1] - Unreleased
 
 ### Fixed

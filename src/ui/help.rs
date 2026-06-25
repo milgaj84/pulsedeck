@@ -1,4 +1,5 @@
 use crate::ui::model::UiModel;
+use crate::ui::model::ScrobbleStatus;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, Row, Table, Tabs};
 
@@ -78,7 +79,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
     frame.render_widget(tabs, tab_area);
 
-    let rows = rows_for_tab(active_tab);
+    let rows = rows_for_tab(active_tab, app);
     let header_row = Row::new(vec![
         Cell::from(Span::styled(
             "Key",
@@ -113,13 +114,13 @@ fn help_tab_index(app: &UiModel<'_>) -> usize {
     app.nav.help_tab_index
 }
 
-fn rows_for_tab(tab: usize) -> Vec<Row<'static>> {
+fn rows_for_tab(tab: usize, app: &UiModel<'_>) -> Vec<Row<'static>> {
     match tab {
         0 => playback_rows(),
         1 => library_rows(),
         2 => search_rows(),
         3 => visuals_rows(),
-        4 => settings_rows(),
+        4 => settings_rows(&app.scrobble_status),
         5 => app_rows(),
         _ => playback_rows(),
     }
@@ -152,6 +153,7 @@ fn library_rows() -> Vec<Row<'static>> {
         shortcut("d", "Playback Doctor diagnostics"),
         shortcut("g", "Recent tracks / listening history"),
         shortcut("e", "Export Library to M3U"),
+        shortcut(": Discover", "Discover stations (via command palette)"),
     ]
 }
 
@@ -178,7 +180,8 @@ fn visuals_rows() -> Vec<Row<'static>> {
     ]
 }
 
-fn settings_rows() -> Vec<Row<'static>> {
+fn settings_rows(scrobble: &ScrobbleStatus) -> Vec<Row<'static>> {
+    let scrobble_label = scrobble_status_label(scrobble);
     vec![
         shortcut(",", "Open settings panel"),
         shortcut("Up/Down · j/k", "Move setting selection"),
@@ -191,7 +194,30 @@ fn settings_rows() -> Vec<Row<'static>> {
         shortcut("Audio Output", "Default, pulse, pipewire, or device"),
         shortcut("Theme", "Retrowave, Catppuccin ×4, Terminal"),
         shortcut("Metadata", "Toggle ICY now-playing metadata"),
+        section("Customization"),
+        note("Keybindings can be customized via keybindings.json"),
+        section("Status"),
+        note(&scrobble_label),
     ]
+}
+
+/// Format scrobble status label for help display.
+pub(crate) fn scrobble_status_label(scrobble: &ScrobbleStatus) -> String {
+    if scrobble.enabled {
+        format!("Scrobble: enabled ({})", scrobble.service_name)
+    } else {
+        format!("Scrobble: disabled ({})", scrobble.service_name)
+    }
+}
+
+fn note(text: &str) -> Row<'static> {
+    Row::new(vec![
+        Cell::from(Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::accent_secondary()),
+        )),
+        Cell::from(""),
+    ])
 }
 
 fn app_rows() -> Vec<Row<'static>> {
@@ -245,9 +271,106 @@ mod tests {
     }
 
     #[test]
-    fn rows_for_each_tab_are_non_empty() {
-        for tab in 0..6 {
-            assert!(!rows_for_tab(tab).is_empty());
-        }
+    fn playback_tab_rows_are_non_empty() {
+        assert!(!playback_rows().is_empty());
+    }
+
+    #[test]
+    fn library_tab_rows_are_non_empty() {
+        assert!(!library_rows().is_empty());
+    }
+
+    #[test]
+    fn search_tab_rows_are_non_empty() {
+        assert!(!search_rows().is_empty());
+    }
+
+    #[test]
+    fn visuals_tab_rows_are_non_empty() {
+        assert!(!visuals_rows().is_empty());
+    }
+
+    #[test]
+    fn settings_tab_rows_are_non_empty() {
+        let status = ScrobbleStatus {
+            enabled: false,
+            service_name: "Last.fm",
+        };
+        assert!(!settings_rows(&status).is_empty());
+    }
+
+    #[test]
+    fn app_tab_rows_are_non_empty() {
+        assert!(!app_rows().is_empty());
+    }
+
+    #[test]
+    fn library_tab_contains_discover_entry() {
+        let rows = library_rows();
+        let text: Vec<String> = rows
+            .iter()
+            .map(|r| format!("{:?}", r))
+            .collect();
+        let joined = text.join(" ");
+        assert!(
+            joined.contains("Discover"),
+            "Library tab must contain a Discover command entry"
+        );
+    }
+
+    #[test]
+    fn settings_tab_contains_keybindings_customization_note() {
+        let status = ScrobbleStatus {
+            enabled: false,
+            service_name: "Last.fm",
+        };
+        let rows = settings_rows(&status);
+        let text: Vec<String> = rows
+            .iter()
+            .map(|r| format!("{:?}", r))
+            .collect();
+        let joined = text.join(" ");
+        assert!(
+            joined.contains("keybindings.json"),
+            "Settings tab must mention keybindings.json customization"
+        );
+    }
+
+    #[test]
+    fn settings_tab_contains_scrobble_status_enabled() {
+        let status = ScrobbleStatus {
+            enabled: true,
+            service_name: "Last.fm",
+        };
+        let label = scrobble_status_label(&status);
+        assert_eq!(label, "Scrobble: enabled (Last.fm)");
+    }
+
+    #[test]
+    fn settings_tab_contains_scrobble_status_disabled() {
+        let status = ScrobbleStatus {
+            enabled: false,
+            service_name: "ListenBrainz",
+        };
+        let label = scrobble_status_label(&status);
+        assert_eq!(label, "Scrobble: disabled (ListenBrainz)");
+    }
+
+    #[test]
+    fn settings_tab_rows_contain_scrobble_status() {
+        let status = ScrobbleStatus {
+            enabled: true,
+            service_name: "ListenBrainz",
+        };
+        let rows = settings_rows(&status);
+        let text: Vec<String> = rows
+            .iter()
+            .map(|r| format!("{:?}", r))
+            .collect();
+        let joined = text.join(" ");
+        assert!(
+            joined.contains("Scrobble: enabled (ListenBrainz)"),
+            "Settings tab must show scrobble status with service name"
+        );
     }
 }

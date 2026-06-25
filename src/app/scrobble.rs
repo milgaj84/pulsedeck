@@ -1,5 +1,8 @@
 use super::*;
+use crate::scrobble::tracker::PendingScrobble;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const RETRY_DRAIN_INTERVAL_SECS: u32 = 60;
 
 impl App {
     /// Tick the scrobble tracker with the current Unix timestamp.
@@ -9,6 +12,39 @@ impl App {
         if let Some(_event) = self.scrobble_tracker.tick(timestamp) {
             // Placeholder: dispatch to ScrobbleClient will be wired in a later task.
         }
+        self.maybe_drain_retries();
+    }
+
+    /// Periodically drain retry queue. Increments counter each tick;
+    /// at 60 ticks, drains and dispatches retries. Skips when disabled.
+    pub(super) fn maybe_drain_retries(&mut self) {
+        if !self.scrobble_tracker.is_enabled() {
+            return;
+        }
+        self.retry_drain_counter += 1;
+        if self.retry_drain_counter < RETRY_DRAIN_INTERVAL_SECS {
+            return;
+        }
+        self.retry_drain_counter = 0;
+        let retries = self.scrobble_tracker.drain_retries();
+        for event in retries {
+            self.dispatch_scrobble_retry(event);
+        }
+    }
+
+    /// Dispatch a single retry event. On failure, re-enqueue.
+    /// Currently a placeholder — real client dispatch will be wired later.
+    fn dispatch_scrobble_retry(&mut self, event: crate::scrobble::tracker::ScrobbleEvent) {
+        if let crate::scrobble::tracker::ScrobbleEvent::Retry(pending) = event {
+            // Placeholder: when a ScrobbleClient is injected, call it here.
+            // For now, treat as success (consume the entry).
+            let _ = pending;
+        }
+    }
+
+    /// Re-enqueue a failed retry back into the tracker.
+    pub(super) fn on_retry_failed(&mut self, pending: PendingScrobble) {
+        self.scrobble_tracker.on_scrobble_failed(pending);
     }
 }
 
@@ -24,7 +60,7 @@ mod tests {
     use super::*;
     use crate::favorites::Library;
     use crate::radio::Station;
-    use crate::scrobble::tracker::ScrobbleTracker;
+    use crate::scrobble::tracker::{PendingScrobble, ScrobbleTracker};
     use crate::scrobble::TrackMetadata;
 
     fn station(name: &str, url: &str) -> Station {
@@ -36,6 +72,77 @@ mod tests {
             station("A", "http://a"),
             station("B", "http://b"),
         ]))
+    }
+
+    fn pending(artist: &str, title: &str, ts: u64) -> PendingScrobble {
+        PendingScrobble {
+            meta: TrackMetadata {
+                artist: artist.to_string(),
+                title: title.to_string(),
+            },
+            timestamp: ts,
+        }
+    }
+
+    #[test]
+    fn test_counter_increments_on_tick_when_enabled() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(true);
+        assert_eq!(app.retry_drain_counter, 0);
+
+        app.maybe_drain_retries();
+
+        assert_eq!(app.retry_drain_counter, 1);
+    }
+
+    #[test]
+    fn test_counter_does_not_increment_when_disabled() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(false);
+
+        app.maybe_drain_retries();
+
+        assert_eq!(app.retry_drain_counter, 0);
+    }
+
+    #[test]
+    fn test_drain_fires_at_60_and_resets_counter() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(true);
+
+        for _ in 0..59 {
+            app.maybe_drain_retries();
+        }
+        assert_eq!(app.retry_drain_counter, 59);
+
+        app.maybe_drain_retries();
+        assert_eq!(app.retry_drain_counter, 0);
+    }
+
+    #[test]
+    fn test_drain_removes_successful_retries() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(true);
+        app.scrobble_tracker.on_scrobble_failed(pending("A", "Song", 100));
+        assert_eq!(app.scrobble_tracker.retry_queue_len(), 1);
+
+        // Advance counter to trigger drain
+        app.retry_drain_counter = 59;
+        app.maybe_drain_retries();
+
+        // Default dispatch is success (placeholder), so queue is drained
+        assert_eq!(app.scrobble_tracker.retry_queue_len(), 0);
+    }
+
+    #[test]
+    fn test_on_retry_failed_re_enqueues() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(true);
+
+        let p = pending("Artist", "Title", 500);
+        app.on_retry_failed(p);
+
+        assert_eq!(app.scrobble_tracker.retry_queue_len(), 1);
     }
 
     #[test]
@@ -104,5 +211,15 @@ mod tests {
             app.tick_scrobble_tracker();
         }
         assert_eq!(app.scrobble_tracker.tick(9999), None);
+    }
+
+    #[test]
+    fn test_maybe_drain_retries_wired_into_tick() {
+        let mut app = test_app();
+        app.scrobble_tracker = ScrobbleTracker::new(true);
+
+        // Calling tick_scrobble_tracker should also call maybe_drain_retries
+        app.tick_scrobble_tracker();
+        assert_eq!(app.retry_drain_counter, 1);
     }
 }

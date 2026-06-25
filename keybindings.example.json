@@ -1,0 +1,39 @@
+[
+  {
+    "_comment": "PulseDeck keybindings configuration. Copy this file to your config directory as 'keybindings.json' for PulseDeck to load it. Each entry maps a key (with optional modifiers and mode) to an action. Unknown fields like '_comment' are ignored.",
+    "key": "char(q)",
+    "modifiers": [],
+    "action": "quit"
+  },
+  {
+    "_comment": "Single-key remap: press 'n' in Normal mode to go to the next station (overrides default 'j' behavior).",
+    "key": "char(n)",
+    "modifiers": [],
+    "action": "next_station"
+  },
+  {
+    "_comment": "Modifier key combination: Ctrl+P opens the command palette.",
+    "key": "char(p)",
+    "modifiers": ["ctrl"],
+    "action": "open_command_palette"
+  },
+  {
+    "_comment": "Parameterized action: Ctrl+1 plays the station assigned to slot 1.",
+    "key": "char(1)",
+    "modifiers": ["ctrl"],
+    "action": "play_slot(1)"
+  },
+  {
+    "_comment": "Mode-specific binding: in Search mode, Ctrl+W clears the search (acts as backspace). Does not affect Normal mode.",
+    "key": "char(w)",
+    "modifiers": ["ctrl"],
+    "action": "search_backspace",
+    "mode": "Search"
+  },
+  {
+    "_comment": "Override a default binding: rebind Enter to toggle pause instead of playing the selected station.",
+    "key": "enter",
+    "modifiers": [],
+    "action": "toggle_pause"
+  }
+]

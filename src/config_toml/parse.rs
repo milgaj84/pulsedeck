@@ -98,10 +98,10 @@ fn parse_audio_section(table: &toml::map::Map<String, toml::Value>, warnings: &m
 
 fn clamp_volume(raw: i64, warnings: &mut Vec<String>) -> u8 {
     if raw < 0 {
-        warnings.push(format!("audio.default_volume ({}) clamped to 0", raw));
+        warnings.push(format!("audio.default_volume: '{}' is invalid, clamped to 0", raw));
         0
     } else if raw > 100 {
-        warnings.push(format!("audio.default_volume ({}) clamped to 100", raw));
+        warnings.push(format!("audio.default_volume: '{}' is invalid, clamped to 100", raw));
         100
     } else {
         raw as u8
@@ -139,7 +139,7 @@ fn validate_theme(raw: &str, warnings: &mut Vec<String>) -> String {
     if is_known {
         raw.to_string()
     } else {
-        warnings.push(format!("ui.theme '{}' is unknown, falling back to Retrowave", raw));
+        warnings.push(format!("ui.theme: '{}' is invalid, using default 'Retrowave'", raw));
         "Retrowave".to_string()
     }
 }
@@ -195,7 +195,7 @@ fn resolve_scrobble_service(
         "listenbrainz" => (ScrobbleService::ListenBrainz, enabled),
         _ => {
             warnings.push(format!(
-                "scrobble.service '{}' is unknown, disabling scrobble",
+                "scrobble.service: '{}' is invalid, disabling scrobble",
                 raw
             ));
             (ScrobbleService::LastFm, false)
@@ -297,7 +297,10 @@ path = "keybindings.json"
 
         assert_eq!(result.config.audio.default_volume, 100);
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("clamped to 100"));
+        assert_eq!(
+            result.warnings[0],
+            "audio.default_volume: '150' is invalid, clamped to 100"
+        );
     }
 
     #[test]
@@ -307,7 +310,10 @@ path = "keybindings.json"
 
         assert_eq!(result.config.audio.default_volume, 0);
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("clamped to 0"));
+        assert_eq!(
+            result.warnings[0],
+            "audio.default_volume: '-5' is invalid, clamped to 0"
+        );
     }
 
     #[test]
@@ -317,7 +323,10 @@ path = "keybindings.json"
 
         assert_eq!(result.config.ui.theme, "Retrowave");
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("unknown"));
+        assert_eq!(
+            result.warnings[0],
+            "ui.theme: 'NonExistent' is invalid, using default 'Retrowave'"
+        );
     }
 
     #[test]
@@ -338,7 +347,10 @@ path = "keybindings.json"
 
         assert!(!result.config.scrobble.enabled);
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("unknown"));
+        assert_eq!(
+            result.warnings[0],
+            "scrobble.service: 'spotify' is invalid, disabling scrobble"
+        );
     }
 
     #[test]
@@ -389,6 +401,53 @@ foo = "bar"
         let err = result.unwrap_err();
         assert!(err.line.is_some());
         assert!(err.col.is_some());
+    }
+
+    #[test]
+    fn test_warning_format_volume_uses_dotted_path_pattern() {
+        let input = "[audio]\ndefault_volume = 200\n";
+        let result = parse_toml(input).unwrap();
+
+        let warning = &result.warnings[0];
+        // Format: "{field_path}: '{value}' is invalid, {action_taken}"
+        assert!(warning.starts_with("audio.default_volume: '"));
+        assert!(warning.contains("' is invalid, "));
+        assert!(warning.ends_with("clamped to 100"));
+    }
+
+    #[test]
+    fn test_warning_format_theme_uses_dotted_path_pattern() {
+        let input = "[ui]\ntheme = \"Bogus\"\n";
+        let result = parse_toml(input).unwrap();
+
+        let warning = &result.warnings[0];
+        // Format: "{field_path}: '{value}' is invalid, {action_taken}"
+        assert!(warning.starts_with("ui.theme: '"));
+        assert!(warning.contains("' is invalid, "));
+        assert!(warning.ends_with("using default 'Retrowave'"));
+    }
+
+    #[test]
+    fn test_warning_format_scrobble_service_uses_dotted_path_pattern() {
+        let input = "[scrobble]\nenabled = true\nservice = \"pandora\"\napi_key = \"k\"\n";
+        let result = parse_toml(input).unwrap();
+
+        let warning = &result.warnings[0];
+        // Format: "{field_path}: '{value}' is invalid, {action_taken}"
+        assert!(warning.starts_with("scrobble.service: '"));
+        assert!(warning.contains("' is invalid, "));
+        assert!(warning.ends_with("disabling scrobble"));
+    }
+
+    #[test]
+    fn test_warning_format_volume_negative_includes_value() {
+        let input = "[audio]\ndefault_volume = -999\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(
+            result.warnings[0],
+            "audio.default_volume: '-999' is invalid, clamped to 0"
+        );
     }
 }
 

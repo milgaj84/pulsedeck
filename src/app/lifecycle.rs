@@ -187,7 +187,9 @@ impl App {
             keybinding_registry,
             notification_cooldown: NotificationCooldown::new(),
             discover_results: Vec::new(),
+            discover_cursor: 0,
             scrobble_tracker: ScrobbleTracker::new(scrobble_enabled),
+            retry_drain_counter: 0,
             config,
             config_preserved,
             #[cfg(test)]

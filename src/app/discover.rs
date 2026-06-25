@@ -1,4 +1,5 @@
 use super::*;
+use crate::audio::AudioCommand;
 use crate::recommend::{build_favorites_profile, recommend};
 use std::collections::HashSet;
 
@@ -13,15 +14,58 @@ impl App {
         if profile.genres.is_empty() && profile.tags.is_empty() {
             self.set_info_notice("Discover: no genre or tag data in favorites");
             self.discover_results = Vec::new();
+            self.discover_cursor = 0;
             return;
         }
 
         let library_urls = self.library_url_set();
-        // Use library stations as candidates for now (real Radio Browser
-        // fetching is async and out of scope for this task).
         let results = recommend(&profile, &self.library.stations, &library_urls);
         self.discover_results = results;
+        self.discover_cursor = 0;
         self.set_info_notice("Discover: building recommendations...");
+    }
+
+    pub(super) fn discover_next(&mut self) {
+        if self.discover_results.is_empty() {
+            return;
+        }
+        let max = self.discover_results.len().saturating_sub(1);
+        self.discover_cursor = (self.discover_cursor + 1).min(max);
+    }
+
+    pub(super) fn discover_prev(&mut self) {
+        if self.discover_results.is_empty() {
+            return;
+        }
+        self.discover_cursor = self.discover_cursor.saturating_sub(1);
+    }
+
+    pub(super) fn discover_select(&mut self) {
+        if self.discover_results.is_empty() {
+            return;
+        }
+        let station = self.discover_results[self.discover_cursor].clone();
+        self.library.stations.push(station.clone());
+        self.library.rebuild_genres();
+        self.mark_library_dirty();
+
+        self.playback.reconnect.disarm();
+        self.playback.view.playing_url = Some(station.url.clone());
+        self.playback.view.state = PlaybackState::Connecting;
+        self.playback.elapsed_timer.reset();
+        self.playback.elapsed_timer.start();
+        self.library.settings.last_played_url = Some(station.url.clone());
+        if self.send_audio_command(AudioCommand::Play(station.url)) {
+            self.sync_volume();
+        }
+
+        self.discover_results.clear();
+        self.discover_cursor = 0;
+    }
+
+    pub(super) fn discover_dismiss(&mut self) {
+        self.discover_results.clear();
+        self.discover_cursor = 0;
     }
 
     fn library_url_set(&self) -> HashSet<String> {
@@ -58,6 +102,19 @@ mod tests {
 
     fn test_app_empty_library() -> App {
         App::new(Library::in_memory(vec![]))
+    }
+
+    fn test_app_with_discover_results() -> App {
+        let mut app = App::new(Library::in_memory(vec![
+            station("Existing", "http://existing", "Rock"),
+        ]));
+        app.discover_results = vec![
+            station("Disco A", "http://disco-a", "Disco"),
+            station("Disco B", "http://disco-b", "Disco"),
+            station("Disco C", "http://disco-c", "Disco"),
+        ];
+        app.discover_cursor = 0;
+        app
     }
 
     #[test]
@@ -101,9 +158,6 @@ mod tests {
 
         app.update(Action::Discover);
 
-        // With library URLs excluded, the only non-favorited Jazz station
-        // (http://rock) won't match jazz profile, so results may be empty
-        // because all library URLs are excluded. This validates the flow works.
         assert!(matches!(
             app.ui.notice.current,
             Some(AppNotice::Info(ref msg)) if msg.contains("building recommendations")
@@ -114,5 +168,128 @@ mod tests {
     fn discover_action_maps_from_palette_command() {
         use crate::app::command_palette::command_action;
         assert_eq!(command_action(PaletteCommand::Discover), Action::Discover);
+    }
+
+    // --- Discover cursor navigation tests ---
+
+    #[test]
+    fn discover_cursor_starts_at_zero() {
+        let app = test_app_with_discover_results();
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_next_increments_cursor() {
+        let mut app = test_app_with_discover_results();
+
+        app.update(Action::DiscoverNext);
+
+        assert_eq!(app.discover_cursor, 1);
+    }
+
+    #[test]
+    fn discover_next_clamps_at_end() {
+        let mut app = test_app_with_discover_results();
+        app.discover_cursor = 2; // last index
+
+        app.update(Action::DiscoverNext);
+
+        assert_eq!(app.discover_cursor, 2);
+    }
+
+    #[test]
+    fn discover_prev_decrements_cursor() {
+        let mut app = test_app_with_discover_results();
+        app.discover_cursor = 2;
+
+        app.update(Action::DiscoverPrev);
+
+        assert_eq!(app.discover_cursor, 1);
+    }
+
+    #[test]
+    fn discover_prev_clamps_at_zero() {
+        let mut app = test_app_with_discover_results();
+        app.discover_cursor = 0;
+
+        app.update(Action::DiscoverPrev);
+
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_select_adds_station_to_library_and_starts_playback() {
+        let mut app = test_app_with_discover_results();
+        app.discover_cursor = 1;
+
+        app.update(Action::DiscoverSelect);
+
+        assert!(app.library.contains("http://disco-b"));
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://disco-b")
+        );
+        assert!(app.discover_results.is_empty());
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_dismiss_clears_results_and_resets_cursor() {
+        let mut app = test_app_with_discover_results();
+        app.discover_cursor = 2;
+
+        app.update(Action::DiscoverDismiss);
+
+        assert!(app.discover_results.is_empty());
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_next_empty_results_is_noop() {
+        let mut app = test_app_empty_library();
+
+        app.update(Action::DiscoverNext);
+
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_prev_empty_results_is_noop() {
+        let mut app = test_app_empty_library();
+
+        app.update(Action::DiscoverPrev);
+
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_select_empty_results_is_noop() {
+        let mut app = test_app_empty_library();
+        let library_len = app.library.stations.len();
+
+        app.update(Action::DiscoverSelect);
+
+        assert_eq!(app.library.stations.len(), library_len);
+        assert_eq!(app.playback.view.playing_url, None);
+    }
+
+    #[test]
+    fn discover_dismiss_empty_results_is_noop() {
+        let mut app = test_app_empty_library();
+
+        app.update(Action::DiscoverDismiss);
+
+        assert!(app.discover_results.is_empty());
+        assert_eq!(app.discover_cursor, 0);
+    }
+
+    #[test]
+    fn discover_resets_cursor_on_new_results() {
+        let mut app = test_app_with_favorites();
+        app.discover_cursor = 5;
+
+        app.update(Action::Discover);
+
+        assert_eq!(app.discover_cursor, 0);
     }
 }

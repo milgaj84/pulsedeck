@@ -79,6 +79,10 @@ pub enum Action {
 
     /// Discovery
     Discover,
+    DiscoverNext,
+    DiscoverPrev,
+    DiscoverSelect,
+    DiscoverDismiss,
 
     /// App lifecycle
     Tick,
