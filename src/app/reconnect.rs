@@ -1,24 +1,33 @@
 use crate::app::PlaybackState;
 use std::time::{Duration, Instant};
 
-const MAX_ATTEMPTS: u8 = 3;
-const BACKOFFS: [u64; 3] = [3, 6, 12]; // seconds
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Reconnect {
     attempts: u8,
+    max_attempts: u8,
+    backoff_seconds: Vec<u64>,
     next_attempt_at: Option<Instant>,
     armed_url: Option<String>,
 }
 
 impl Reconnect {
+    pub fn new(max_attempts: u8, backoff_seconds: Vec<u64>) -> Self {
+        Self {
+            attempts: 0,
+            max_attempts,
+            backoff_seconds,
+            next_attempt_at: None,
+            armed_url: None,
+        }
+    }
+
     pub fn arm(&mut self, url: String, now: Instant) {
-        // Keep counting across consecutive failures of the same url.
         if self.armed_url.as_deref() != Some(url.as_str()) {
             self.attempts = 0;
         }
         self.armed_url = Some(url);
-        let backoff = BACKOFFS[(self.attempts as usize).min(BACKOFFS.len() - 1)];
+        let index = (self.attempts as usize).min(self.backoff_seconds.len() - 1);
+        let backoff = self.backoff_seconds[index];
         self.next_attempt_at = Some(now + Duration::from_secs(backoff));
     }
 
@@ -31,7 +40,7 @@ impl Reconnect {
     /// Returns the url to retry when it is time and attempts remain.
     pub fn take_due(&mut self, now: Instant) -> Option<String> {
         let due = self.next_attempt_at.is_some_and(|t| now >= t);
-        if due && self.attempts < MAX_ATTEMPTS {
+        if due && self.attempts < self.max_attempts {
             self.attempts += 1;
             self.next_attempt_at = None;
             self.armed_url.clone()
@@ -41,7 +50,7 @@ impl Reconnect {
     }
 
     pub fn exhausted(&self) -> bool {
-        self.attempts >= MAX_ATTEMPTS
+        self.attempts >= self.max_attempts
     }
 
     pub fn attempt(&self) -> u8 {
@@ -49,7 +58,13 @@ impl Reconnect {
     }
 
     pub fn max(&self) -> u8 {
-        MAX_ATTEMPTS
+        self.max_attempts
+    }
+}
+
+impl Default for Reconnect {
+    fn default() -> Self {
+        Self::new(3, vec![3, 6, 12])
     }
 }
 
@@ -233,6 +248,82 @@ mod tests {
         assert_eq!(rec.take_due(t4), Some(url_b));
     }
 
+    #[test]
+    fn test_custom_max_attempts_respected() {
+        let mut rec = Reconnect::new(5, vec![1, 2, 4]);
+        let now = Instant::now();
+        let url = "http://custom".to_string();
+
+        assert_eq!(rec.max(), 5);
+
+        let mut t = now;
+        for i in 0..5 {
+            rec.arm(url.clone(), t);
+            let backoff = [1, 2, 4][i.min(2)];
+            t = t + Duration::from_secs(backoff);
+            assert_eq!(rec.take_due(t), Some(url.clone()));
+        }
+        assert!(rec.exhausted());
+        assert_eq!(rec.attempts, 5);
+    }
+
+    #[test]
+    fn test_custom_backoff_list_used() {
+        let mut rec = Reconnect::new(3, vec![1, 2, 4]);
+        let now = Instant::now();
+        let url = "http://backoff-test".to_string();
+
+        // Attempt 0 → backoff 1s
+        rec.arm(url.clone(), now);
+        assert!(rec.take_due(now + Duration::from_secs(1)).is_some());
+
+        // Attempt 1 → backoff 2s
+        let t1 = now + Duration::from_secs(1);
+        rec.arm(url.clone(), t1);
+        assert!(rec.take_due(t1 + Duration::from_secs(2)).is_some());
+
+        // Attempt 2 → backoff 4s
+        let t2 = t1 + Duration::from_secs(2);
+        rec.arm(url.clone(), t2);
+        assert!(rec.take_due(t2 + Duration::from_secs(4)).is_some());
+        assert!(rec.exhausted());
+    }
+
+    #[test]
+    fn test_backoff_last_element_repeats_for_overflow() {
+        let mut rec = Reconnect::new(5, vec![2, 5]);
+        let now = Instant::now();
+        let url = "http://overflow".to_string();
+
+        // Attempt 0 → backoff[0] = 2s
+        rec.arm(url.clone(), now);
+        let t1 = now + Duration::from_secs(2);
+        assert_eq!(rec.take_due(t1), Some(url.clone()));
+
+        // Attempt 1 → backoff[1] = 5s
+        rec.arm(url.clone(), t1);
+        let t2 = t1 + Duration::from_secs(5);
+        assert_eq!(rec.take_due(t2), Some(url.clone()));
+
+        // Attempt 2 → backoff[min(2, 1)] = backoff[1] = 5s (last repeats)
+        rec.arm(url.clone(), t2);
+        let t3 = t2 + Duration::from_secs(5);
+        assert_eq!(rec.take_due(t3), Some(url.clone()));
+
+        // Attempt 3 → also 5s (still overflow)
+        rec.arm(url.clone(), t3);
+        let t4 = t3 + Duration::from_secs(5);
+        assert_eq!(rec.take_due(t4), Some(url.clone()));
+
+        // Attempt 4 → also 5s
+        rec.arm(url.clone(), t4);
+        let t5 = t4 + Duration::from_secs(5);
+        assert_eq!(rec.take_due(t5), Some(url.clone()));
+
+        assert!(rec.exhausted());
+        assert_eq!(rec.attempts, 5);
+    }
+
     /// **Validates: Requirements 3.1, 3.2**
     #[test]
     fn test_drive_reconnect_resets_elapsed_timer() {
@@ -302,5 +393,61 @@ mod tests {
             !app.playback.elapsed_timer.is_running(),
             "elapsed_timer should not be running after drive_reconnect fires"
         );
+    }
+}
+
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: v090-features, Property 3: Backoff index selection
+        /// For any valid backoff list of length L and any attempt index I (zero-based),
+        /// the selected backoff duration SHALL equal `backoff_seconds[min(I, L-1)]`.
+        ///
+        /// **Validates: Requirements 1.7**
+        #[test]
+        fn backoff_index_selection(
+            backoff_list in proptest::collection::vec(1u64..=60, 1..=10),
+            attempt_index in 0u8..=20,
+        ) {
+            let max_attempts = 21u8; // high max so we don't exhaust
+            let mut rec = Reconnect::new(max_attempts, backoff_list.clone());
+            let url = "http://test".to_string();
+            let mut now = Instant::now();
+
+            for i in 0..=attempt_index {
+                rec.arm(url.clone(), now);
+
+                let expected_backoff = backoff_list[((i as usize)).min(backoff_list.len() - 1)];
+                let expected_delay = Duration::from_secs(expected_backoff);
+
+                // 1 nanosecond before expected delay → not due yet
+                let before = now + expected_delay - Duration::from_nanos(1);
+                prop_assert_eq!(
+                    rec.take_due(before),
+                    None,
+                    "attempt {} should NOT be due 1ns before expected backoff of {}s",
+                    i,
+                    expected_backoff,
+                );
+
+                // At exactly the expected delay → due
+                let at_deadline = now + expected_delay;
+                prop_assert_eq!(
+                    rec.take_due(at_deadline),
+                    Some(url.clone()),
+                    "attempt {} should be due at expected backoff of {}s",
+                    i,
+                    expected_backoff,
+                );
+
+                now = at_deadline;
+            }
+        }
     }
 }

@@ -33,6 +33,7 @@ use crate::keybindings::KeybindingRegistry;
 use crate::number_jump::NumberJump;
 use crate::radio::Station;
 use crate::recommend::ScoredStation;
+use crate::search_history::SearchHistoryRing;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -106,6 +107,9 @@ pub struct App {
 
     /// Watches config file mtime for hot-reload on tick.
     pub config_watcher: ConfigWatcher,
+
+    /// Search history ring for query recall via Up/Down arrows.
+    pub search_history: SearchHistoryRing,
 
     /// Test-only counter for how many notifications were dispatched.
     #[cfg(test)]

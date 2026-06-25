@@ -4,6 +4,26 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.9.0] - Unreleased
+
+### Added
+- **Configurable reconnect strategy**: Expose `reconnect_max_attempts` (1–10, default 3) and `reconnect_backoff_seconds` (list of 1–60s durations, default [3, 6, 12]) in `[playback]` TOML section. Power users on flaky connections can bump attempts; those on reliable networks can tighten timing.
+- **Smarter hardware recovery**: `device_recovery_attempts` (1–5, default 2) and `device_recovery_delay_ms` (100–5000, default 1000) in `[playback]`. The audio engine now retries output device reopens multiple times with a configurable delay — handles Bluetooth/headset disconnects gracefully.
+- **Prebuffer progress in mini mode**: Mini mode now shows buffering percentage (e.g., `◌42%`) during stream connection instead of just the connecting indicator. Disappears once playback starts.
+- **Search history ring**: Last 10 unique search queries are saved and recallable with Up/Down arrows when the search input is empty. Persists across sessions in `search_history.json`.
+- **Discover scoring weight configurability**: `genre_weight` (0–10, default 3), `tag_weight` (0–10, default 1), and `country_weight` (0–10, default 1) in a new `[discover]` TOML section. Tune recommendation ranking to your preferences.
+- **Discover exclusion list**: `exclude_tags` and `exclude_countries` in `[discover]` let you permanently filter unwanted stations from recommendations without UI changes.
+
+### Internal
+- 1215 tests pass, zero clippy warnings.
+- 17 new property-based tests covering config clamping invariants, normalization, round-trips, scoring formula correctness, exclusion filtering, ring capacity/uniqueness, and cycling correctness.
+- New types: `DiscoverConfig`, `ScoringWeights`, `SearchHistoryRing`, `DeviceRecoveryConfig`.
+- New TOML sections: `[discover]` with weights and exclusion lists.
+- Reconnect module refactored from hardcoded constants to configurable struct fields.
+- Property tests caught and fixed a bug in search history Up-arrow cycling.
+
+---
+
 ## [0.8.3] - Unreleased
 
 ### Added

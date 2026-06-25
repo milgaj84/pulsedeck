@@ -24,6 +24,8 @@ pub enum Action {
     SearchBackspace,
     SearchConfirm,
     SearchAudition,
+    SearchHistoryUp,
+    SearchHistoryDown,
 
     /// Command palette
     OpenCommandPalette,

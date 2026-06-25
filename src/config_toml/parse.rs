@@ -2,7 +2,7 @@
 
 use crate::theme_name::ThemeName;
 
-use super::{AppConfig, AudioConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
+use super::{AppConfig, AudioConfig, DiscoverConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
 
 /// Error wrapper for TOML parse failures.
 #[derive(Debug)]
@@ -51,14 +51,17 @@ pub fn parse_toml(input: &str) -> Result<ParseResult, ParseError> {
 
     let audio = parse_audio_section(&table, &mut warnings);
     let ui = parse_ui_section(&table, &mut warnings);
-    let playback = parse_playback_section(&table);
+    let playback = parse_playback_section(&table, &mut warnings);
     let keybindings = parse_keybindings_section(&table);
+
+    let discover = parse_discover_section(&table, &mut warnings);
 
     let config = AppConfig {
         audio,
         ui,
         playback,
         keybindings,
+        discover,
     };
 
     Ok(ParseResult {
@@ -157,7 +160,10 @@ fn validate_theme(raw: &str, warnings: &mut Vec<String>) -> String {
     }
 }
 
-fn parse_playback_section(table: &toml::map::Map<String, toml::Value>) -> PlaybackConfig {
+fn parse_playback_section(
+    table: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> PlaybackConfig {
     let section = table.get("playback").and_then(|v| v.as_table());
     let Some(sec) = section else {
         return PlaybackConfig::default();
@@ -172,9 +178,107 @@ fn parse_playback_section(table: &toml::map::Map<String, toml::Value>) -> Playba
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    let reconnect_max_attempts = parse_reconnect_max_attempts(sec, warnings);
+    let reconnect_backoff_seconds = parse_reconnect_backoff_seconds(sec, warnings);
+    let device_recovery_attempts = parse_device_recovery_attempts(sec, warnings);
+    let device_recovery_delay_ms = parse_device_recovery_delay_ms(sec, warnings);
+
     PlaybackConfig {
         autoplay_last,
         save_history,
+        reconnect_max_attempts,
+        reconnect_backoff_seconds,
+        device_recovery_attempts,
+        device_recovery_delay_ms,
+    }
+}
+
+fn parse_reconnect_max_attempts(
+    sec: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> u8 {
+    sec.get("reconnect_max_attempts")
+        .and_then(|v| v.as_integer())
+        .map(|v| clamp_i64(v, 1, 10, "playback.reconnect_max_attempts", warnings) as u8)
+        .unwrap_or(3)
+}
+
+fn parse_reconnect_backoff_seconds(
+    sec: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> Vec<u64> {
+    let default = vec![3, 6, 12];
+    let Some(val) = sec.get("reconnect_backoff_seconds") else {
+        return default;
+    };
+    let Some(arr) = val.as_array() else {
+        return default;
+    };
+
+    if arr.is_empty() {
+        warnings.push(
+            "playback.reconnect_backoff_seconds: '[]' is invalid, using default [3, 6, 12]"
+                .to_string(),
+        );
+        return default;
+    }
+
+    let mut result: Vec<u64> = arr
+        .iter()
+        .filter_map(|v| v.as_integer())
+        .map(|v| clamp_i64(v, 1, 60, "playback.reconnect_backoff_seconds element", warnings) as u64)
+        .collect();
+
+    if result.is_empty() {
+        return default;
+    }
+
+    if result.len() > 10 {
+        warnings.push(format!(
+            "playback.reconnect_backoff_seconds: '{}' entries is invalid, truncated to 10",
+            result.len()
+        ));
+        result.truncate(10);
+    }
+
+    result
+}
+
+fn parse_device_recovery_attempts(
+    sec: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> u8 {
+    sec.get("device_recovery_attempts")
+        .and_then(|v| v.as_integer())
+        .map(|v| clamp_i64(v, 1, 5, "playback.device_recovery_attempts", warnings) as u8)
+        .unwrap_or(2)
+}
+
+fn parse_device_recovery_delay_ms(
+    sec: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> u64 {
+    sec.get("device_recovery_delay_ms")
+        .and_then(|v| v.as_integer())
+        .map(|v| clamp_i64(v, 100, 5000, "playback.device_recovery_delay_ms", warnings) as u64)
+        .unwrap_or(1000)
+}
+
+fn clamp_i64(raw: i64, min: i64, max: i64, field: &str, warnings: &mut Vec<String>) -> i64 {
+    if raw < min {
+        warnings.push(format!(
+            "{}: '{}' is invalid, clamped to {}",
+            field, raw, min
+        ));
+        min
+    } else if raw > max {
+        warnings.push(format!(
+            "{}: '{}' is invalid, clamped to {}",
+            field, raw, max
+        ));
+        max
+    } else {
+        raw
     }
 }
 
@@ -190,6 +294,116 @@ fn parse_keybindings_section(table: &toml::map::Map<String, toml::Value>) -> Key
         .map(|s| s.to_string());
 
     KeybindingsConfig { path }
+}
+
+pub fn parse_discover_section(
+    table: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> DiscoverConfig {
+    let section = table.get("discover").and_then(|v| v.as_table());
+    let Some(sec) = section else {
+        return DiscoverConfig::default();
+    };
+
+    let genre_weight = parse_weight(sec, "genre_weight", 3, warnings);
+    let tag_weight = parse_weight(sec, "tag_weight", 1, warnings);
+    let country_weight = parse_weight(sec, "country_weight", 1, warnings);
+    let exclude_tags = parse_string_list(sec, "exclude_tags", Normalization::Lower, 100, warnings);
+    let exclude_countries =
+        parse_string_list(sec, "exclude_countries", Normalization::Upper, 10, warnings);
+
+    DiscoverConfig {
+        genre_weight,
+        tag_weight,
+        country_weight,
+        exclude_tags,
+        exclude_countries,
+    }
+}
+
+fn parse_weight(
+    sec: &toml::map::Map<String, toml::Value>,
+    field: &str,
+    default: u32,
+    warnings: &mut Vec<String>,
+) -> u32 {
+    let Some(raw) = sec.get(field).and_then(|v| v.as_integer()) else {
+        return default;
+    };
+    clamp_weight(raw, field, warnings)
+}
+
+fn clamp_weight(raw: i64, field: &str, warnings: &mut Vec<String>) -> u32 {
+    if raw < 0 {
+        warnings.push(format!(
+            "discover.{}: '{}' is invalid, clamped to 0",
+            field, raw
+        ));
+        0
+    } else if raw > 10 {
+        warnings.push(format!(
+            "discover.{}: '{}' is invalid, clamped to 10",
+            field, raw
+        ));
+        10
+    } else {
+        raw as u32
+    }
+}
+
+enum Normalization {
+    Lower,
+    Upper,
+}
+
+fn parse_string_list(
+    sec: &toml::map::Map<String, toml::Value>,
+    field: &str,
+    normalization: Normalization,
+    max_entry_chars: usize,
+    warnings: &mut Vec<String>,
+) -> Vec<String> {
+    let Some(arr) = sec.get(field).and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut result: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(|s| normalize_entry(s, &normalization, max_entry_chars))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if result.len() > 50 {
+        warnings.push(format!(
+            "discover.{}: list exceeds 50 entries, truncated",
+            field
+        ));
+        result.truncate(50);
+    }
+
+    result
+}
+
+fn normalize_entry(raw: &str, normalization: &Normalization, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let normalized = match normalization {
+        Normalization::Lower => trimmed.to_lowercase(),
+        Normalization::Upper => trimmed.to_uppercase(),
+    };
+    let truncated = if normalized.len() > max_chars {
+        normalized[..max_chars].trim_end().to_string()
+    } else {
+        normalized
+    };
+    if truncated.is_empty() {
+        String::new()
+    } else {
+        truncated
+    }
 }
 
 fn line_col_from_offset(input: &str, offset: usize) -> (Option<usize>, Option<usize>) {
@@ -399,6 +613,455 @@ foo = "bar"
             result.warnings[0],
             "audio.default_volume: '-999' is invalid, clamped to 0"
         );
+    }
+
+    // --- Playback section: reconnect_max_attempts ---
+
+    #[test]
+    fn test_reconnect_max_attempts_valid_value_parsed() {
+        let input = "[playback]\nreconnect_max_attempts = 7\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_max_attempts, 7);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_reconnect_max_attempts_below_range_clamped() {
+        let input = "[playback]\nreconnect_max_attempts = 0\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_max_attempts, 1);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.reconnect_max_attempts: '0' is invalid, clamped to 1"
+        );
+    }
+
+    #[test]
+    fn test_reconnect_max_attempts_above_range_clamped() {
+        let input = "[playback]\nreconnect_max_attempts = 99\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_max_attempts, 10);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.reconnect_max_attempts: '99' is invalid, clamped to 10"
+        );
+    }
+
+    #[test]
+    fn test_reconnect_max_attempts_missing_uses_default() {
+        let input = "[playback]\nautoplay_last = true\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_max_attempts, 3);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_reconnect_max_attempts_wrong_type_uses_default() {
+        let input = "[playback]\nreconnect_max_attempts = \"hello\"\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_max_attempts, 3);
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- Playback section: reconnect_backoff_seconds ---
+
+    #[test]
+    fn test_reconnect_backoff_seconds_valid_values_parsed() {
+        let input = "[playback]\nreconnect_backoff_seconds = [2, 5, 10, 30]\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![2, 5, 10, 30]);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_reconnect_backoff_seconds_elements_clamped() {
+        let input = "[playback]\nreconnect_backoff_seconds = [0, 5, 100]\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![1, 5, 60]);
+        assert_eq!(result.warnings.len(), 2);
+        assert!(result.warnings[0].contains("clamped to 1"));
+        assert!(result.warnings[1].contains("clamped to 60"));
+    }
+
+    #[test]
+    fn test_reconnect_backoff_seconds_empty_list_uses_default() {
+        let input = "[playback]\nreconnect_backoff_seconds = []\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("using default [3, 6, 12]"));
+    }
+
+    #[test]
+    fn test_reconnect_backoff_seconds_oversized_list_truncated() {
+        let input = "[playback]\nreconnect_backoff_seconds = [1,2,3,4,5,6,7,8,9,10,11,12]\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds.len(), 10);
+        assert_eq!(
+            result.config.playback.reconnect_backoff_seconds,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        );
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("truncated to 10"));
+    }
+
+    #[test]
+    fn test_reconnect_backoff_seconds_missing_uses_default() {
+        let input = "[playback]\nautoplay_last = true\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_reconnect_backoff_seconds_wrong_type_uses_default() {
+        let input = "[playback]\nreconnect_backoff_seconds = \"not an array\"\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- Playback section: device_recovery_attempts ---
+
+    #[test]
+    fn test_device_recovery_attempts_valid_value_parsed() {
+        let input = "[playback]\ndevice_recovery_attempts = 4\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_attempts, 4);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_device_recovery_attempts_below_range_clamped() {
+        let input = "[playback]\ndevice_recovery_attempts = 0\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_attempts, 1);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.device_recovery_attempts: '0' is invalid, clamped to 1"
+        );
+    }
+
+    #[test]
+    fn test_device_recovery_attempts_above_range_clamped() {
+        let input = "[playback]\ndevice_recovery_attempts = 20\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_attempts, 5);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.device_recovery_attempts: '20' is invalid, clamped to 5"
+        );
+    }
+
+    #[test]
+    fn test_device_recovery_attempts_missing_uses_default() {
+        let input = "[playback]\nautoplay_last = true\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_attempts, 2);
+    }
+
+    #[test]
+    fn test_device_recovery_attempts_wrong_type_uses_default() {
+        let input = "[playback]\ndevice_recovery_attempts = \"bad\"\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_attempts, 2);
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- Playback section: device_recovery_delay_ms ---
+
+    #[test]
+    fn test_device_recovery_delay_ms_valid_value_parsed() {
+        let input = "[playback]\ndevice_recovery_delay_ms = 2500\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_delay_ms, 2500);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_device_recovery_delay_ms_below_range_clamped() {
+        let input = "[playback]\ndevice_recovery_delay_ms = 10\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_delay_ms, 100);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.device_recovery_delay_ms: '10' is invalid, clamped to 100"
+        );
+    }
+
+    #[test]
+    fn test_device_recovery_delay_ms_above_range_clamped() {
+        let input = "[playback]\ndevice_recovery_delay_ms = 99999\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_delay_ms, 5000);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "playback.device_recovery_delay_ms: '99999' is invalid, clamped to 5000"
+        );
+    }
+
+    #[test]
+    fn test_device_recovery_delay_ms_missing_uses_default() {
+        let input = "[playback]\nautoplay_last = true\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_delay_ms, 1000);
+    }
+
+    #[test]
+    fn test_device_recovery_delay_ms_wrong_type_uses_default() {
+        let input = "[playback]\ndevice_recovery_delay_ms = true\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.playback.device_recovery_delay_ms, 1000);
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- Playback section: all new fields together ---
+
+    #[test]
+    fn test_playback_all_new_fields_valid() {
+        let input = r#"
+[playback]
+autoplay_last = true
+save_history = true
+reconnect_max_attempts = 5
+reconnect_backoff_seconds = [1, 3, 7]
+device_recovery_attempts = 3
+device_recovery_delay_ms = 500
+"#;
+        let result = parse_toml(input).unwrap();
+        let pb = &result.config.playback;
+
+        assert!(pb.autoplay_last);
+        assert!(pb.save_history);
+        assert_eq!(pb.reconnect_max_attempts, 5);
+        assert_eq!(pb.reconnect_backoff_seconds, vec![1, 3, 7]);
+        assert_eq!(pb.device_recovery_attempts, 3);
+        assert_eq!(pb.device_recovery_delay_ms, 500);
+        assert!(result.warnings.is_empty());
+    }
+
+    // --- Discover section tests ---
+
+    #[test]
+    fn test_parse_discover_valid_config() {
+        let input = r#"
+[discover]
+genre_weight = 5
+tag_weight = 2
+country_weight = 4
+exclude_tags = ["jazz", "blues"]
+exclude_countries = ["US", "GB"]
+"#;
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.genre_weight, 5);
+        assert_eq!(result.config.discover.tag_weight, 2);
+        assert_eq!(result.config.discover.country_weight, 4);
+        assert_eq!(result.config.discover.exclude_tags, vec!["jazz", "blues"]);
+        assert_eq!(result.config.discover.exclude_countries, vec!["US", "GB"]);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_discover_weights_clamped_above() {
+        let input = "[discover]\ngenre_weight = 15\ntag_weight = 20\ncountry_weight = 99\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.genre_weight, 10);
+        assert_eq!(result.config.discover.tag_weight, 10);
+        assert_eq!(result.config.discover.country_weight, 10);
+        assert_eq!(result.warnings.len(), 3);
+        assert_eq!(
+            result.warnings[0],
+            "discover.genre_weight: '15' is invalid, clamped to 10"
+        );
+        assert_eq!(
+            result.warnings[1],
+            "discover.tag_weight: '20' is invalid, clamped to 10"
+        );
+        assert_eq!(
+            result.warnings[2],
+            "discover.country_weight: '99' is invalid, clamped to 10"
+        );
+    }
+
+    #[test]
+    fn test_parse_discover_weights_clamped_below() {
+        let input = "[discover]\ngenre_weight = -3\ntag_weight = -1\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.genre_weight, 0);
+        assert_eq!(result.config.discover.tag_weight, 0);
+        assert_eq!(result.config.discover.country_weight, 1); // default
+        assert_eq!(result.warnings.len(), 2);
+        assert_eq!(
+            result.warnings[0],
+            "discover.genre_weight: '-3' is invalid, clamped to 0"
+        );
+        assert_eq!(
+            result.warnings[1],
+            "discover.tag_weight: '-1' is invalid, clamped to 0"
+        );
+    }
+
+    #[test]
+    fn test_parse_discover_missing_section_returns_defaults() {
+        let input = "[audio]\ndefault_volume = 50\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover, DiscoverConfig::default());
+    }
+
+    #[test]
+    fn test_parse_discover_missing_fields_returns_defaults() {
+        let input = "[discover]\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.genre_weight, 3);
+        assert_eq!(result.config.discover.tag_weight, 1);
+        assert_eq!(result.config.discover.country_weight, 1);
+        assert!(result.config.discover.exclude_tags.is_empty());
+        assert!(result.config.discover.exclude_countries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_discover_tags_trimmed_and_lowercased() {
+        let input = r#"
+[discover]
+exclude_tags = ["  Jazz  ", "BLUES", " Rock "]
+"#;
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(
+            result.config.discover.exclude_tags,
+            vec!["jazz", "blues", "rock"]
+        );
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_discover_tags_discard_empty_and_whitespace() {
+        let input = r#"
+[discover]
+exclude_tags = ["jazz", "", "  ", "blues"]
+"#;
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.exclude_tags, vec!["jazz", "blues"]);
+    }
+
+    #[test]
+    fn test_parse_discover_countries_trimmed_and_uppercased() {
+        let input = r#"
+[discover]
+exclude_countries = ["  us  ", "gb", " De "]
+"#;
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(
+            result.config.discover.exclude_countries,
+            vec!["US", "GB", "DE"]
+        );
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_discover_countries_discard_empty_and_whitespace() {
+        let input = r#"
+[discover]
+exclude_countries = ["US", "", "  ", "GB"]
+"#;
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(
+            result.config.discover.exclude_countries,
+            vec!["US", "GB"]
+        );
+    }
+
+    #[test]
+    fn test_parse_discover_tags_truncated_at_50_entries() {
+        let tags: Vec<String> = (0..60).map(|i| format!("\"tag{}\"", i)).collect();
+        let input = format!("[discover]\nexclude_tags = [{}]\n", tags.join(", "));
+        let result = parse_toml(&input).unwrap();
+
+        assert_eq!(result.config.discover.exclude_tags.len(), 50);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "discover.exclude_tags: list exceeds 50 entries, truncated"
+        );
+    }
+
+    #[test]
+    fn test_parse_discover_countries_truncated_at_50_entries() {
+        let countries: Vec<String> = (0..55).map(|i| format!("\"C{}\"", i)).collect();
+        let input = format!(
+            "[discover]\nexclude_countries = [{}]\n",
+            countries.join(", ")
+        );
+        let result = parse_toml(&input).unwrap();
+
+        assert_eq!(result.config.discover.exclude_countries.len(), 50);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "discover.exclude_countries: list exceeds 50 entries, truncated"
+        );
+    }
+
+    #[test]
+    fn test_parse_discover_wrong_type_weight_uses_default() {
+        let input = "[discover]\ngenre_weight = \"hello\"\n";
+        let result = parse_toml(input).unwrap();
+
+        assert_eq!(result.config.discover.genre_weight, 3); // default
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_discover_tag_max_100_chars_truncated() {
+        let long_tag = "a".repeat(150);
+        let input = format!("[discover]\nexclude_tags = [\"{}\"]\n", long_tag);
+        let result = parse_toml(&input).unwrap();
+
+        assert_eq!(result.config.discover.exclude_tags[0].len(), 100);
+    }
+
+    #[test]
+    fn test_parse_discover_country_max_10_chars_truncated() {
+        let long_country = "A".repeat(15);
+        let input = format!("[discover]\nexclude_countries = [\"{}\"]\n", long_country);
+        let result = parse_toml(&input).unwrap();
+
+        assert_eq!(result.config.discover.exclude_countries[0].len(), 10);
     }
 }
 
@@ -659,6 +1322,200 @@ mod property_tests {
                 prop_assert_eq!(&result.config.keybindings.path, &kb_path);
             } else {
                 prop_assert_eq!(result.config.keybindings.path, defaults.keybindings.path);
+            }
+        }
+    }
+
+    // Feature: v090-features, Property 1: Reconnect max_attempts clamping invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 1.2, 1.8**
+        #[test]
+        fn prop_reconnect_max_attempts_clamping(value in proptest::num::i64::ANY) {
+            let input = format!("[playback]\nreconnect_max_attempts = {}\n", value);
+            let result = parse_toml(&input).unwrap();
+            let attempts = result.config.playback.reconnect_max_attempts;
+
+            // Must always be in [1, 10]
+            prop_assert!(attempts >= 1 && attempts <= 10,
+                "reconnect_max_attempts {} out of [1, 10] for input {}", attempts, value);
+
+            // Verify exact clamping behavior
+            if value < 1 {
+                prop_assert_eq!(attempts, 1, "input {} below 1 should clamp to 1", value);
+            } else if value > 10 {
+                prop_assert_eq!(attempts, 10, "input {} above 10 should clamp to 10", value);
+            } else {
+                prop_assert_eq!(attempts, value as u8, "input {} in range should be preserved", value);
+            }
+        }
+    }
+
+    // Feature: v090-features, Property 2: Reconnect backoff_seconds list clamping invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 1.3, 1.9, 1.10**
+        #[test]
+        fn prop_reconnect_backoff_seconds_clamping(
+            values in proptest::collection::vec(proptest::num::i64::ANY, 0..=15)
+        ) {
+            let arr_str = values.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let input = format!("[playback]\nreconnect_backoff_seconds = [{}]\n", arr_str);
+            let result = parse_toml(&input).unwrap();
+            let backoff = &result.config.playback.reconnect_backoff_seconds;
+
+            // If input was empty, result should be the default [3, 6, 12]
+            if values.is_empty() {
+                prop_assert_eq!(backoff, &vec![3u64, 6, 12],
+                    "empty input should produce default [3, 6, 12]");
+            } else {
+                // Result list length must be in [1, 10]
+                prop_assert!(backoff.len() >= 1 && backoff.len() <= 10,
+                    "backoff list length {} out of [1, 10]", backoff.len());
+
+                // Each element must be in [1, 60]
+                for &elem in backoff.iter() {
+                    prop_assert!(elem >= 1 && elem <= 60,
+                        "backoff element {} out of [1, 60]", elem);
+                }
+            }
+        }
+    }
+
+    // Feature: v090-features, Property 4: Device recovery attempts clamping invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 2.2**
+        #[test]
+        fn prop_device_recovery_attempts_clamping(value in proptest::num::i64::ANY) {
+            let input = format!("[playback]\ndevice_recovery_attempts = {}\n", value);
+            let result = parse_toml(&input).unwrap();
+            let attempts = result.config.playback.device_recovery_attempts;
+
+            // Must always be in [1, 5]
+            prop_assert!(attempts >= 1 && attempts <= 5,
+                "device_recovery_attempts {} out of [1, 5] for input {}", attempts, value);
+        }
+    }
+
+    // Feature: v090-features, Property 5: Device recovery delay clamping invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 2.3**
+        #[test]
+        fn prop_device_recovery_delay_ms_clamping(value in proptest::num::i64::ANY) {
+            let input = format!("[playback]\ndevice_recovery_delay_ms = {}\n", value);
+            let result = parse_toml(&input).unwrap();
+            let delay = result.config.playback.device_recovery_delay_ms;
+
+            // Must always be in [100, 5000]
+            prop_assert!(delay >= 100 && delay <= 5000,
+                "device_recovery_delay_ms {} out of [100, 5000] for input {}", delay, value);
+        }
+    }
+
+    // Feature: v090-features, Property 12: Discover weight clamping invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 5.2**
+        #[test]
+        fn prop_discover_weight_clamping(
+            genre in proptest::num::i64::ANY,
+            tag in proptest::num::i64::ANY,
+            country in proptest::num::i64::ANY,
+        ) {
+            let input = format!(
+                "[discover]\ngenre_weight = {}\ntag_weight = {}\ncountry_weight = {}\n",
+                genre, tag, country
+            );
+            let result = parse_toml(&input).unwrap();
+
+            // Each weight must be in [0, 10]
+            prop_assert!(result.config.discover.genre_weight <= 10,
+                "genre_weight {} out of [0, 10] for input {}", result.config.discover.genre_weight, genre);
+            prop_assert!(result.config.discover.tag_weight <= 10,
+                "tag_weight {} out of [0, 10] for input {}", result.config.discover.tag_weight, tag);
+            prop_assert!(result.config.discover.country_weight <= 10,
+                "country_weight {} out of [0, 10] for input {}", result.config.discover.country_weight, country);
+        }
+    }
+
+    /// Generate a random string for exclude_tags entries (mixed case, whitespace, up to 120 chars).
+    fn arb_tag_entry() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9 \t]{0,120}"
+    }
+
+    /// Generate a random string for exclude_countries entries (mixed case, whitespace, up to 15 chars).
+    fn arb_country_entry() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9 ]{0,15}"
+    }
+
+    // Feature: v090-features, Property 15: Exclude_tags normalization invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 6.2**
+        #[test]
+        fn prop_exclude_tags_normalization(
+            entries in proptest::collection::vec(arb_tag_entry(), 0..=10)
+        ) {
+            let escaped: Vec<String> = entries.iter()
+                .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+                .collect();
+            let input = format!("[discover]\nexclude_tags = [{}]\n", escaped.join(", "));
+            let result = parse_toml(&input).unwrap();
+
+            for tag in &result.config.discover.exclude_tags {
+                // Non-empty
+                prop_assert!(!tag.is_empty(), "exclude_tags entry must be non-empty");
+                // Trimmed (no leading/trailing whitespace)
+                prop_assert_eq!(tag, &tag.trim().to_string(),
+                    "exclude_tags entry '{}' must be trimmed", tag);
+                // Lowercased
+                prop_assert_eq!(tag, &tag.to_lowercase(),
+                    "exclude_tags entry '{}' must be lowercased", tag);
+                // At most 100 characters
+                prop_assert!(tag.len() <= 100,
+                    "exclude_tags entry length {} exceeds 100", tag.len());
+            }
+        }
+    }
+
+    // Feature: v090-features, Property 16: Exclude_countries normalization invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 6.3**
+        #[test]
+        fn prop_exclude_countries_normalization(
+            entries in proptest::collection::vec(arb_country_entry(), 0..=10)
+        ) {
+            let escaped: Vec<String> = entries.iter()
+                .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+                .collect();
+            let input = format!("[discover]\nexclude_countries = [{}]\n", escaped.join(", "));
+            let result = parse_toml(&input).unwrap();
+
+            for country in &result.config.discover.exclude_countries {
+                // Non-empty
+                prop_assert!(!country.is_empty(), "exclude_countries entry must be non-empty");
+                // Trimmed (no leading/trailing whitespace)
+                prop_assert_eq!(country, &country.trim().to_string(),
+                    "exclude_countries entry '{}' must be trimmed", country);
+                // Uppercased
+                prop_assert_eq!(country, &country.to_uppercase(),
+                    "exclude_countries entry '{}' must be uppercased", country);
+                // At most 10 characters
+                prop_assert!(country.len() <= 10,
+                    "exclude_countries entry length {} exceeds 10", country.len());
             }
         }
     }

@@ -19,6 +19,7 @@ const MINI_ELAPSED_MIN_WIDTH: u16 = 40;
 /// Single-line when height < 3 rows; two-line when height >= 3.
 pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let state_char = state_indicator(&app.player.state);
+    let buffer_text = buffer_percent_display(&app.player.state, app.player.buffer_percent);
     let station_name = station_name_text(app);
     let track_title = track_title_text(app);
     let volume_text = volume_display(app);
@@ -28,6 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     if area.height < 3 {
         let line = build_line(
             state_char,
+            buffer_text.as_deref(),
             &station_name,
             track_title.as_deref(),
             elapsed_text.as_deref(),
@@ -43,6 +45,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
             area,
             &TwoLineParams {
                 indicator: state_char,
+                buffer: buffer_text.as_deref(),
                 station: &station_name,
                 track: track_title.as_deref(),
                 elapsed: elapsed_text.as_deref(),
@@ -62,6 +65,16 @@ pub fn state_indicator(state: &PlaybackState) -> char {
         PlaybackState::Connecting => '◌',
         PlaybackState::FadingOut { .. } => '▶',
         PlaybackState::Error(_) => '✗',
+    }
+}
+
+/// Format buffer percentage for display during Connecting state.
+/// Returns `Some("42%")` when connecting with buffer_percent > 0, `None` otherwise.
+pub fn buffer_percent_display(state: &PlaybackState, buffer_percent: u8) -> Option<String> {
+    if *state == PlaybackState::Connecting && buffer_percent > 0 {
+        Some(format!("{}%", buffer_percent))
+    } else {
+        None
     }
 }
 
@@ -101,6 +114,7 @@ fn elapsed_display(app: &UiModel<'_>, width: u16) -> Option<String> {
 /// Build the single-line layout with truncation.
 fn build_line<'a>(
     indicator: char,
+    buffer: Option<&str>,
     station: &str,
     track: Option<&str>,
     elapsed: Option<&str>,
@@ -108,13 +122,14 @@ fn build_line<'a>(
     max_width: usize,
     volume_flash_active: bool,
 ) -> Line<'a> {
-    let parts = compose_parts(indicator, station, track, elapsed, volume, max_width);
+    let parts = compose_parts(indicator, buffer, station, track, elapsed, volume, max_width);
     Line::from(styled_spans(&parts, volume_flash_active))
 }
 
 /// Internal data structure for a composed mini-mode line.
 struct LineParts<'a> {
     indicator: char,
+    buffer: Option<Cow<'a, str>>,
     station: Cow<'a, str>,
     track: Option<Cow<'a, str>>,
     elapsed: Option<Cow<'a, str>>,
@@ -124,24 +139,29 @@ struct LineParts<'a> {
 /// Compose and truncate parts to fit within max_width.
 fn compose_parts<'a>(
     indicator: char,
+    buffer: Option<&'a str>,
     station: &'a str,
     track: Option<&'a str>,
     elapsed: Option<&'a str>,
     volume: &'a str,
     max_width: usize,
 ) -> LineParts<'a> {
-    let indicator_width = 1 + SEPARATOR.len();
+    let indicator_width = 1;
+    let buffer_width = buffer.map(|b| b.len()).unwrap_or(0);
+    let separator_after_indicator = SEPARATOR.len();
     let volume_width = if volume.is_empty() {
         0
     } else {
         SEPARATOR.len() + volume.len()
     };
     let elapsed_width = elapsed.map(|e| SEPARATOR.len() + e.len()).unwrap_or(0);
-    let fixed_width = indicator_width + volume_width + elapsed_width;
+    let fixed_width =
+        indicator_width + buffer_width + separator_after_indicator + volume_width + elapsed_width;
 
     if max_width <= fixed_width {
         return LineParts {
             indicator,
+            buffer: buffer.map(Cow::Borrowed),
             station: Cow::Borrowed(""),
             track: None,
             elapsed: elapsed.map(Cow::Borrowed),
@@ -154,6 +174,7 @@ fn compose_parts<'a>(
 
     LineParts {
         indicator,
+        buffer: buffer.map(Cow::Borrowed),
         station: station_cow,
         track: track_cow,
         elapsed: elapsed.map(Cow::Borrowed),
@@ -234,6 +255,9 @@ fn cow_truncate<'a>(s: &'a str, max_chars: usize) -> Cow<'a, str> {
 fn styled_spans(parts: &LineParts, volume_flash_active: bool) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     spans.push(Span::styled(parts.indicator.to_string(), theme::playing()));
+    if let Some(ref buffer) = parts.buffer {
+        spans.push(Span::styled(buffer.to_string(), theme::dim()));
+    }
     if !parts.station.is_empty() {
         spans.push(Span::styled(SEPARATOR.to_string(), theme::dim()));
         spans.push(Span::styled(parts.station.to_string(), theme::cyan()));
@@ -261,6 +285,7 @@ fn styled_spans(parts: &LineParts, volume_flash_active: bool) -> Vec<Span<'stati
 /// Parameters for the two-line mini-mode render.
 struct TwoLineParams<'a> {
     indicator: char,
+    buffer: Option<&'a str>,
     station: &'a str,
     track: Option<&'a str>,
     elapsed: Option<&'a str>,
@@ -268,11 +293,12 @@ struct TwoLineParams<'a> {
     volume_flash_active: bool,
 }
 
-/// Two-line layout: line 1 = indicator + station + elapsed + volume, line 2 = track title.
+/// Two-line layout: line 1 = indicator + buffer + station + elapsed + volume, line 2 = track title.
 fn render_two_line(frame: &mut Frame, area: Rect, params: &TwoLineParams<'_>) {
     let width = area.width as usize;
     let line1 = build_line(
         params.indicator,
+        params.buffer,
         params.station,
         None,
         params.elapsed,
@@ -305,8 +331,11 @@ mod tests {
         volume: &str,
         max_width: usize,
     ) -> usize {
-        let parts = compose_parts(indicator, station, track, elapsed, volume, max_width);
+        let parts = compose_parts(indicator, None, station, track, elapsed, volume, max_width);
         let mut width = 1; // indicator
+        if let Some(ref buffer) = parts.buffer {
+            width += buffer.len();
+        }
         if !parts.station.is_empty() {
             width += SEPARATOR.len() + parts.station.chars().count();
         }
@@ -331,7 +360,7 @@ mod tests {
         volume: &str,
         max_width: usize,
     ) -> bool {
-        let parts = compose_parts(indicator, station, track, elapsed, volume, max_width);
+        let parts = compose_parts(indicator, None, station, track, elapsed, volume, max_width);
         parts.volume == volume
     }
 
@@ -344,7 +373,7 @@ mod tests {
         volume: &str,
         max_width: usize,
     ) -> bool {
-        let parts = compose_parts(indicator, station, track, elapsed, volume, max_width);
+        let parts = compose_parts(indicator, None, station, track, elapsed, volume, max_width);
         parts.indicator == indicator
     }
 
@@ -419,6 +448,7 @@ mod tests {
     fn test_truncation_track_truncated_first() {
         let parts = compose_parts(
             '▶',
+            None,
             "Station",
             Some("A Really Long Track Title"),
             None,
@@ -433,14 +463,15 @@ mod tests {
 
     #[test]
     fn test_truncation_station_truncated_when_track_gone() {
-        let parts = compose_parts('▶', "Very Long Station", Some("Track"), None, "80%", 10);
+        let parts =
+            compose_parts('▶', None, "Very Long Station", Some("Track"), None, "80%", 10);
         assert!(parts.station.chars().count() <= 4);
         assert!(parts.track.is_none() || parts.station.ends_with('…'));
     }
 
     #[test]
     fn test_compose_everything_fits() {
-        let parts = compose_parts('▶', "FM", Some("Song"), None, "50%", 80);
+        let parts = compose_parts('▶', None, "FM", Some("Song"), None, "50%", 80);
         assert_eq!(parts.station, "FM");
         assert_eq!(parts.track.as_deref(), Some("Song"));
         assert_eq!(parts.volume, "50%");
@@ -448,7 +479,7 @@ mod tests {
 
     #[test]
     fn test_compose_no_track() {
-        let parts = compose_parts('■', "Station", None, None, "", 40);
+        let parts = compose_parts('■', None, "Station", None, None, "", 40);
         assert_eq!(parts.station, "Station");
         assert_eq!(parts.track, None);
         assert_eq!(parts.volume, "");
@@ -533,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_elapsed_included_when_width_at_least_60() {
-        let parts = compose_parts('▶', "Station", Some("Track"), Some("03:45"), "80%", 80);
+        let parts = compose_parts('▶', None, "Station", Some("Track"), Some("03:45"), "80%", 80);
         assert_eq!(parts.elapsed.as_deref(), Some("03:45"));
     }
 
@@ -546,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_elapsed_none_has_no_effect_on_layout() {
-        let parts = compose_parts('▶', "Station", Some("Track"), None, "80%", 60);
+        let parts = compose_parts('▶', None, "Station", Some("Track"), None, "80%", 60);
         assert_eq!(parts.elapsed, None);
     }
 
@@ -573,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_volume_style_highlighted_when_flash_active() {
-        let parts = compose_parts('▶', "Station", None, None, "80%", 40);
+        let parts = compose_parts('▶', None, "Station", None, None, "80%", 40);
         let spans_flash = styled_spans(&parts, true);
         let spans_normal = styled_spans(&parts, false);
 
@@ -583,5 +614,129 @@ mod tests {
         assert_eq!(volume_span_flash.style, theme::cyan());
         assert_eq!(volume_span_normal.style, theme::text());
         assert_ne!(volume_span_flash.style, volume_span_normal.style);
+    }
+
+    #[test]
+    fn test_mini_mode_connecting_no_buffer_shows_only_indicator() {
+        let result = buffer_percent_display(&PlaybackState::Connecting, 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_mini_mode_connecting_with_buffer_shows_percentage() {
+        let result = buffer_percent_display(&PlaybackState::Connecting, 42);
+        assert_eq!(result, Some("42%".to_string()));
+    }
+
+    #[test]
+    fn test_mini_mode_connecting_buffer_100_shows_percentage() {
+        let result = buffer_percent_display(&PlaybackState::Connecting, 100);
+        assert_eq!(result, Some("100%".to_string()));
+    }
+
+    #[test]
+    fn test_mini_mode_playing_no_buffer_shown() {
+        let result = buffer_percent_display(&PlaybackState::Playing, 42);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_compose_with_buffer_includes_buffer_text() {
+        let parts = compose_parts('◌', Some("42%"), "Station", None, None, "", 40);
+        assert_eq!(parts.buffer.as_deref(), Some("42%"));
+        assert_eq!(parts.station, "Station");
+    }
+
+    #[test]
+    fn test_compose_with_buffer_accounts_for_width() {
+        // indicator(1) + buffer(3) + sep(1) + station = max_width(20)
+        // available for station = 20 - 1 - 3 - 1 = 15
+        let parts = compose_parts('◌', Some("42%"), "Very Long Station Name", None, None, "", 20);
+        assert!(parts.station.chars().count() <= 15);
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Feature: v090-features, Property 6: Mini mode buffer percentage format
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 3.1, 3.3**
+        #[test]
+        fn prop_buffer_percent_format(buffer_percent in 1u8..=100) {
+            let result = buffer_percent_display(&PlaybackState::Connecting, buffer_percent);
+            prop_assert_eq!(result, Some(format!("{}%", buffer_percent)));
+        }
+    }
+
+    #[test]
+    fn prop_buffer_percent_zero_returns_none() {
+        let result = buffer_percent_display(&PlaybackState::Connecting, 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn prop_buffer_percent_playing_returns_none() {
+        for pct in 1..=100u8 {
+            let result = buffer_percent_display(&PlaybackState::Playing, pct);
+            assert_eq!(result, None);
+        }
+    }
+
+    // Feature: v090-features, Property 7: Mini mode station name presence with truncation
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 3.5**
+        #[test]
+        fn prop_station_name_presence_with_truncation(
+            station_name in "[a-zA-Z ]{1,50}",
+            width in 20usize..=120,
+            buffer_percent in 0u8..=100,
+        ) {
+            let buffer_text = buffer_percent_display(&PlaybackState::Connecting, buffer_percent);
+            let parts = compose_parts(
+                '◌',
+                buffer_text.as_deref(),
+                &station_name,
+                None,
+                None,
+                "",
+                width,
+            );
+
+            // Compute fixed width: indicator(1) + buffer + separator(1)
+            let buffer_width = buffer_text.as_ref().map(|b| b.len()).unwrap_or(0);
+            let fixed_width = 1 + buffer_width + 1; // indicator + buffer + separator
+
+            // If width is large enough to fit fixed parts plus at least 1 char of station
+            if width > fixed_width {
+                prop_assert!(
+                    !parts.station.is_empty(),
+                    "Station should be non-empty when width ({}) > fixed_width ({})",
+                    width,
+                    fixed_width
+                );
+            }
+
+            // Composed result never exceeds max_width
+            let mut total_width = 1; // indicator
+            if let Some(ref buffer) = parts.buffer {
+                total_width += buffer.len();
+            }
+            if !parts.station.is_empty() {
+                total_width += SEPARATOR.len() + parts.station.chars().count();
+            }
+            prop_assert!(
+                total_width <= width,
+                "Total width ({}) exceeded max_width ({})",
+                total_width,
+                width
+            );
+        }
     }
 }

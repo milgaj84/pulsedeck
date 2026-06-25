@@ -1,6 +1,6 @@
 // TOML serialization: serializes AppConfig back to TOML string, merging preserved unknown keys.
 
-use super::{AppConfig, AudioConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
+use super::{AppConfig, AudioConfig, DiscoverConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
 
 /// Serialize AppConfig back to TOML string, merging preserved unknown keys.
 pub fn serialize_toml(config: &AppConfig, preserved: &toml::Value) -> String {
@@ -10,6 +10,7 @@ pub fn serialize_toml(config: &AppConfig, preserved: &toml::Value) -> String {
     set_ui_section(&mut table, &config.ui);
     set_playback_section(&mut table, &config.playback);
     set_keybindings_section(&mut table, &config.keybindings);
+    set_discover_section(&mut table, &config.discover);
 
     toml::to_string_pretty(&table).unwrap_or_default()
 }
@@ -65,6 +66,28 @@ fn set_playback_section(
         "save_history".into(),
         toml::Value::Boolean(playback.save_history),
     );
+    sec.insert(
+        "reconnect_max_attempts".into(),
+        toml::Value::Integer(playback.reconnect_max_attempts as i64),
+    );
+    sec.insert(
+        "reconnect_backoff_seconds".into(),
+        toml::Value::Array(
+            playback
+                .reconnect_backoff_seconds
+                .iter()
+                .map(|&v| toml::Value::Integer(v as i64))
+                .collect(),
+        ),
+    );
+    sec.insert(
+        "device_recovery_attempts".into(),
+        toml::Value::Integer(playback.device_recovery_attempts as i64),
+    );
+    sec.insert(
+        "device_recovery_delay_ms".into(),
+        toml::Value::Integer(playback.device_recovery_delay_ms as i64),
+    );
 }
 
 fn set_keybindings_section(
@@ -85,10 +108,50 @@ fn set_keybindings_section(
     }
 }
 
+fn set_discover_section(table: &mut toml::map::Map<String, toml::Value>, discover: &DiscoverConfig) {
+    let section = table
+        .entry("discover")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let sec = section.as_table_mut().unwrap();
+    sec.insert(
+        "genre_weight".into(),
+        toml::Value::Integer(discover.genre_weight as i64),
+    );
+    sec.insert(
+        "tag_weight".into(),
+        toml::Value::Integer(discover.tag_weight as i64),
+    );
+    sec.insert(
+        "country_weight".into(),
+        toml::Value::Integer(discover.country_weight as i64),
+    );
+    sec.insert(
+        "exclude_tags".into(),
+        toml::Value::Array(
+            discover
+                .exclude_tags
+                .iter()
+                .map(|s| toml::Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+    sec.insert(
+        "exclude_countries".into(),
+        toml::Value::Array(
+            discover
+                .exclude_countries
+                .iter()
+                .map(|s| toml::Value::String(s.clone()))
+                .collect(),
+        ),
+    );
+}
+
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use crate::config_toml::parse::parse_toml;
+    use crate::config_toml::DiscoverConfig;
     use crate::theme_name::ThemeName;
     use proptest::prelude::*;
 
@@ -103,8 +166,20 @@ mod property_tests {
         )
     }
 
+    fn valid_backoff_strategy() -> impl Strategy<Value = Vec<u64>> {
+        prop::collection::vec(1u64..=60, 1..=10)
+    }
+
+    fn valid_exclude_tags_strategy() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec("[a-z]{1,20}", 0..=5)
+    }
+
+    fn valid_exclude_countries_strategy() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec("[A-Z]{2}", 0..=5)
+    }
+
     fn valid_app_config_strategy() -> impl Strategy<Value = AppConfig> {
-        (
+        let base = (
             any::<Option<String>>(),
             0u8..=100u8,
             valid_theme_strategy(),
@@ -113,9 +188,24 @@ mod property_tests {
             any::<bool>(),
             any::<bool>(),
             any::<Option<String>>(),
-        )
-            .prop_map(
-                |(
+        );
+        let playback_ext = (
+            1u8..=10u8,
+            valid_backoff_strategy(),
+            1u8..=5u8,
+            100u64..=5000u64,
+        );
+        let discover = (
+            0u32..=10u32,
+            0u32..=10u32,
+            0u32..=10u32,
+            valid_exclude_tags_strategy(),
+            valid_exclude_countries_strategy(),
+        );
+
+        (base, playback_ext, discover).prop_map(
+            |(
+                (
                     output_device,
                     default_volume,
                     theme,
@@ -124,33 +214,52 @@ mod property_tests {
                     autoplay_last,
                     save_history,
                     keybindings_path,
-                )| {
-                    AppConfig {
-                        audio: AudioConfig {
-                            output_device,
-                            default_volume,
-                        },
-                        ui: UiConfig {
-                            theme,
-                            notifications_enabled,
-                            stream_metadata_enabled,
-                        },
-                        playback: PlaybackConfig {
-                            autoplay_last,
-                            save_history,
-                        },
-                        keybindings: KeybindingsConfig {
-                            path: keybindings_path,
-                        },
-                    }
-                },
-            )
+                ),
+                (
+                    reconnect_max_attempts,
+                    reconnect_backoff_seconds,
+                    device_recovery_attempts,
+                    device_recovery_delay_ms,
+                ),
+                (genre_weight, tag_weight, country_weight, exclude_tags, exclude_countries),
+            )| {
+                AppConfig {
+                    audio: AudioConfig {
+                        output_device,
+                        default_volume,
+                    },
+                    ui: UiConfig {
+                        theme,
+                        notifications_enabled,
+                        stream_metadata_enabled,
+                    },
+                    playback: PlaybackConfig {
+                        autoplay_last,
+                        save_history,
+                        reconnect_max_attempts,
+                        reconnect_backoff_seconds,
+                        device_recovery_attempts,
+                        device_recovery_delay_ms,
+                    },
+                    keybindings: KeybindingsConfig {
+                        path: keybindings_path,
+                    },
+                    discover: DiscoverConfig {
+                        genre_weight,
+                        tag_weight,
+                        country_weight,
+                        exclude_tags,
+                        exclude_countries,
+                    },
+                }
+            },
+        )
     }
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(100))]
 
-        /// **Validates: Requirements 7.10**
+        /// **Validates: Requirements 1.2, 1.3, 2.2, 2.3, 5.2, 6.2, 6.3**
         #[test]
         fn toml_round_trip_produces_equivalent_config(config in valid_app_config_strategy()) {
             let preserved = toml::Value::Table(toml::map::Map::new());
@@ -165,6 +274,7 @@ mod property_tests {
 mod tests {
     use super::*;
     use crate::config_toml::parse::parse_toml;
+    use crate::config_toml::DiscoverConfig;
 
     #[test]
     fn test_serialize_toml_round_trip_produces_equivalent_config() {
@@ -181,10 +291,12 @@ mod tests {
             playback: PlaybackConfig {
                 autoplay_last: true,
                 save_history: true,
+                ..PlaybackConfig::default()
             },
             keybindings: KeybindingsConfig {
                 path: Some("keys.json".to_string()),
             },
+            discover: DiscoverConfig::default(),
         };
 
         let preserved = toml::Value::Table(toml::map::Map::new());
@@ -269,5 +381,105 @@ stream_metadata_enabled = true
             let kb_table = kb.as_table().unwrap();
             assert!(!kb_table.contains_key("path"));
         }
+    }
+
+    #[test]
+    fn test_serialize_toml_playback_reconnect_fields_round_trip() {
+        let config = AppConfig {
+            playback: PlaybackConfig {
+                autoplay_last: true,
+                save_history: false,
+                reconnect_max_attempts: 7,
+                reconnect_backoff_seconds: vec![2, 4, 8, 16],
+                device_recovery_attempts: 4,
+                device_recovery_delay_ms: 2500,
+            },
+            ..AppConfig::default()
+        };
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output = serialize_toml(&config, &preserved);
+        let result = parse_toml(&output).unwrap();
+
+        assert_eq!(result.config.playback, config.playback);
+    }
+
+    #[test]
+    fn test_serialize_toml_discover_fields_round_trip() {
+        let config = AppConfig {
+            discover: DiscoverConfig {
+                genre_weight: 5,
+                tag_weight: 2,
+                country_weight: 8,
+                exclude_tags: vec!["jazz".to_string(), "blues".to_string()],
+                exclude_countries: vec!["US".to_string(), "GB".to_string()],
+            },
+            ..AppConfig::default()
+        };
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output = serialize_toml(&config, &preserved);
+        let result = parse_toml(&output).unwrap();
+
+        assert_eq!(result.config.discover, config.discover);
+    }
+
+    #[test]
+    fn test_serialize_toml_discover_empty_lists_round_trip() {
+        let config = AppConfig {
+            discover: DiscoverConfig {
+                genre_weight: 0,
+                tag_weight: 10,
+                country_weight: 0,
+                exclude_tags: vec![],
+                exclude_countries: vec![],
+            },
+            ..AppConfig::default()
+        };
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output = serialize_toml(&config, &preserved);
+        let result = parse_toml(&output).unwrap();
+
+        assert_eq!(result.config.discover, config.discover);
+    }
+
+    #[test]
+    fn test_serialize_toml_all_new_fields_together_round_trip() {
+        let config = AppConfig {
+            audio: AudioConfig {
+                output_device: Some("Headphones".to_string()),
+                default_volume: 60,
+            },
+            ui: UiConfig {
+                theme: "Terminal".to_string(),
+                notifications_enabled: false,
+                stream_metadata_enabled: false,
+            },
+            playback: PlaybackConfig {
+                autoplay_last: true,
+                save_history: true,
+                reconnect_max_attempts: 10,
+                reconnect_backoff_seconds: vec![1, 2, 3, 5, 8, 13],
+                device_recovery_attempts: 5,
+                device_recovery_delay_ms: 100,
+            },
+            keybindings: KeybindingsConfig {
+                path: Some("custom.json".to_string()),
+            },
+            discover: DiscoverConfig {
+                genre_weight: 10,
+                tag_weight: 5,
+                country_weight: 3,
+                exclude_tags: vec!["talk".to_string(), "news".to_string(), "sports".to_string()],
+                exclude_countries: vec!["CN".to_string(), "RU".to_string()],
+            },
+        };
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output = serialize_toml(&config, &preserved);
+        let result = parse_toml(&output).unwrap();
+
+        assert_eq!(result.config, config);
     }
 }

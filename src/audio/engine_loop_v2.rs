@@ -18,11 +18,11 @@ use std::time::Duration;
 use super::output_manager::OutputManager;
 use super::supervisor::ConnectionSupervisor;
 use super::types::{
-    ConnectRequest, EndReason, EngineError, EngineEvent, EngineState, PlaybackOptions,
-    PrebufferConfig,
+    ConnectRequest, DeviceRecoveryConfig, EndReason, EngineError, EngineEvent, EngineState,
+    PlaybackOptions, PrebufferConfig,
 };
 use super::volume::{clamp_volume, VolumeRamp};
-use super::{AudioCommand, AudioStatus, MAX_HARDWARE_RECOVERY_RETRIES};
+use super::{AudioCommand, AudioStatus};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,6 +48,7 @@ pub(super) struct EngineLoop {
     supervisor: ConnectionSupervisor,
     options: PlaybackOptions,
     volume: VolumeRamp,
+    recovery_config: DeviceRecoveryConfig,
     status_tx: mpsc::Sender<AudioStatus>,
     event_rx: mpsc::Receiver<EngineEvent>,
     event_tx: mpsc::Sender<EngineEvent>,
@@ -60,7 +61,11 @@ impl EngineLoop {
     // -----------------------------------------------------------------------
 
     /// Creates a new `EngineLoop` in `Idle` state.
-    fn new(status_tx: mpsc::Sender<AudioStatus>, sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
+    fn new(
+        status_tx: mpsc::Sender<AudioStatus>,
+        sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+        recovery_config: DeviceRecoveryConfig,
+    ) -> Self {
         let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
         Self {
             state: EngineState::Idle,
@@ -68,6 +73,7 @@ impl EngineLoop {
             supervisor: ConnectionSupervisor::new(),
             options: PlaybackOptions::default(),
             volume: VolumeRamp::new(0.8),
+            recovery_config,
             status_tx,
             event_rx,
             event_tx,
@@ -87,8 +93,9 @@ impl EngineLoop {
         cmd_rx: mpsc::Receiver<AudioCommand>,
         status_tx: mpsc::Sender<AudioStatus>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+        recovery_config: DeviceRecoveryConfig,
     ) {
-        let mut engine = EngineLoop::new(status_tx, sample_buffer);
+        let mut engine = EngineLoop::new(status_tx, sample_buffer, recovery_config);
         loop {
             // 1. Drain one command (10 ms timeout).
             match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -327,8 +334,13 @@ impl EngineLoop {
     /// re-spawns the worker. Otherwise, emits `AudioStatus::Error`.
     fn fail_or_recover(&mut self, error: EngineError, url: Option<String>) {
         if error.is_recoverable_output()
-            && self.output.recovery_retries() < MAX_HARDWARE_RECOVERY_RETRIES
+            && self.output.recovery_retries() < self.recovery_config.max_attempts
         {
+            // Wait before retry (skip delay on first attempt for responsiveness).
+            if self.output.recovery_retries() > 0 {
+                std::thread::sleep(Duration::from_millis(self.recovery_config.delay_ms));
+            }
+
             match self.output.reopen() {
                 Ok(()) => {
                     if let Some(url) = url {
@@ -355,12 +367,22 @@ impl EngineLoop {
                     }
                 }
                 Err(reopen_err) => {
-                    let status_str = reopen_err.to_status_string();
-                    self.transition_to(EngineState::Failed {
-                        url,
-                        error: reopen_err,
-                    });
-                    self.emit(AudioStatus::Error(status_str));
+                    // Reopen failed — try again if retries remain.
+                    if self.output.recovery_retries() < self.recovery_config.max_attempts {
+                        self.fail_or_recover(reopen_err, url);
+                    } else {
+                        let msg = format!(
+                            "device recovery exhausted after {} attempts",
+                            self.recovery_config.max_attempts
+                        );
+                        let final_err = EngineError::Output(msg.clone());
+                        let status_str = final_err.to_status_string();
+                        self.transition_to(EngineState::Failed {
+                            url,
+                            error: final_err,
+                        });
+                        self.emit(AudioStatus::Error(status_str));
+                    }
                 }
             }
         } else {
@@ -393,7 +415,7 @@ mod tests {
     fn make_engine() -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
         let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::<f32>::new()));
-        let engine = EngineLoop::new(status_tx, sample_buffer);
+        let engine = EngineLoop::new(status_tx, sample_buffer, DeviceRecoveryConfig::default());
         (engine, status_rx)
     }
 
@@ -859,5 +881,118 @@ mod tests {
         assert!(engine.options.metadata_enabled); // default is true
         engine.handle_command(AudioCommand::SetStreamMetadata(false));
         assert!(!engine.options.metadata_enabled);
+    }
+
+    // -----------------------------------------------------------------------
+    // Configurable device recovery tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: build an `EngineLoop` with custom `DeviceRecoveryConfig`.
+    fn make_engine_with_recovery(config: DeviceRecoveryConfig) -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
+        let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::<f32>::new()));
+        let engine = EngineLoop::new(status_tx, sample_buffer, config);
+        (engine, status_rx)
+    }
+
+    #[test]
+    fn recovery_exhausted_emits_error_when_retries_at_configured_limit() {
+        let config = DeviceRecoveryConfig {
+            max_attempts: 3,
+            delay_ms: 0,
+        };
+        let (mut engine, status_rx) = make_engine_with_recovery(config);
+        let gen = engine.supervisor.next_generation();
+        engine.state = EngineState::Playing {
+            generation: gen,
+            url: "http://example.com".into(),
+        };
+        // Simulate that we've already exhausted all recovery attempts.
+        engine.output.set_recovery_retries(3);
+        let _ = drain_status(&status_rx);
+
+        engine.handle_event(EngineEvent::OutputLost);
+
+        let statuses = drain_status(&status_rx);
+        assert!(
+            matches!(engine.state, EngineState::Failed { .. }),
+            "expected Failed state after exhausting retries, got {:?}",
+            engine.state,
+        );
+        assert!(
+            has_status(&statuses, &AudioStatus::Error(String::new())),
+            "expected Error status after exhausted recovery, got {:?}",
+            statuses,
+        );
+    }
+
+    #[test]
+    fn recovery_allowed_when_retries_below_configured_limit() {
+        let config = DeviceRecoveryConfig {
+            max_attempts: 4,
+            delay_ms: 0,
+        };
+        let (mut engine, status_rx) = make_engine_with_recovery(config);
+        let gen = engine.supervisor.next_generation();
+        engine.state = EngineState::Playing {
+            generation: gen,
+            url: "http://example.com".into(),
+        };
+        // Simulate 2 retries already consumed (below limit of 4).
+        engine.output.set_recovery_retries(2);
+        let _ = drain_status(&status_rx);
+
+        engine.handle_event(EngineEvent::OutputLost);
+
+        // On headless CI, reopen may fail (incrementing retries further) or
+        // succeed (resetting to 0 and reconnecting). Both are valid — what
+        // matters is that the engine did NOT immediately give up.
+        let statuses = drain_status(&status_rx);
+        let gave_up_immediately = matches!(engine.state, EngineState::Failed { .. })
+            && statuses.iter().any(|s| {
+                matches!(s, AudioStatus::Error(msg) if msg.contains("output device lost"))
+            });
+        assert!(
+            !gave_up_immediately,
+            "engine should attempt recovery when retries (2) < max_attempts (4)"
+        );
+    }
+
+    #[test]
+    fn configured_max_attempts_of_one_exhausts_on_first_failure() {
+        let config = DeviceRecoveryConfig {
+            max_attempts: 1,
+            delay_ms: 0,
+        };
+        let (mut engine, status_rx) = make_engine_with_recovery(config);
+        let gen = engine.supervisor.next_generation();
+        engine.state = EngineState::Playing {
+            generation: gen,
+            url: "http://example.com".into(),
+        };
+        // Already at the limit.
+        engine.output.set_recovery_retries(1);
+        let _ = drain_status(&status_rx);
+
+        engine.handle_event(EngineEvent::OutputLost);
+
+        let statuses = drain_status(&status_rx);
+        assert!(
+            matches!(engine.state, EngineState::Failed { .. }),
+            "expected Failed when retries already at max_attempts=1, got {:?}",
+            engine.state,
+        );
+        assert!(
+            has_status(&statuses, &AudioStatus::Error(String::new())),
+            "expected Error status, got {:?}",
+            statuses,
+        );
+    }
+
+    #[test]
+    fn recovery_config_default_has_two_max_attempts() {
+        let (engine, _status_rx) = make_engine();
+        assert_eq!(engine.recovery_config.max_attempts, 2);
+        assert_eq!(engine.recovery_config.delay_ms, 1000);
     }
 }

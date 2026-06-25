@@ -41,16 +41,59 @@ impl Default for UiConfig {
 }
 
 /// Playback behavior settings.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlaybackConfig {
     pub autoplay_last: bool,
     pub save_history: bool,
+    /// Maximum reconnect attempts after connection failure, range 1–10.
+    pub reconnect_max_attempts: u8,
+    /// Backoff durations (seconds) between reconnect attempts, each 1–60, max 10 entries.
+    pub reconnect_backoff_seconds: Vec<u64>,
+    /// Maximum device recovery attempts for output device failures, range 1–5.
+    pub device_recovery_attempts: u8,
+    /// Delay in milliseconds between device recovery attempts, range 100–5000.
+    pub device_recovery_delay_ms: u64,
+}
+
+impl Default for PlaybackConfig {
+    fn default() -> Self {
+        Self {
+            autoplay_last: false,
+            save_history: false,
+            reconnect_max_attempts: 3,
+            reconnect_backoff_seconds: vec![3, 6, 12],
+            device_recovery_attempts: 2,
+            device_recovery_delay_ms: 1000,
+        }
+    }
 }
 
 /// Keybinding file path override.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct KeybindingsConfig {
     pub path: Option<String>,
+}
+
+/// Discover scoring weights and exclusion lists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoverConfig {
+    pub genre_weight: u32,
+    pub tag_weight: u32,
+    pub country_weight: u32,
+    pub exclude_tags: Vec<String>,
+    pub exclude_countries: Vec<String>,
+}
+
+impl Default for DiscoverConfig {
+    fn default() -> Self {
+        Self {
+            genre_weight: 3,
+            tag_weight: 1,
+            country_weight: 1,
+            exclude_tags: Vec::new(),
+            exclude_countries: Vec::new(),
+        }
+    }
 }
 
 /// Top-level application configuration.
@@ -60,6 +103,7 @@ pub struct AppConfig {
     pub ui: UiConfig,
     pub playback: PlaybackConfig,
     pub keybindings: KeybindingsConfig,
+    pub discover: DiscoverConfig,
 }
 
 #[cfg(test)]
@@ -89,6 +133,10 @@ mod tests {
 
         assert!(!config.autoplay_last);
         assert!(!config.save_history);
+        assert_eq!(config.reconnect_max_attempts, 3);
+        assert_eq!(config.reconnect_backoff_seconds, vec![3, 6, 12]);
+        assert_eq!(config.device_recovery_attempts, 2);
+        assert_eq!(config.device_recovery_delay_ms, 1000);
     }
 
     #[test]
@@ -106,5 +154,17 @@ mod tests {
         assert_eq!(config.ui, UiConfig::default());
         assert_eq!(config.playback, PlaybackConfig::default());
         assert_eq!(config.keybindings, KeybindingsConfig::default());
+        assert_eq!(config.discover, DiscoverConfig::default());
+    }
+
+    #[test]
+    fn test_discover_config_default_values() {
+        let config = DiscoverConfig::default();
+
+        assert_eq!(config.genre_weight, 3);
+        assert_eq!(config.tag_weight, 1);
+        assert_eq!(config.country_weight, 1);
+        assert!(config.exclude_tags.is_empty());
+        assert!(config.exclude_countries.is_empty());
     }
 }

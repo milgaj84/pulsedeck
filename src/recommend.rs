@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::config_toml::DiscoverConfig;
 use crate::favorites_set::FavoritesSet;
 use crate::radio::{normalized_station_url, Station};
 
@@ -10,6 +11,24 @@ use crate::radio::{normalized_station_url, Station};
 pub struct ScoredStation {
     pub station: Station,
     pub score: u32,
+}
+
+/// Configurable weights for the discover scoring formula.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoringWeights {
+    pub genre_weight: u32,
+    pub tag_weight: u32,
+    pub country_weight: u32,
+}
+
+impl Default for ScoringWeights {
+    fn default() -> Self {
+        Self {
+            genre_weight: 3,
+            tag_weight: 1,
+            country_weight: 1,
+        }
+    }
 }
 
 /// A profile built from the user's favorited stations.
@@ -22,27 +41,31 @@ pub struct FavoritesProfile {
 
 /// Score a single candidate station against a favorites profile.
 /// Returns 0 when profile is empty.
-pub fn score_station(profile: &FavoritesProfile, candidate: &Station) -> u32 {
+pub fn score_station(
+    profile: &FavoritesProfile,
+    candidate: &Station,
+    weights: &ScoringWeights,
+) -> u32 {
     if profile.genres.is_empty() && profile.tags.is_empty() && profile.country_codes.is_empty() {
         return 0;
     }
 
-    let genre_score = if profile
+    let genre_match: u32 = if profile
         .genres
         .contains_key(&candidate.genre.trim().to_ascii_lowercase())
     {
-        3
+        1
     } else {
         0
     };
 
-    let tag_score = candidate
+    let matching_tag_count: u32 = candidate
         .tags
         .iter()
         .filter(|t| profile.tags.contains_key(&t.trim().to_ascii_lowercase()))
         .count() as u32;
 
-    let country_score = if profile
+    let country_match: u32 = if profile
         .country_codes
         .contains_key(&candidate.country_code.trim().to_ascii_uppercase())
     {
@@ -51,7 +74,9 @@ pub fn score_station(profile: &FavoritesProfile, candidate: &Station) -> u32 {
         0
     };
 
-    genre_score + tag_score + country_score
+    (weights.genre_weight * genre_match)
+        + (weights.tag_weight * matching_tag_count)
+        + (weights.country_weight * country_match)
 }
 
 /// Explanation of which factors contributed to a station's score.
@@ -184,12 +209,20 @@ fn prefilter_candidates<'a>(
 
 /// Produce a ranked recommendation list (max 25 items, descending score).
 /// Excludes stations whose URL is already in `library_urls`.
+/// Excludes stations matching `config.exclude_tags` (by genre or tag) or `config.exclude_countries`.
 /// Applies pre-filter when candidates exceed 1000 and profile has genres or tags.
 pub fn recommend(
     profile: &FavoritesProfile,
     candidates: &[Station],
     library_urls: &HashSet<String>,
+    config: &DiscoverConfig,
 ) -> Vec<ScoredStation> {
+    let weights = ScoringWeights {
+        genre_weight: config.genre_weight,
+        tag_weight: config.tag_weight,
+        country_weight: config.country_weight,
+    };
+
     let effective_candidates = maybe_prefilter(profile, candidates);
     let iter: Box<dyn Iterator<Item = &Station>> = match &effective_candidates {
         Some(filtered) => Box::new(filtered.iter().copied()),
@@ -198,7 +231,8 @@ pub fn recommend(
 
     let mut scored: Vec<(u32, &Station)> = iter
         .filter(|s| !library_urls.contains(&normalized_station_url(&s.url)))
-        .map(|s| (score_station(profile, s), s))
+        .filter(|s| !is_excluded(s, config))
+        .map(|s| (score_station(profile, s, &weights), s))
         .filter(|(score, _)| *score > 0)
         .collect();
 
@@ -216,6 +250,38 @@ pub fn recommend(
             score,
         })
         .collect()
+}
+
+/// Check if a station should be excluded based on config exclusion lists.
+fn is_excluded(station: &Station, config: &DiscoverConfig) -> bool {
+    if is_excluded_by_tags(station, &config.exclude_tags) {
+        return true;
+    }
+    is_excluded_by_country(station, &config.exclude_countries)
+}
+
+/// Check if a station's genre or any of its tags match the exclude_tags list.
+fn is_excluded_by_tags(station: &Station, exclude_tags: &[String]) -> bool {
+    if exclude_tags.is_empty() {
+        return false;
+    }
+    let genre = station.genre.trim().to_ascii_lowercase();
+    if exclude_tags.iter().any(|t| t == &genre) {
+        return true;
+    }
+    station.tags.iter().any(|tag| {
+        let normalized = tag.trim().to_ascii_lowercase();
+        exclude_tags.iter().any(|t| t == &normalized)
+    })
+}
+
+/// Check if a station's country_code matches the exclude_countries list.
+fn is_excluded_by_country(station: &Station, exclude_countries: &[String]) -> bool {
+    if exclude_countries.is_empty() {
+        return false;
+    }
+    let country = station.country_code.trim().to_ascii_uppercase();
+    exclude_countries.iter().any(|c| c == &country)
 }
 
 /// Apply pre-filter if candidates exceed threshold and profile has genres or tags.
@@ -390,7 +456,7 @@ mod tests {
         let profile = empty_profile();
         let station = make_station("http://a", "Rock", vec!["guitar"], "US");
 
-        assert_eq!(score_station(&profile, &station), 0);
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 0);
     }
 
     #[test]
@@ -398,7 +464,7 @@ mod tests {
         let profile = profile_with(&["rock"], &[], &[]);
         let station = make_station("http://a", "Rock", vec![], "");
 
-        assert_eq!(score_station(&profile, &station), 3);
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 3);
     }
 
     #[test]
@@ -407,7 +473,7 @@ mod tests {
         let station = make_station("http://a", "", vec!["Guitar", "Live"], "");
 
         // Only "guitar" overlaps (case-insensitive) → 1 tag × 1 = 1
-        assert_eq!(score_station(&profile, &station), 1);
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 1);
     }
 
     #[test]
@@ -415,7 +481,7 @@ mod tests {
         let profile = profile_with(&[], &[], &["US", "DE"]);
         let station = make_station("http://a", "", vec![], "de");
 
-        assert_eq!(score_station(&profile, &station), 1);
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 1);
     }
 
     #[test]
@@ -424,7 +490,59 @@ mod tests {
         let station = make_station("http://a", "Jazz", vec!["smooth", "chill", "live"], "DE");
 
         // genre: 3 + tags: 2 (smooth, chill) + country: 1 = 6
-        assert_eq!(score_station(&profile, &station), 6);
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 6);
+    }
+
+    #[test]
+    fn score_station_custom_weights_change_scores() {
+        let profile = profile_with(&["rock"], &["guitar"], &["US"]);
+        let station = make_station("http://a", "Rock", vec!["guitar"], "US");
+        let weights = ScoringWeights {
+            genre_weight: 5,
+            tag_weight: 1,
+            country_weight: 1,
+        };
+
+        // genre: 5×1 + tag: 1×1 + country: 1×1 = 7
+        assert_eq!(score_station(&profile, &station, &weights), 7);
+    }
+
+    #[test]
+    fn score_station_all_zero_weights_returns_zero() {
+        let profile = profile_with(&["rock"], &["guitar", "chill"], &["US"]);
+        let station = make_station("http://a", "Rock", vec!["guitar", "chill"], "US");
+        let weights = ScoringWeights {
+            genre_weight: 0,
+            tag_weight: 0,
+            country_weight: 0,
+        };
+
+        assert_eq!(score_station(&profile, &station, &weights), 0);
+    }
+
+    #[test]
+    fn score_station_tag_weight_multiplies_matching_count() {
+        let profile = profile_with(&[], &["guitar", "chill", "smooth"], &[]);
+        let station = make_station("http://a", "", vec!["guitar", "chill", "smooth"], "");
+        let weights = ScoringWeights {
+            genre_weight: 0,
+            tag_weight: 2,
+            country_weight: 0,
+        };
+
+        // tag: 2×3 = 6
+        assert_eq!(score_station(&profile, &station, &weights), 6);
+    }
+
+    #[test]
+    fn score_station_default_weights_match_original_behavior() {
+        let profile = profile_with(&["jazz"], &["smooth", "chill"], &["DE"]);
+        let station = make_station("http://a", "Jazz", vec!["smooth", "chill", "live"], "DE");
+
+        // Original hardcoded: genre=3, tag=1 per match, country=1
+        // Default weights: genre_weight=3, tag_weight=1, country_weight=1
+        // Expected: 3×1 + 1×2 + 1×1 = 6
+        assert_eq!(score_station(&profile, &station, &ScoringWeights::default()), 6);
     }
 
     // --- build_favorites_profile tests ---
@@ -450,8 +568,9 @@ mod tests {
     fn recommend_empty_candidates_returns_empty() {
         let profile = profile_with(&["rock"], &["guitar"], &["US"]);
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &[], &library);
+        let result = recommend(&profile, &[], &library, &config);
 
         assert!(result.is_empty());
     }
@@ -464,8 +583,9 @@ mod tests {
             make_station("http://b", "Rock", vec![], ""),
         ];
         let library: HashSet<String> = vec!["http://a".to_string()].into_iter().collect();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].station.url, "http://b");
@@ -478,8 +598,9 @@ mod tests {
             .map(|i| make_station(&format!("http://s{i}"), "Rock", vec![], ""))
             .collect();
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         assert_eq!(result.len(), 25);
     }
@@ -498,8 +619,9 @@ mod tests {
         s3.click_count = Some(1);
         let candidates = vec![s1, s2, s3];
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         // All have same score (3), so tie-break by votes desc, then clicks desc
         assert_eq!(result[0].station.url, "http://c"); // votes=50
@@ -515,8 +637,9 @@ mod tests {
             make_station("http://b", "Jazz", vec![], ""),
         ];
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].station.url, "http://b");
@@ -528,10 +651,119 @@ mod tests {
         let candidates = vec![make_station("HTTP://A/", "Rock", vec![], "")];
         // Library contains normalized form
         let library: HashSet<String> = vec!["http://a".to_string()].into_iter().collect();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         assert!(result.is_empty());
+    }
+
+    // --- recommend exclusion tests ---
+
+    #[test]
+    fn test_recommend_excludes_by_tag() {
+        let profile = profile_with(&["rock"], &["guitar", "metal"], &[]);
+        let candidates = vec![
+            make_station("http://a", "Rock", vec!["guitar"], "US"),
+            make_station("http://b", "Rock", vec!["metal"], "US"),
+            make_station("http://c", "Rock", vec!["live"], "US"),
+        ];
+        let library = HashSet::new();
+        let config = DiscoverConfig {
+            exclude_tags: vec!["metal".to_string()],
+            ..DiscoverConfig::default()
+        };
+
+        let result = recommend(&profile, &candidates, &library, &config);
+
+        // Station "http://b" has tag "metal" which is excluded
+        assert!(result.iter().all(|s| s.station.url != "http://b"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_recommend_excludes_by_genre_matching_exclude_tags() {
+        let profile = profile_with(&["jazz", "rock"], &[], &[]);
+        let candidates = vec![
+            make_station("http://a", "Jazz", vec![], "US"),
+            make_station("http://b", "Rock", vec![], "US"),
+        ];
+        let library = HashSet::new();
+        let config = DiscoverConfig {
+            exclude_tags: vec!["jazz".to_string()],
+            ..DiscoverConfig::default()
+        };
+
+        let result = recommend(&profile, &candidates, &library, &config);
+
+        // Station "http://a" has genre "Jazz" which matches exclude_tags "jazz"
+        assert!(result.iter().all(|s| s.station.url != "http://a"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].station.url, "http://b");
+    }
+
+    #[test]
+    fn test_recommend_excludes_by_country() {
+        let profile = profile_with(&["rock"], &[], &["US", "DE"]);
+        let candidates = vec![
+            make_station("http://a", "Rock", vec![], "US"),
+            make_station("http://b", "Rock", vec![], "DE"),
+            make_station("http://c", "Rock", vec![], "GB"),
+        ];
+        let library = HashSet::new();
+        let config = DiscoverConfig {
+            exclude_countries: vec!["DE".to_string()],
+            ..DiscoverConfig::default()
+        };
+
+        let result = recommend(&profile, &candidates, &library, &config);
+
+        // Station "http://b" has country "DE" which is excluded
+        assert!(result.iter().all(|s| s.station.url != "http://b"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_recommend_all_excluded_returns_empty() {
+        let profile = profile_with(&["rock"], &[], &[]);
+        let candidates = vec![
+            make_station("http://a", "Rock", vec![], "US"),
+            make_station("http://b", "Rock", vec![], "DE"),
+        ];
+        let library = HashSet::new();
+        let config = DiscoverConfig {
+            exclude_countries: vec!["US".to_string(), "DE".to_string()],
+            ..DiscoverConfig::default()
+        };
+
+        let result = recommend(&profile, &candidates, &library, &config);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_recommend_uses_configured_weights() {
+        let profile = profile_with(&["rock"], &["guitar"], &["US"]);
+        let candidates = vec![
+            make_station("http://a", "Rock", vec!["guitar"], "US"),
+            make_station("http://b", "Rock", vec![], "US"),
+        ];
+        let library = HashSet::new();
+        // Give tags very high weight, genre zero weight
+        let config = DiscoverConfig {
+            genre_weight: 0,
+            tag_weight: 10,
+            country_weight: 0,
+            ..DiscoverConfig::default()
+        };
+
+        let result = recommend(&profile, &candidates, &library, &config);
+
+        // Station "http://a" has tag "guitar" → score = 0*1 + 10*1 + 0*1 = 10
+        // Station "http://b" has no matching tags → score = 0*1 + 10*0 + 0*1 = 0 (excluded)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].station.url, "http://a");
+        assert_eq!(result[0].score, 10);
     }
 
     // --- explain_score tests ---
@@ -837,8 +1069,9 @@ mod tests {
         // Add one rock station that would match
         candidates[999] = make_station("http://rock", "Rock", vec![], "");
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].station.url, "http://rock");
@@ -858,8 +1091,9 @@ mod tests {
         candidates[0] = make_station("http://rock1", "Rock", vec![], "US");
         candidates[1] = make_station("http://rock2", "Rock", vec![], "US");
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         // Pre-filter keeps only "rock" genre stations (2), then scores them
         // Country match alone doesn't pass pre-filter (country is not in pre-filter logic)
@@ -880,8 +1114,9 @@ mod tests {
             .map(|i| make_station(&format!("http://s{i}"), "Rock", vec![], "US"))
             .collect();
         let library = HashSet::new();
+        let config = DiscoverConfig::default();
 
-        let result = recommend(&profile, &candidates, &library);
+        let result = recommend(&profile, &candidates, &library, &config);
 
         // No pre-filter because genres and tags are empty
         // All 1001 score > 0 (country match), capped at 25
@@ -1051,7 +1286,7 @@ mod property_tests {
             profile in arb_favorites_profile(),
             candidate in arb_station_scored(),
         ) {
-            let actual = score_station(&profile, &candidate);
+            let actual = score_station(&profile, &candidate, &ScoringWeights::default());
 
             let genre_score: u32 = if profile
                 .genres
@@ -1108,7 +1343,8 @@ mod property_tests {
             candidates in prop::collection::vec(arb_station_full(), 0..60),
             library_urls in arb_library_urls(),
         ) {
-            let result = recommend(&profile, &candidates, &library_urls);
+            let config = DiscoverConfig::default();
+            let result = recommend(&profile, &candidates, &library_urls, &config);
 
             // (a) length ≤ 25
             prop_assert!(
@@ -1143,6 +1379,145 @@ mod property_tests {
                     "ordering violated: ({}, v={}, c={}) should come before ({}, v={}, c={})",
                     score_a, votes_a, clicks_a,
                     score_b, votes_b, clicks_b
+                );
+            }
+        }
+    }
+
+    // Feature: v090-features, Property 13: Discover scoring formula correctness
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 5.4, 5.5**
+        #[test]
+        fn discover_scoring_formula_correctness(
+            genre_weight in 0..=10u32,
+            tag_weight in 0..=10u32,
+            country_weight in 0..=10u32,
+            profile_genres in proptest::collection::hash_map(arb_genre(), 1..5u32, 1..=5),
+            profile_tags in proptest::collection::hash_map(arb_tag(), 1..5u32, 0..=5),
+            profile_countries in proptest::collection::hash_map(arb_country_code(), 1..5u32, 0..=3),
+            candidate in arb_station_scored(),
+        ) {
+            let profile = FavoritesProfile {
+                genres: profile_genres,
+                tags: profile_tags,
+                country_codes: profile_countries,
+            };
+
+            let weights = ScoringWeights {
+                genre_weight,
+                tag_weight,
+                country_weight,
+            };
+
+            let actual = score_station(&profile, &candidate, &weights);
+
+            let genre_match: u32 = if profile
+                .genres
+                .contains_key(&candidate.genre.trim().to_ascii_lowercase())
+            {
+                1
+            } else {
+                0
+            };
+
+            let matching_tag_count: u32 = candidate
+                .tags
+                .iter()
+                .filter(|t| profile.tags.contains_key(&t.trim().to_ascii_lowercase()))
+                .count() as u32;
+
+            let country_match: u32 = if profile
+                .country_codes
+                .contains_key(&candidate.country_code.trim().to_ascii_uppercase())
+            {
+                1
+            } else {
+                0
+            };
+
+            let expected = (genre_weight * genre_match)
+                + (tag_weight * matching_tag_count)
+                + (country_weight * country_match);
+
+            prop_assert_eq!(
+                actual, expected,
+                "score mismatch: weights=({},{},{}), genre_match={}, tag_count={}, country_match={}",
+                genre_weight, tag_weight, country_weight,
+                genre_match, matching_tag_count, country_match
+            );
+        }
+    }
+
+    // --- Generators for exclusion filtering test ---
+
+    fn arb_lowercase_string() -> impl Strategy<Value = String> {
+        "[a-z]{1,8}".prop_map(|s| s.to_string())
+    }
+
+    fn arb_uppercase_country() -> impl Strategy<Value = String> {
+        "[A-Z]{2}".prop_map(|s| s.to_string())
+    }
+
+    fn arb_non_empty_profile() -> impl Strategy<Value = FavoritesProfile> {
+        (
+            proptest::collection::hash_map(arb_genre(), 1..5u32, 1..=5),
+            proptest::collection::hash_map(arb_tag(), 1..5u32, 0..=5),
+            proptest::collection::hash_map(arb_country_code(), 1..5u32, 0..=3),
+        )
+            .prop_map(|(genres, tags, country_codes)| FavoritesProfile {
+                genres,
+                tags,
+                country_codes,
+            })
+    }
+
+    // Feature: v090-features, Property 14: Discover exclusion filtering invariant
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 6.6, 6.7, 6.8, 6.9**
+        #[test]
+        fn discover_exclusion_filtering_invariant(
+            exclude_tags in proptest::collection::vec(arb_lowercase_string(), 0..=5),
+            exclude_countries in proptest::collection::vec(arb_uppercase_country(), 0..=3),
+            candidates in proptest::collection::vec(arb_station_scored(), 3..=10),
+            profile in arb_non_empty_profile(),
+        ) {
+            let config = DiscoverConfig {
+                genre_weight: 3,
+                tag_weight: 1,
+                country_weight: 1,
+                exclude_tags: exclude_tags.clone(),
+                exclude_countries: exclude_countries.clone(),
+            };
+
+            let library_urls = HashSet::new();
+            let result = recommend(&profile, &candidates, &library_urls, &config);
+
+            for scored in &result {
+                let genre_lower = scored.station.genre.trim().to_ascii_lowercase();
+                prop_assert!(
+                    !exclude_tags.contains(&genre_lower),
+                    "result contains station with excluded genre '{}' (station url: {})",
+                    genre_lower, scored.station.url
+                );
+
+                for tag in &scored.station.tags {
+                    let tag_lower = tag.trim().to_ascii_lowercase();
+                    prop_assert!(
+                        !exclude_tags.contains(&tag_lower),
+                        "result contains station with excluded tag '{}' (station url: {})",
+                        tag_lower, scored.station.url
+                    );
+                }
+
+                let country_upper = scored.station.country_code.trim().to_ascii_uppercase();
+                prop_assert!(
+                    !exclude_countries.contains(&country_upper),
+                    "result contains station with excluded country '{}' (station url: {})",
+                    country_upper, scored.station.url
                 );
             }
         }

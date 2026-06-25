@@ -67,6 +67,8 @@ impl App {
             Action::SearchBackspace => self.search_backspace(),
             Action::SearchConfirm => self.confirm_search(),
             Action::SearchAudition => self.audition_search_result(),
+            Action::SearchHistoryUp => self.search_history_up(),
+            Action::SearchHistoryDown => self.search_history_down(),
 
             Action::OpenCommandPalette => self.open_command_palette(),
             Action::CommandPaletteConfirm

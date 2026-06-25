@@ -3,6 +3,7 @@ use crate::audio::{AudioCommand, AudioEngine, AudioStatus};
 use crate::config_toml::AppConfig;
 use crate::keybindings::{detect_shadows, KeybindingRegistry};
 use crate::radio::{find_station_by_url, find_station_index_by_url, station_url_matches};
+use crate::search_history::SearchHistoryRing;
 use std::time::{Duration, Instant};
 
 const NOTICE_INFO_TICKS: u16 = 90;
@@ -72,10 +73,15 @@ impl AppParts {
     pub(super) fn load(library: Library) -> Self {
         let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
-        let audio = AudioEngine::spawn(sample_buffer.clone());
         let (history, history_warning) = crate::history::History::load_with_warning();
         let (config, config_preserved, config_warnings, config_loaded_from_file) =
             load_toml_config();
+
+        let recovery_config = crate::audio::DeviceRecoveryConfig {
+            max_attempts: config.playback.device_recovery_attempts,
+            delay_ms: config.playback.device_recovery_delay_ms,
+        };
+        let audio = AudioEngine::spawn(sample_buffer.clone(), recovery_config);
 
         Self {
             library,
@@ -164,6 +170,17 @@ fn build_config_watcher() -> ConfigWatcher {
     ConfigWatcher::new(path)
 }
 
+const SEARCH_HISTORY_FILE: &str = "search_history.json";
+
+/// Load search history ring from the config directory.
+/// Returns an empty ring if no config directory or file is available.
+fn load_search_history(config_dir: &Option<PathBuf>) -> SearchHistoryRing {
+    let Some(dir) = config_dir else {
+        return SearchHistoryRing::new();
+    };
+    SearchHistoryRing::load(&dir.join(SEARCH_HISTORY_FILE))
+}
+
 impl App {
     pub fn new(library: Library) -> Self {
         Self::from_parts(AppParts::load(library))
@@ -188,6 +205,8 @@ impl App {
             diagnostics_metadata_enabled,
             parts.audio,
             parts.sample_buffer,
+            config.playback.reconnect_max_attempts,
+            config.playback.reconnect_backoff_seconds.clone(),
         );
 
         let keybinding_registry = load_keybinding_registry();
@@ -195,6 +214,8 @@ impl App {
         let config_watcher = build_config_watcher();
 
         let config_dir = crate::config::config_dir();
+
+        let search_history = load_search_history(&config_dir);
 
         let mut app = Self {
             library: parts.library,
@@ -218,6 +239,7 @@ impl App {
             config_preserved,
             config_dir,
             config_watcher,
+            search_history,
             #[cfg(test)]
             notification_count: 0,
         };
@@ -1225,6 +1247,14 @@ mod tests {
             app.ui.notice.current,
             Some(AppNotice::Info(ref msg)) if msg == "Config reloaded"
         ));
+    }
+
+    #[test]
+    fn test_app_initializes_with_search_history_ring() {
+        let app = App::from_parts(test_parts(Library::in_memory(vec![])));
+
+        assert!(app.search_history.is_empty());
+        assert_eq!(app.search_history.len(), 0);
     }
 }
 

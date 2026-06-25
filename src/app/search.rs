@@ -8,6 +8,8 @@ pub struct SearchState {
     pub pending_api_search: Option<String>,
     pub searching_api: bool,
     pub last_api_query: String,
+    /// `None` when not cycling, `Some(index)` when cycling through history ring.
+    pub history_cycling: Option<usize>,
 }
 
 impl Default for SearchState {
@@ -19,6 +21,7 @@ impl Default for SearchState {
             pending_api_search: None,
             searching_api: false,
             last_api_query: String::new(),
+            history_cycling: None,
         }
     }
 }
@@ -34,6 +37,7 @@ impl App {
         self.search.status = SearchStatus::WaitingForInput;
         self.search.searching_api = false;
         self.search.pending_api_search = None;
+        self.search.history_cycling = None;
         self.ui.nav.selected = clamped_index(
             self.ui.nav.search_selected_snapshot,
             self.search.results.len(),
@@ -49,10 +53,12 @@ impl App {
         self.search.status = SearchStatus::WaitingForInput;
         self.search.searching_api = false;
         self.search.pending_api_search = None;
+        self.search.history_cycling = None;
         self.restore_normal_selection_snapshot();
     }
 
     pub(super) fn search_input(&mut self, c: char) {
+        self.search.history_cycling = None;
         self.search.query.push(c);
         self.refresh_search_state();
     }
@@ -62,7 +68,90 @@ impl App {
         self.refresh_search_state();
     }
 
+    pub(super) fn search_history_up(&mut self) {
+        if self.search.query.is_empty() || self.search.history_cycling.is_some() {
+            self.cycle_history_backward();
+        } else {
+            self.prev_search_result();
+        }
+    }
+
+    pub(super) fn search_history_down(&mut self) {
+        if self.search.history_cycling.is_some() {
+            self.cycle_history_forward();
+        } else {
+            self.next_search_result();
+        }
+    }
+
+    fn cycle_history_backward(&mut self) {
+        let ring_len = self.search_history.len();
+        if ring_len == 0 {
+            return;
+        }
+
+        let index = match self.search.history_cycling {
+            None => ring_len - 1,
+            Some(i) => {
+                if i == 0 {
+                    ring_len - 1
+                } else {
+                    i - 1
+                }
+            }
+        };
+
+        self.search.history_cycling = Some(index);
+        if let Some(entry) = self.search_history.get(index) {
+            self.search.query = entry.to_string();
+        }
+    }
+
+    fn cycle_history_forward(&mut self) {
+        let ring_len = self.search_history.len();
+        if ring_len == 0 {
+            return;
+        }
+
+        let index = match self.search.history_cycling {
+            None => return,
+            Some(i) => (i + 1) % ring_len,
+        };
+
+        self.search.history_cycling = Some(index);
+        if let Some(entry) = self.search_history.get(index) {
+            self.search.query = entry.to_string();
+        }
+    }
+
+    fn push_search_query_to_history(&mut self) {
+        let trimmed = self.search.query.trim();
+        if !trimmed.is_empty() {
+            self.search_history.push(trimmed);
+        }
+    }
+
+    fn prev_search_result(&mut self) {
+        let count = self.search.results.len();
+        if count > 0 {
+            self.ui.nav.selected = if self.ui.nav.selected == 0 {
+                count - 1
+            } else {
+                self.ui.nav.selected - 1
+            };
+        }
+    }
+
+    fn next_search_result(&mut self) {
+        let count = self.search.results.len();
+        if count > 0 {
+            self.ui.nav.selected = (self.ui.nav.selected + 1) % count;
+        }
+    }
+
     pub(super) fn confirm_search(&mut self) {
+        self.push_search_query_to_history();
+
         // Add the selected search result to library and play it.
         let played = if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
             self.playback.reconnect.disarm();
@@ -105,6 +194,8 @@ impl App {
     }
 
     pub(super) fn audition_search_result(&mut self) {
+        self.push_search_query_to_history();
+
         if let Some(station) = self.search.results.get(self.ui.nav.selected).cloned() {
             self.playback.reconnect.disarm();
             let next_playback = if matches!(
@@ -632,5 +723,219 @@ mod tests {
         assert_eq!(clamped_index(5, 0), 0);
         assert_eq!(clamped_index(5, 2), 1);
         assert_eq!(clamped_index(1, 2), 1);
+    }
+
+    // ---- History cycling tests ----
+
+    fn test_app_with_history(entries: Vec<&str>) -> App {
+        let mut app = test_app();
+        for entry in entries {
+            app.search_history.push(entry);
+        }
+        app
+    }
+
+    #[test]
+    fn test_up_arrow_empty_input_enters_cycling() {
+        let mut app = test_app_with_history(vec!["jazz", "lofi", "synthwave"]);
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchHistoryUp);
+
+        assert_eq!(app.search.history_cycling, Some(2));
+        assert_eq!(app.search.query, "synthwave");
+    }
+
+    #[test]
+    fn test_up_arrow_cycles_backward() {
+        let mut app = test_app_with_history(vec!["jazz", "lofi", "synthwave"]);
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchHistoryUp); // index 2 → "synthwave"
+        app.update(Action::SearchHistoryUp); // index 1 → "lofi"
+        app.update(Action::SearchHistoryUp); // index 0 → "jazz"
+        app.update(Action::SearchHistoryUp); // wraps to index 2 → "synthwave"
+
+        assert_eq!(app.search.history_cycling, Some(2));
+        assert_eq!(app.search.query, "synthwave");
+    }
+
+    #[test]
+    fn test_down_arrow_cycles_forward() {
+        let mut app = test_app_with_history(vec!["jazz", "lofi", "synthwave"]);
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchHistoryUp); // index 2 → "synthwave"
+        app.update(Action::SearchHistoryDown); // index 0 → "jazz"
+
+        assert_eq!(app.search.history_cycling, Some(0));
+        assert_eq!(app.search.query, "jazz");
+    }
+
+    #[test]
+    fn test_character_input_exits_cycling() {
+        let mut app = test_app_with_history(vec!["jazz", "lofi"]);
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchHistoryUp); // enter cycling
+        assert!(app.search.history_cycling.is_some());
+
+        app.update(Action::SearchInput('x'));
+
+        assert_eq!(app.search.history_cycling, None);
+        assert_eq!(app.search.query, "lofix");
+    }
+
+    #[test]
+    fn test_up_arrow_empty_ring_no_op() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+
+        app.update(Action::SearchHistoryUp);
+
+        assert_eq!(app.search.history_cycling, None);
+        assert_eq!(app.search.query, "");
+    }
+
+    // ---- Search history push tests ----
+
+    #[test]
+    fn test_confirm_search_pushes_query_to_history() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search.query = "jazz".to_string();
+        app.search.results = vec![station("Jazz FM", "http://jazz")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchConfirm);
+
+        assert_eq!(app.search_history.len(), 1);
+        assert_eq!(app.search_history.get(0), Some("jazz"));
+    }
+
+    #[test]
+    fn test_audition_pushes_query_to_history() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search.query = "lofi".to_string();
+        app.search.results = vec![station("Lofi Radio", "http://lofi")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchAudition);
+
+        assert_eq!(app.search_history.len(), 1);
+        assert_eq!(app.search_history.get(0), Some("lofi"));
+    }
+
+    #[test]
+    fn test_confirm_short_query_not_pushed() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search.query = "a".to_string();
+        app.search.results = vec![station("Station", "http://station")];
+        app.ui.nav.selected = 0;
+
+        app.update(Action::SearchConfirm);
+
+        assert!(app.search_history.is_empty());
+    }
+
+    #[test]
+    fn test_confirm_empty_query_not_pushed() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+        app.search.query = String::new();
+
+        app.update(Action::SearchConfirm);
+
+        assert!(app.search_history.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use crate::action::Action;
+    use crate::favorites::Library;
+    use proptest::prelude::*;
+
+    fn test_app() -> App {
+        App::new(Library::in_memory(vec![]))
+    }
+
+    // Feature: v090-features, Property 10: Search history Up-arrow cycling
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 4.4**
+        #[test]
+        fn up_arrow_cycling(
+            n in 1usize..=10,
+            k in 1usize..=30,
+        ) {
+            let entries = (0..n)
+                .map(|i| format!("entry_{:02}", i))
+                .collect::<Vec<_>>();
+
+            let mut app = test_app();
+            for entry in &entries {
+                app.search_history.push(entry);
+            }
+            app.update(Action::EnterSearch);
+
+            for _ in 0..k {
+                app.update(Action::SearchHistoryUp);
+            }
+
+            let expected_index = n - 1 - ((k - 1) % n);
+            let expected_query = &entries[expected_index];
+            prop_assert_eq!(
+                &app.search.query,
+                expected_query,
+                "After {} ups in ring of size {}, expected index {} = {:?}, got {:?}",
+                k, n, expected_index, expected_query, app.search.query
+            );
+        }
+    }
+
+    // Feature: v090-features, Property 11: Search history Down-arrow cycling
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        /// **Validates: Requirements 4.5**
+        #[test]
+        fn down_arrow_cycling(
+            n in 1usize..=10,
+            initial_ups in 1usize..=10,
+            d in 1usize..=30,
+        ) {
+            let entries = (0..n)
+                .map(|i| format!("entry_{:02}", i))
+                .collect::<Vec<_>>();
+
+            let mut app = test_app();
+            for entry in &entries {
+                app.search_history.push(entry);
+            }
+            app.update(Action::EnterSearch);
+
+            for _ in 0..initial_ups {
+                app.update(Action::SearchHistoryUp);
+            }
+
+            for _ in 0..d {
+                app.update(Action::SearchHistoryDown);
+            }
+
+            let pos_after_ups = n - 1 - ((initial_ups - 1) % n);
+            let expected_index = (pos_after_ups + d) % n;
+            let expected_query = &entries[expected_index];
+            prop_assert_eq!(
+                &app.search.query,
+                expected_query,
+                "After {} ups then {} downs in ring of size {}, expected index {} = {:?}, got {:?}",
+                initial_ups, d, n, expected_index, expected_query, app.search.query
+            );
+        }
     }
 }

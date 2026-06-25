@@ -18,6 +18,7 @@ mod playlist_export;
 mod radio;
 mod recent_ring;
 mod recommend;
+pub mod search_history;
 
 mod runtime;
 mod text;

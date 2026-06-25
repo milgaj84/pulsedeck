@@ -21,7 +21,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 pub(super) const HARDWARE_OUTPUT_ERROR_PREFIX: &str = "Hardware output error:";
-const MAX_HARDWARE_RECOVERY_RETRIES: u8 = 1;
+
+pub use types::DeviceRecoveryConfig;
 
 /// Commands sent from the UI thread to the audio thread.
 #[derive(Debug, Clone)]
@@ -56,13 +57,16 @@ pub struct AudioEngine {
 
 impl AudioEngine {
     /// Spawn the audio engine on a dedicated OS thread.
-    pub fn spawn(sample_buffer: Arc<Mutex<VecDeque<f32>>>) -> Self {
+    pub fn spawn(
+        sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+        recovery_config: DeviceRecoveryConfig,
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
         let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
 
         let sample_buffer_clone = sample_buffer.clone();
         std::thread::spawn(move || {
-            engine_loop_v2::EngineLoop::run(cmd_rx, status_tx, sample_buffer_clone);
+            engine_loop_v2::EngineLoop::run(cmd_rx, status_tx, sample_buffer_clone, recovery_config);
         });
 
         Self { cmd_tx, status_rx }

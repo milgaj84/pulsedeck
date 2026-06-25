@@ -54,15 +54,16 @@ Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch
 - 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line with preview and enrich-only modes
 - 🩺 **Playback Doctor**: press `d` to inspect output, metadata, reconnect, decoder, recent events, and recovery hints while troubleshooting a stream
 - 🔔 **Desktop notifications**: a quiet system notification shows the current track when a new song starts, rate-limited to one per 5 seconds to prevent notification floods during stream reconnects
-- 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries up to 3× on dropout, and manual retry with `r` also works
+- 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries with configurable attempts and backoff on dropout (tunable in `pulsedeck.toml`), and manual retry with `r` also works
 - 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
-- 🔁 **Audio output recovery**: default-device playback retries once after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
-- 📐 **Mini mode**: press `F6` to toggle a compact 1-2 line display showing station, track, volume, and play state — designed for small tmux panes and tiling WM corners
+- 🔁 **Audio output recovery**: default-device playback retries with configurable attempts and delay after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
+- 📐 **Mini mode**: press `F6` to toggle a compact 1-2 line display showing station, track, volume, play state, and buffer percentage during connection — designed for small tmux panes and tiling WM corners
 - 🟢 **Station health dots**: color-coded indicators (green/yellow/red) next to stations in the library based on local connection history — spot unreliable stations at a glance; old failures decay after 7 days
 - ⏱️ **Elapsed listening time**: shows how long you've been tuned to the current station in the footer and mini mode
-- 🔍 **Station recommendations**: "Discover stations" in the command palette scores candidates against your favorites' genres, tags, and country — expand your listening without manual search
+- 🔍 **Station recommendations**: "Discover stations" in the command palette scores candidates against your favorites' genres, tags, and country with configurable weights and exclusion lists — expand your listening without manual search
 - ⌨️ **Keybinding customization**: drop a `keybindings.json` in your config directory to remap any key to any action, with mode-specific bindings and graceful fallback to defaults
-- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, and keybindings path — with backward-compatible migration from `library.json`
+- 🕐 **Search history**: last 10 searches are saved and recallable with Up/Down arrows in search mode — quickly repeat frequent queries without retyping
+- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, keybindings path, reconnect strategy, device recovery, and discover weights/exclusions — with backward-compatible migration from `library.json`
 
 ---
 
@@ -310,6 +311,17 @@ stream_metadata_enabled = true
 [playback]
 autoplay_last = false
 save_history = false
+reconnect_max_attempts = 3            # 1–10, how many times to retry on stream dropout
+reconnect_backoff_seconds = [3, 6, 12] # delay between retries (last value repeats)
+device_recovery_attempts = 2          # 1–5, retries for Bluetooth/headset disconnects
+device_recovery_delay_ms = 1000       # 100–5000, ms between device recovery attempts
+
+[discover]
+genre_weight = 3                      # 0–10, weight for genre match in scoring
+tag_weight = 1                        # 0–10, weight for tag matches in scoring
+country_weight = 1                    # 0–10, weight for country match in scoring
+exclude_tags = []                     # tags/genres to never recommend (lowercased)
+exclude_countries = []                # country codes to never recommend (uppercased)
 
 [keybindings]
 path = "keybindings.json"             # optional, relative to config dir
@@ -363,7 +375,7 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
-**1110 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, and discover cursor bounds.
+**1215 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, discover cursor bounds, search history ring cycling, config clamping invariants, exclusion filtering, and scoring formula correctness.
 
 ---
 

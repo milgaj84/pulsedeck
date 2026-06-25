@@ -277,13 +277,13 @@ pub fn search_mode_defaults() -> Vec<KeyBinding> {
         bind(
             KeySpec::Named(NamedKey::Up),
             vec![],
-            Action::PrevStation,
+            Action::SearchHistoryUp,
             mode.clone(),
         ),
         bind(
             KeySpec::Named(NamedKey::Down),
             vec![],
-            Action::NextStation,
+            Action::SearchHistoryDown,
             mode.clone(),
         ),
         bind(

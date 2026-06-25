@@ -309,9 +309,9 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         // Confirm search: add highlighted result, play it, and leave search
         (_, KeyCode::Enter) => Some(Action::SearchConfirm),
 
-        // Navigate within filtered results
-        (_, KeyCode::Up) => Some(Action::PrevStation),
-        (_, KeyCode::Down) => Some(Action::NextStation),
+        // Navigate within filtered results / cycle history
+        (_, KeyCode::Up) => Some(Action::SearchHistoryUp),
+        (_, KeyCode::Down) => Some(Action::SearchHistoryDown),
 
         // Delete character
         (_, KeyCode::Backspace) => Some(Action::SearchBackspace),

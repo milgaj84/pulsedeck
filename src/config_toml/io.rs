@@ -202,6 +202,7 @@ fn extract_playback_from_json(settings: &serde_json::Value) -> PlaybackConfig {
     PlaybackConfig {
         autoplay_last,
         save_history,
+        ..PlaybackConfig::default()
     }
 }
 
@@ -365,6 +366,7 @@ save_history = true
             playback: PlaybackConfig {
                 autoplay_last: true,
                 save_history: true,
+                ..PlaybackConfig::default()
             },
             ..AppConfig::default()
         };

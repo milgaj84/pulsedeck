@@ -207,6 +207,31 @@ impl Default for PlaybackOptions {
 }
 
 // ---------------------------------------------------------------------------
+// DeviceRecoveryConfig
+// ---------------------------------------------------------------------------
+
+/// Configuration for output device recovery behavior.
+///
+/// Controls how many times the engine retries opening the output device
+/// after a failure and how long to wait between attempts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceRecoveryConfig {
+    /// Maximum number of recovery attempts (range 1–5, default 2).
+    pub max_attempts: u8,
+    /// Delay in milliseconds between recovery attempts (range 100–5000, default 1000).
+    pub delay_ms: u64,
+}
+
+impl Default for DeviceRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 2,
+            delay_ms: 1000,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // StreamFormat
 // ---------------------------------------------------------------------------
 

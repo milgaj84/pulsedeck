@@ -65,7 +65,7 @@ impl App {
                     &self.library.settings.favorites,
                 );
                 let library_urls = self.library_url_set();
-                let results = recommend(&profile, &candidates, &library_urls);
+                let results = recommend(&profile, &candidates, &library_urls, &self.config.discover);
                 if results.is_empty() {
                     self.set_info_notice(
                         "No matches found — try starring more stations",
@@ -485,6 +485,31 @@ mod tests {
         // Only the new station should appear (library URL excluded)
         for result in &app.discover_results {
             assert_ne!(result.station.url, "http://jazz");
+        }
+    }
+
+    #[test]
+    fn test_discover_uses_app_config_for_exclusions() {
+        let mut app = test_app_with_favorites();
+        app.config.discover.exclude_countries = vec!["US".to_string()];
+
+        let mut candidate_us = station("US Jazz", "http://us-jazz", "Jazz");
+        candidate_us.tags = vec!["jazz".to_string()];
+        candidate_us.country_code = "US".to_string();
+
+        let mut candidate_de = station("DE Jazz", "http://de-jazz", "Jazz");
+        candidate_de.tags = vec!["jazz".to_string()];
+        candidate_de.country_code = "DE".to_string();
+
+        app.apply_discover_response(Ok(vec![candidate_us, candidate_de]));
+
+        // US stations should be excluded by app config
+        assert!(!app.discover_results.is_empty());
+        for result in &app.discover_results {
+            assert_ne!(
+                result.station.country_code, "US",
+                "US stations should be excluded by config"
+            );
         }
     }
 }

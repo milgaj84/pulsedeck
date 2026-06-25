@@ -21,13 +21,19 @@ impl PlaybackRuntime {
         metadata_enabled: bool,
         audio: AudioEngine,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+        reconnect_max_attempts: u8,
+        reconnect_backoff_seconds: Vec<u64>,
     ) -> Self {
         Self {
             view: PlaybackView::default(),
             volume: ui_state.volume(),
             muted: ui_state.muted(),
-            reconnect: Reconnect::default(),
-            diagnostics: PlaybackDiagnostics::new(output_device, metadata_enabled, 3),
+            reconnect: Reconnect::new(reconnect_max_attempts, reconnect_backoff_seconds),
+            diagnostics: PlaybackDiagnostics::new(
+                output_device,
+                metadata_enabled,
+                reconnect_max_attempts,
+            ),
             sleep_timer: SleepTimer::default(),
             audio,
             sample_buffer,
@@ -79,6 +85,8 @@ mod tests {
             library.settings.stream_metadata_enabled,
             audio,
             sample_buffer,
+            3,
+            vec![3, 6, 12],
         );
 
         assert_eq!(runtime.volume, 37);
@@ -107,7 +115,15 @@ mod property_tests {
         );
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();
-        PlaybackRuntime::new(&ui_state, "Test".to_string(), false, audio, sample_buffer)
+        PlaybackRuntime::new(
+            &ui_state,
+            "Test".to_string(),
+            false,
+            audio,
+            sample_buffer,
+            3,
+            vec![3, 6, 12],
+        )
     }
 
     proptest! {

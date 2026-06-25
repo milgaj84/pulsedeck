@@ -183,6 +183,12 @@ impl OutputManager {
         self.reopen_needed = false;
     }
 
+    /// Sets `recovery_retries` to a specific value for testing.
+    #[cfg(test)]
+    pub(super) fn set_recovery_retries(&mut self, n: u8) {
+        self.recovery_retries = n;
+    }
+
     /// Applies one tick of a `VolumeRamp` to the current sink, if one exists.
     ///
     /// This allows `EngineLoop` to drive volume fading without exposing the
