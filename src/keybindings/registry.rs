@@ -31,6 +31,7 @@ impl KeybindingRegistry {
     }
 
     /// Create a registry with pre-built default bindings (for testing).
+    #[cfg(test)]
     pub fn new_with_defaults(defaults: Vec<KeyBinding>) -> Self {
         Self {
             defaults,

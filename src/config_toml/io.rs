@@ -8,6 +8,7 @@ use super::serialize::serialize_toml;
 use super::{AppConfig, AudioConfig, PlaybackConfig, UiConfig};
 
 const TOML_FILENAME: &str = "pulsedeck.toml";
+#[allow(dead_code)]
 const TEMP_FILENAME: &str = "pulsedeck.toml.tmp";
 const LEGACY_FILENAME: &str = "library.json";
 
@@ -40,6 +41,7 @@ pub fn load_config(config_dir: &Path) -> LoadResult {
 
 /// Save config atomically: write to temp file, then rename.
 /// Falls back to direct write if rename fails.
+#[allow(dead_code)]
 pub fn save_config(
     config_dir: &Path,
     config: &AppConfig,

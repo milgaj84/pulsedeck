@@ -41,51 +41,25 @@ impl Default for UiConfig {
 }
 
 /// Playback behavior settings.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlaybackConfig {
     pub autoplay_last: bool,
     pub save_history: bool,
 }
 
-impl Default for PlaybackConfig {
-    fn default() -> Self {
-        Self {
-            autoplay_last: false,
-            save_history: false,
-        }
-    }
-}
-
 /// Keybinding file path override.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct KeybindingsConfig {
     pub path: Option<String>,
 }
 
-impl Default for KeybindingsConfig {
-    fn default() -> Self {
-        Self { path: None }
-    }
-}
-
 /// Top-level application configuration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AppConfig {
     pub audio: AudioConfig,
     pub ui: UiConfig,
     pub playback: PlaybackConfig,
     pub keybindings: KeybindingsConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            audio: AudioConfig::default(),
-            ui: UiConfig::default(),
-            playback: PlaybackConfig::default(),
-            keybindings: KeybindingsConfig::default(),
-        }
-    }
 }
 
 #[cfg(test)]

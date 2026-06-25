@@ -1,5 +1,7 @@
 // TOML serialization: serializes AppConfig back to TOML string, merging preserved unknown keys.
 
+#![allow(dead_code)]
+
 use super::{AppConfig, AudioConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
 
 /// Serialize AppConfig back to TOML string, merging preserved unknown keys.
