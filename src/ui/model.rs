@@ -4,12 +4,13 @@ use std::time::Duration;
 use crate::app::{
     ActiveOverlay, App, CommandPaletteState, DisplayMode, InputMode, LayoutMode, Navigation,
     NoticeState, Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackState, PlaybackView,
-    SearchState, SleepTimer, VisualizerMode,
+    SearchState, SettingRow, SleepTimer, VisualizerMode,
 };
 use crate::elapsed_format::format_elapsed;
 use crate::favorites::Library;
 use crate::favorites_set::FavoritesSet;
 use crate::history::History;
+use crate::library_sort::SortMode;
 use crate::radio::Station;
 use crate::recommend::ScoredStation;
 
@@ -48,6 +49,8 @@ pub struct UiModel<'a> {
     pub exclude_tags: Vec<String>,
     pub exclude_countries: Vec<String>,
     pub search_history_empty: bool,
+    pub settings_undo_available: [bool; SettingRow::COUNT],
+    pub sort_mode: SortMode,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -87,6 +90,10 @@ impl<'a> UiModel<'a> {
 
     pub fn show_sleep_timer(&self) -> bool {
         self.overlays.active == ActiveOverlay::SleepTimer
+    }
+
+    pub fn has_settings_undo(&self, row: SettingRow) -> bool {
+        self.settings_undo_available[row.index()]
     }
 }
 
@@ -139,6 +146,10 @@ impl<'a> From<&'a App> for UiModel<'a> {
             exclude_tags: app.config.discover.exclude_tags.clone(),
             exclude_countries: app.config.discover.exclude_countries.clone(),
             search_history_empty: app.search_history.is_empty(),
+            settings_undo_available: SettingRow::ALL.map(|row| {
+                app.settings_undo.has_entry(row.index())
+            }),
+            sort_mode: app.sort_mode,
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }
@@ -338,5 +349,43 @@ mod tests {
 
         assert!(!model.discover_results_empty);
         assert_eq!(model.exclude_tags, vec!["ads"]);
+    }
+
+    #[test]
+    fn settings_undo_marker_shown_after_change() {
+        use crate::app::SettingSnapshot;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.settings_undo
+            .capture(SettingRow::Notifications.index(), SettingSnapshot::Bool(true));
+
+        let model = UiModel::from(&app);
+
+        assert!(model.has_settings_undo(SettingRow::Notifications));
+    }
+
+    #[test]
+    fn settings_undo_marker_removed_after_undo() {
+        use crate::app::SettingSnapshot;
+
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.settings_undo
+            .capture(SettingRow::Theme.index(), SettingSnapshot::String("dark".to_string()));
+        app.settings_undo.take(SettingRow::Theme.index());
+
+        let model = UiModel::from(&app);
+
+        assert!(!model.has_settings_undo(SettingRow::Theme));
+    }
+
+    #[test]
+    fn settings_undo_marker_absent_with_no_change() {
+        let app = App::new(Library::in_memory(vec![]));
+
+        let model = UiModel::from(&app);
+
+        for row in SettingRow::ALL {
+            assert!(!model.has_settings_undo(row));
+        }
     }
 }

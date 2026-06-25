@@ -1,5 +1,6 @@
 // TOML parsing: deserializes a TOML string into AppConfig + preserved Value.
 
+use crate::library_sort::SortMode;
 use crate::theme_name::ThemeName;
 
 use super::{AppConfig, AudioConfig, DiscoverConfig, KeybindingsConfig, PlaybackConfig, UiConfig};
@@ -140,10 +141,32 @@ fn parse_ui_section(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let sort_mode = parse_sort_mode(sec, warnings);
+
     UiConfig {
         theme,
         notifications_enabled,
         stream_metadata_enabled,
+        sort_mode,
+    }
+}
+
+fn parse_sort_mode(
+    sec: &toml::map::Map<String, toml::Value>,
+    warnings: &mut Vec<String>,
+) -> String {
+    let default = "favorites_first".to_string();
+    let Some(raw) = sec.get("sort_mode").and_then(|v| v.as_str()) else {
+        return default;
+    };
+    if SortMode::from_key(raw).is_some() {
+        raw.to_string()
+    } else {
+        warnings.push(format!(
+            "ui.sort_mode: '{}' is invalid, using default 'favorites_first'",
+            raw
+        ));
+        default
     }
 }
 
@@ -1133,6 +1156,46 @@ exclude_countries = ["US", "", "  ", "GB"]
         assert_eq!(result, "🎵🎶🎸🎹🎺🎻🥁🎤🎧🎼");
         // Ensure valid UTF-8 (would panic on construction if not)
         let _ = result.as_bytes();
+    }
+
+    // --- UI section: sort_mode ---
+
+    #[test]
+    fn test_sort_mode_valid_value_parsed() {
+        for mode in ["favorites_first", "alphabetical", "recently_added", "most_played"] {
+            let input = format!("[ui]\nsort_mode = \"{}\"\n", mode);
+            let result = parse_toml(&input).unwrap();
+            assert_eq!(result.config.ui.sort_mode, mode);
+            assert!(result.warnings.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_sort_mode_missing_defaults_to_favorites_first() {
+        let input = "[ui]\ntheme = \"Retrowave\"\n";
+        let result = parse_toml(input).unwrap();
+        assert_eq!(result.config.ui.sort_mode, "favorites_first");
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_sort_mode_invalid_warns_and_defaults() {
+        let input = "[ui]\nsort_mode = \"banana\"\n";
+        let result = parse_toml(input).unwrap();
+        assert_eq!(result.config.ui.sort_mode, "favorites_first");
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(
+            result.warnings[0],
+            "ui.sort_mode: 'banana' is invalid, using default 'favorites_first'"
+        );
+    }
+
+    #[test]
+    fn test_sort_mode_wrong_type_defaults() {
+        let input = "[ui]\nsort_mode = 42\n";
+        let result = parse_toml(input).unwrap();
+        assert_eq!(result.config.ui.sort_mode, "favorites_first");
+        assert!(result.warnings.is_empty());
     }
 }
 

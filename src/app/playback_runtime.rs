@@ -81,6 +81,7 @@ mod tests {
             LayoutMode::Split,
             VisualizerMode::RealOscilloscope,
             DisplayMode::Normal,
+            None,
         );
         let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
@@ -120,6 +121,7 @@ mod property_tests {
             LayoutMode::Split,
             VisualizerMode::RealOscilloscope,
             DisplayMode::Normal,
+            None,
         );
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = AudioEngine::disconnected_for_test();

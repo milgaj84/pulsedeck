@@ -49,6 +49,13 @@ fn unix_now_string() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
+fn current_unix_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[derive(Default)]
 pub struct NoticeState {
     pub current: Option<AppNotice>,
@@ -75,8 +82,17 @@ impl AppParts {
         let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
         let (history, history_warning) = crate::history::History::load_with_warning();
+
+        #[cfg(not(test))]
         let (config, config_preserved, config_warnings, config_loaded_from_file) =
             load_toml_config();
+        #[cfg(test)]
+        let (config, config_preserved, config_warnings, config_loaded_from_file) = (
+            AppConfig::default(),
+            toml::Value::Table(toml::map::Map::new()),
+            Vec::new(),
+            false,
+        );
 
         let recovery_config = crate::audio::DeviceRecoveryConfig {
             max_attempts: config.playback.device_recovery_attempts,
@@ -136,6 +152,7 @@ fn load_keybinding_registry() -> KeybindingRegistry {
 
 /// Load TOML config from the config directory with library.json fallback.
 /// Returns defaults if no config directory is available.
+#[cfg_attr(test, allow(dead_code))]
 fn load_toml_config() -> (AppConfig, toml::Value, Vec<String>, bool) {
     let Some(config_dir) = crate::config::config_dir() else {
         return (
@@ -223,7 +240,10 @@ impl App {
 
         let config_watcher = build_config_watcher();
 
+        #[cfg(not(test))]
         let config_dir = crate::config::config_dir();
+        #[cfg(test)]
+        let config_dir: Option<std::path::PathBuf> = None;
 
         let keybinding_watcher = build_keybinding_watcher();
 
@@ -243,7 +263,8 @@ impl App {
             metadata_refresh_running: false,
             persist: persist::PersistFlags::default(),
             keybinding_registry,
-            sort_mode: crate::library_sort::SortMode::FavoritesFirst,
+            sort_mode: crate::library_sort::SortMode::from_key(&config.ui.sort_mode)
+                .unwrap_or(crate::library_sort::SortMode::FavoritesFirst),
             notification_cooldown: NotificationCooldown::new(),
             discover_results: Vec::new(),
             discover_cursor: 0,
@@ -255,6 +276,7 @@ impl App {
             keybinding_watcher,
             search_history,
             settings_undo: SettingsUndoStack::new(),
+            stale_dismissed_at: parts.ui_state.stale_dismissed_at(),
             #[cfg(test)]
             notification_count: 0,
         };
@@ -418,9 +440,15 @@ impl App {
     }
 
     fn apply_stale_station_notice(&mut self) {
-        let now = unix_now_string();
-        let count = count_stale_stations(&self.library.stations, &now);
+        let now = current_unix_epoch();
+        if super::ui_state::should_suppress_stale_notice(self.stale_dismissed_at, now) {
+            return;
+        }
+        let now_str = now.to_string();
+        let count = count_stale_stations(&self.library.stations, &now_str);
         if count > 0 {
+            self.stale_dismissed_at = Some(now);
+            self.mark_ui_state_dirty();
             self.set_info_notice(format!("{count} stations have been failing for 30+ days"));
         }
     }
@@ -609,6 +637,7 @@ mod tests {
                 LayoutMode::RightOnly,
                 VisualizerMode::SimOscilloscope,
                 DisplayMode::Normal,
+                None,
             ),
             ui_state_warning: None,
             history: crate::history::History::default(),
@@ -1363,8 +1392,10 @@ mod tests {
         app.keybinding_watcher = crate::keybindings::watcher::KeybindingWatcher::new(Some(path));
 
         let t0 = Instant::now();
-        app.check_keybinding_reload(t0); // detect mtime change
-        app.check_keybinding_reload(t0 + Duration::from_millis(500)); // debounce fires
+        // After 500ms startup cooldown, detect mtime change
+        app.check_keybinding_reload(t0 + Duration::from_millis(501));
+        // After additional 500ms debounce, reload fires
+        app.check_keybinding_reload(t0 + Duration::from_millis(1001));
 
         assert_eq!(app.keybinding_registry.customs.len(), 1);
         assert_eq!(
@@ -1392,8 +1423,10 @@ mod tests {
         app.keybinding_watcher = crate::keybindings::watcher::KeybindingWatcher::new(Some(path));
 
         let t0 = Instant::now();
-        app.check_keybinding_reload(t0); // detect mtime change
-        app.check_keybinding_reload(t0 + Duration::from_millis(500)); // debounce fires
+        // After 500ms startup cooldown, detect mtime change
+        app.check_keybinding_reload(t0 + Duration::from_millis(501));
+        // After additional 500ms debounce, reload fires (with error)
+        app.check_keybinding_reload(t0 + Duration::from_millis(1001));
 
         assert_eq!(app.keybinding_registry.customs, original_customs);
         assert!(matches!(
@@ -1449,6 +1482,42 @@ mod tests {
             }
             Some(AppNotice::Error(_)) => {} // Could be other startup warnings, not stale
         }
+    }
+
+    #[test]
+    fn from_parts_loads_sort_mode_from_config() {
+        use crate::library_sort::SortMode;
+
+        let mut parts = test_parts(Library::in_memory(vec![]));
+        parts.config.ui.sort_mode = "alphabetical".to_string();
+
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.sort_mode, SortMode::Alphabetical);
+    }
+
+    #[test]
+    fn from_parts_defaults_sort_mode_on_invalid_config_value() {
+        use crate::library_sort::SortMode;
+
+        let mut parts = test_parts(Library::in_memory(vec![]));
+        parts.config.ui.sort_mode = "nonsense".to_string();
+
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
+    }
+
+    #[test]
+    fn from_parts_defaults_sort_mode_on_empty_config_value() {
+        use crate::library_sort::SortMode;
+
+        let mut parts = test_parts(Library::in_memory(vec![]));
+        parts.config.ui.sort_mode = String::new();
+
+        let app = App::from_parts(parts);
+
+        assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
     }
 }
 
@@ -1566,6 +1635,7 @@ mod hot_reload_proptests {
                     LayoutMode::Split,
                     VisualizerMode::SimOscilloscope,
                     DisplayMode::Normal,
+                    None,
                 ),
                 ui_state_warning: None,
                 history: crate::history::History::default(),

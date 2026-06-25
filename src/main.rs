@@ -13,6 +13,7 @@ mod history;
 mod keybindings;
 mod library_filter;
 pub mod library_sort;
+pub(crate) mod mtime_debounce;
 mod number_jump;
 mod playlist;
 mod playlist_export;

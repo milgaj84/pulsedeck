@@ -6,8 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::parse::parse_toml;
 use super::AppConfig;
-
-const DEBOUNCE_DURATION: Duration = Duration::from_millis(500);
+use crate::mtime_debounce::MtimeDebounce;
 
 /// Result of checking for config file changes.
 #[derive(Debug)]
@@ -22,17 +21,15 @@ pub enum ReloadResult {
 
 /// Tracks file modification time for hot-reload detection with debounce.
 pub struct ConfigWatcher {
-    last_mtime: Option<SystemTime>,
+    debounce: MtimeDebounce,
     config_path: PathBuf,
-    pending_since: Option<Instant>,
 }
 
 impl ConfigWatcher {
     pub fn new(config_path: PathBuf) -> Self {
         Self {
-            last_mtime: None,
+            debounce: MtimeDebounce::new(Duration::from_millis(500), None, Instant::now()),
             config_path,
-            pending_since: None,
         }
     }
 
@@ -41,42 +38,18 @@ impl ConfigWatcher {
     pub fn check_reload(&mut self, now: Instant) -> ReloadResult {
         let mtime = Self::get_mtime(&self.config_path);
 
-        if self.mtime_changed(mtime) {
-            self.last_mtime = mtime;
-            self.pending_since = Some(now);
-            return ReloadResult::Unchanged;
+        if self.debounce.check(mtime, now) {
+            self.reload_file()
+        } else {
+            ReloadResult::Unchanged
         }
-
-        self.try_debounced_reload(now)
-    }
-
-    fn mtime_changed(&self, current: Option<SystemTime>) -> bool {
-        match (current, self.last_mtime) {
-            (Some(cur), Some(last)) => cur != last,
-            (Some(_), None) => true,
-            _ => false,
-        }
-    }
-
-    fn try_debounced_reload(&mut self, now: Instant) -> ReloadResult {
-        let pending = match self.pending_since {
-            Some(t) => t,
-            None => return ReloadResult::Unchanged,
-        };
-
-        if now.duration_since(pending) < DEBOUNCE_DURATION {
-            return ReloadResult::Unchanged;
-        }
-
-        self.pending_since = None;
-        self.reload_file()
     }
 
     fn get_mtime(path: &PathBuf) -> Option<SystemTime> {
         fs::metadata(path).ok()?.modified().ok()
     }
 
-    fn reload_file(&mut self) -> ReloadResult {
+    fn reload_file(&self) -> ReloadResult {
         let content = match fs::read_to_string(&self.config_path) {
             Ok(c) => c,
             Err(e) => return ReloadResult::Error(e.to_string()),
@@ -338,12 +311,10 @@ mod tests {
     }
 
     #[test]
-    fn test_new_creates_watcher_with_no_mtime() {
+    fn test_new_creates_watcher_with_correct_path() {
         let path = PathBuf::from("/nonexistent/path/config.toml");
         let watcher = ConfigWatcher::new(path.clone());
 
         assert_eq!(watcher.config_path, path);
-        assert!(watcher.last_mtime.is_none());
-        assert!(watcher.pending_since.is_none());
     }
 }

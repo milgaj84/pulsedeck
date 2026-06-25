@@ -49,6 +49,7 @@ mod tests {
             LayoutMode::RightOnly,
             VisualizerMode::SimOscilloscope,
             DisplayMode::Mini,
+            None,
         );
 
         let runtime = UiRuntimeState::from_ui_state(&ui_state);

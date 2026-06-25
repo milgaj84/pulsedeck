@@ -54,6 +54,8 @@ pub use playback_runtime::{PlaybackOptions, PlaybackRuntime};
 pub use reconnect::Reconnect;
 pub use search::SearchState;
 pub use settings_undo::SettingsUndoStack;
+#[cfg(test)]
+pub(crate) use settings_undo::SettingSnapshot;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{
     AppNotice, DecoderState, DisplayMode, InputMode, LayoutMode, PlaybackDiagnostics,
@@ -123,6 +125,9 @@ pub struct App {
 
     /// Per-row undo buffer for the settings overlay.
     pub settings_undo: SettingsUndoStack,
+
+    /// Epoch timestamp when the stale notice was last dismissed.
+    pub stale_dismissed_at: Option<u64>,
 
     /// Test-only counter for how many notifications were dispatched.
     #[cfg(test)]

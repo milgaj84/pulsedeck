@@ -28,6 +28,37 @@ impl SortMode {
         }
     }
 
+    /// Stable string key for TOML serialization.
+    pub fn to_key(self) -> &'static str {
+        match self {
+            Self::FavoritesFirst => "favorites_first",
+            Self::Alphabetical => "alphabetical",
+            Self::RecentlyAdded => "recently_added",
+            Self::MostPlayed => "most_played",
+        }
+    }
+
+    /// Parse from TOML key string. Returns None for unrecognized values.
+    pub fn from_key(s: &str) -> Option<Self> {
+        match s {
+            "favorites_first" => Some(Self::FavoritesFirst),
+            "alphabetical" => Some(Self::Alphabetical),
+            "recently_added" => Some(Self::RecentlyAdded),
+            "most_played" => Some(Self::MostPlayed),
+            _ => None,
+        }
+    }
+
+    /// Single-character abbreviation for footer chip display.
+    pub fn chip(self) -> char {
+        match self {
+            Self::FavoritesFirst => 'F',
+            Self::Alphabetical => 'A',
+            Self::RecentlyAdded => 'R',
+            Self::MostPlayed => 'M',
+        }
+    }
+
     /// Human-readable label for notice display.
     pub fn label(self) -> &'static str {
         match self {
@@ -515,5 +546,46 @@ mod tests {
         assert_eq!(SortMode::Alphabetical.label(), "Alphabetical");
         assert_eq!(SortMode::RecentlyAdded.label(), "Recently Added");
         assert_eq!(SortMode::MostPlayed.label(), "Most Played");
+    }
+
+    #[test]
+    fn test_to_key_returns_expected_strings() {
+        assert_eq!(SortMode::FavoritesFirst.to_key(), "favorites_first");
+        assert_eq!(SortMode::Alphabetical.to_key(), "alphabetical");
+        assert_eq!(SortMode::RecentlyAdded.to_key(), "recently_added");
+        assert_eq!(SortMode::MostPlayed.to_key(), "most_played");
+    }
+
+    #[test]
+    fn test_from_key_parses_valid_strings() {
+        assert_eq!(SortMode::from_key("favorites_first"), Some(SortMode::FavoritesFirst));
+        assert_eq!(SortMode::from_key("alphabetical"), Some(SortMode::Alphabetical));
+        assert_eq!(SortMode::from_key("recently_added"), Some(SortMode::RecentlyAdded));
+        assert_eq!(SortMode::from_key("most_played"), Some(SortMode::MostPlayed));
+    }
+
+    #[test]
+    fn test_from_key_returns_none_for_invalid() {
+        assert_eq!(SortMode::from_key(""), None);
+        assert_eq!(SortMode::from_key("unknown"), None);
+        assert_eq!(SortMode::from_key("Alphabetical"), None);
+        assert_eq!(SortMode::from_key("FAVORITES_FIRST"), None);
+    }
+
+    #[test]
+    fn test_to_key_from_key_round_trip() {
+        for &mode in &SortMode::ALL {
+            let key = mode.to_key();
+            let parsed = SortMode::from_key(key);
+            assert_eq!(parsed, Some(mode));
+        }
+    }
+
+    #[test]
+    fn test_chip_returns_expected_chars() {
+        assert_eq!(SortMode::FavoritesFirst.chip(), 'F');
+        assert_eq!(SortMode::Alphabetical.chip(), 'A');
+        assert_eq!(SortMode::RecentlyAdded.chip(), 'R');
+        assert_eq!(SortMode::MostPlayed.chip(), 'M');
     }
 }

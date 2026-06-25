@@ -191,6 +191,7 @@ fn extract_ui_from_json(settings: &serde_json::Value) -> UiConfig {
         theme,
         notifications_enabled,
         stream_metadata_enabled,
+        ..UiConfig::default()
     }
 }
 
@@ -366,6 +367,7 @@ save_history = true
                 theme: "Terminal".to_string(),
                 notifications_enabled: false,
                 stream_metadata_enabled: false,
+                sort_mode: "favorites_first".to_string(),
             },
             playback: PlaybackConfig {
                 autoplay_last: true,

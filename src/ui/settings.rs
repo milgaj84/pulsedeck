@@ -91,6 +91,10 @@ fn render_setting_row(frame: &mut Frame, area: Rect, app: &UiModel<'_>, row: Set
     )];
     spans.extend(setting_row_spans(app, row, label_style));
 
+    if app.has_settings_undo(row) {
+        spans.push(Span::styled(" ↩", theme::dim()));
+    }
+
     let mut paragraph = Paragraph::new(Line::from(spans));
     if is_selected {
         paragraph = paragraph.style(active_bg);

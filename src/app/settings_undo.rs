@@ -36,7 +36,6 @@ impl SettingsUndoStack {
     }
 
     /// Checks if entry exists for row.
-    #[allow(dead_code)]
     pub fn has_entry(&self, row_index: usize) -> bool {
         self.entries.contains_key(&row_index)
     }

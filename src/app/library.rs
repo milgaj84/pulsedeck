@@ -90,6 +90,8 @@ impl App {
 
     pub(super) fn cycle_sort_mode(&mut self) {
         self.sort_mode = self.sort_mode.next();
+        self.config.ui.sort_mode = self.sort_mode.to_key().to_string();
+        self.persist_config_change();
         self.set_info_notice(format!("Sort: {}", self.sort_mode.label()));
     }
 
@@ -576,7 +578,6 @@ mod tests {
             "http://a",
             "Synthwave",
         )]));
-        assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
 
         app.update(Action::CycleSortMode);
 
@@ -601,6 +602,43 @@ mod tests {
 
         assert_eq!(app.sort_mode, SortMode::FavoritesFirst);
         assert_eq!(notice_text(&app), Some("Sort: Favorites First"));
+    }
+
+    #[test]
+    fn test_cycle_sort_mode_persists_to_config() {
+        use crate::library_sort::SortMode;
+
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+
+        app.update(Action::CycleSortMode);
+
+        assert_eq!(app.sort_mode, SortMode::Alphabetical);
+        assert_eq!(app.config.ui.sort_mode, "alphabetical");
+    }
+
+    #[test]
+    fn test_cycle_sort_mode_persists_each_step() {
+        let mut app = App::new(Library::in_memory(vec![station(
+            "A",
+            "http://a",
+            "Synthwave",
+        )]));
+
+        app.update(Action::CycleSortMode);
+        assert_eq!(app.config.ui.sort_mode, "alphabetical");
+
+        app.update(Action::CycleSortMode);
+        assert_eq!(app.config.ui.sort_mode, "recently_added");
+
+        app.update(Action::CycleSortMode);
+        assert_eq!(app.config.ui.sort_mode, "most_played");
+
+        app.update(Action::CycleSortMode);
+        assert_eq!(app.config.ui.sort_mode, "favorites_first");
     }
 
     #[test]

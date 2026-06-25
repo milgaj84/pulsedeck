@@ -3,6 +3,7 @@ use ratatui::widgets::Paragraph;
 
 use super::theme;
 use crate::app::{AppNotice, InputMode, LayoutMode, PlaybackState, VisualizerMode};
+use crate::library_sort::SortMode;
 use crate::ui::model::UiModel;
 
 /// Render the bottom control bar: playback status + volume + keybinds.
@@ -71,6 +72,14 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         visualizer_label(app.visualizer_mode),
         theme::dim(),
     ));
+
+    if app.layout_mode != LayoutMode::RightOnly {
+        spans.push(Span::styled("  ", theme::dim()));
+        spans.push(Span::styled(
+            sort_mode_chip(app.sort_mode),
+            Style::default().fg(theme::accent_secondary()),
+        ));
+    }
 
     if let Some(remaining) = app.sleep_timer.remaining(std::time::Instant::now()) {
         let secs = remaining.as_secs();
@@ -156,6 +165,10 @@ fn visualizer_label(visualizer_mode: VisualizerMode) -> &'static str {
         VisualizerMode::RealOscilloscope => "REAL OSC",
         VisualizerMode::SimOscilloscope => "SIM OSC",
     }
+}
+
+fn sort_mode_chip(mode: SortMode) -> String {
+    format!("[{}]", mode.chip())
 }
 
 /// Bottom row: keyboard shortcut hints, mode-aware.
@@ -319,6 +332,7 @@ mod tests {
     use super::*;
     use crate::app::{App, PlaybackState};
     use crate::favorites::Library;
+    use crate::library_sort::SortMode;
     use crate::radio::Station;
     use crate::ui::model::UiModel;
 
@@ -337,6 +351,37 @@ mod tests {
             "REAL OSC"
         );
         assert_eq!(visualizer_label(VisualizerMode::SimOscilloscope), "SIM OSC");
+    }
+
+    #[test]
+    fn sort_mode_chip_updates_when_sort_mode_changes() {
+        let mut app = App::new(Library::in_memory(vec![Station::basic(
+            "A", "http://a", "Genre", "US", 128,
+        )]));
+
+        app.sort_mode = SortMode::FavoritesFirst;
+        let model = UiModel::from(&app);
+        assert_eq!(model.sort_mode.chip(), 'F');
+
+        app.sort_mode = SortMode::Alphabetical;
+        let model = UiModel::from(&app);
+        assert_eq!(model.sort_mode.chip(), 'A');
+
+        app.sort_mode = SortMode::RecentlyAdded;
+        let model = UiModel::from(&app);
+        assert_eq!(model.sort_mode.chip(), 'R');
+
+        app.sort_mode = SortMode::MostPlayed;
+        let model = UiModel::from(&app);
+        assert_eq!(model.sort_mode.chip(), 'M');
+    }
+
+    #[test]
+    fn sort_mode_chip_formats_with_brackets() {
+        assert_eq!(sort_mode_chip(SortMode::FavoritesFirst), "[F]");
+        assert_eq!(sort_mode_chip(SortMode::Alphabetical), "[A]");
+        assert_eq!(sort_mode_chip(SortMode::RecentlyAdded), "[R]");
+        assert_eq!(sort_mode_chip(SortMode::MostPlayed), "[M]");
     }
 
     #[test]

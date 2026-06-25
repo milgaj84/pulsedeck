@@ -832,4 +832,21 @@ save_history = false
         let bindings = registry.effective_bindings();
         assert!(!bindings.is_empty());
     }
+
+    #[test]
+    fn test_config_show_default_contains_sort_mode_favorites_first() {
+        let temp_dir = unique_temp_dir("pulsedeck_config_show_sort_mode");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let result = crate::config_toml::io::load_config(&temp_dir);
+        let output =
+            crate::config_toml::serialize::serialize_toml(&result.config, &result.preserved);
+
+        assert!(
+            output.contains("sort_mode = \"favorites_first\""),
+            "config show output must include sort_mode with default value, got:\n{output}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
 }

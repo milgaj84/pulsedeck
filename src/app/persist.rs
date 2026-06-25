@@ -176,6 +176,7 @@ impl App {
                 self.ui.layout_mode,
                 self.ui.visualizer_mode,
                 self.ui.display_mode,
+                self.stale_dismissed_at,
             );
 
             match state.save() {

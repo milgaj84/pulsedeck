@@ -29,6 +29,7 @@ pub struct UiConfig {
     pub theme: String,
     pub notifications_enabled: bool,
     pub stream_metadata_enabled: bool,
+    pub sort_mode: String,
 }
 
 impl Default for UiConfig {
@@ -37,6 +38,7 @@ impl Default for UiConfig {
             theme: "Retrowave".to_string(),
             notifications_enabled: true,
             stream_metadata_enabled: true,
+            sort_mode: "favorites_first".to_string(),
         }
     }
 }
@@ -126,6 +128,7 @@ mod tests {
         assert_eq!(config.theme, "Retrowave");
         assert!(config.notifications_enabled);
         assert!(config.stream_metadata_enabled);
+        assert_eq!(config.sort_mode, "favorites_first");
     }
 
     #[test]

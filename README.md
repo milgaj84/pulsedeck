@@ -185,7 +185,7 @@ Search results show saved stations with a star and include compact genre/country
 - In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
 - During stop or station changes, the deck stays visually active while the audio fade-out completes.
 - Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
-- Watch the footer chips for playback state, volume, layout, and visualizer mode.
+- Watch the footer chips for playback state, volume, layout, visualizer mode, and active sort mode.
 
 **Playback codec support:**
 
@@ -307,6 +307,7 @@ default_volume = 80                   # 0–100
 theme = "Retrowave"                   # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal
 notifications_enabled = true
 stream_metadata_enabled = true
+sort_mode = "favorites_first"         # favorites_first | alphabetical | recently_added | most_played
 
 [playback]
 autoplay_last = false
@@ -375,7 +376,7 @@ PulseDeck's CI checks:
 
 The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
 
-**1298 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, discover cursor bounds, search history ring cycling, config clamping invariants, exclusion filtering, scoring formula correctness, hot-reload propagation, Unicode truncation, buffer animation determinism, library sort permutation and ordering, stale station classification, config validation round-trips, and settings undo semantics.
+**1331 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, discover cursor bounds, search history ring cycling, config clamping invariants, exclusion filtering, scoring formula correctness, hot-reload propagation, Unicode truncation, buffer animation determinism, library sort permutation and ordering, stale station classification, config validation round-trips, settings undo semantics, mtime debounce invariants, sort mode serialization round-trips, and stale notice suppression thresholds.
 
 ---
 

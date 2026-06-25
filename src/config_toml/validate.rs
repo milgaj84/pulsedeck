@@ -39,6 +39,15 @@ mod property_tests {
         )
     }
 
+    fn valid_sort_mode_strategy() -> impl Strategy<Value = String> {
+        prop::sample::select(vec![
+            "favorites_first".to_string(),
+            "alphabetical".to_string(),
+            "recently_added".to_string(),
+            "most_played".to_string(),
+        ])
+    }
+
     fn valid_app_config_strategy() -> impl Strategy<Value = AppConfig> {
         let base = (
             any::<Option<String>>(),
@@ -46,6 +55,7 @@ mod property_tests {
             valid_theme_strategy(),
             any::<bool>(),
             any::<bool>(),
+            valid_sort_mode_strategy(),
             any::<bool>(),
             any::<bool>(),
             any::<Option<String>>(),
@@ -72,6 +82,7 @@ mod property_tests {
                     theme,
                     notifications_enabled,
                     stream_metadata_enabled,
+                    sort_mode,
                     autoplay_last,
                     save_history,
                     keybindings_path,
@@ -93,6 +104,7 @@ mod property_tests {
                         theme,
                         notifications_enabled,
                         stream_metadata_enabled,
+                        sort_mode,
                     },
                     playback: PlaybackConfig {
                         autoplay_last,
@@ -158,6 +170,7 @@ mod tests {
                 theme: "Terminal".to_string(),
                 notifications_enabled: false,
                 stream_metadata_enabled: true,
+                sort_mode: "favorites_first".to_string(),
             },
             playback: PlaybackConfig {
                 autoplay_last: true,

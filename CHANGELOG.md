@@ -4,6 +4,36 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.10.1] - Unreleased
+
+### Added
+- **Sort mode persistence**: Selected library sort mode now persists to `pulsedeck.toml` and restores on startup. No more reset to Favorites First every launch.
+- **Sort mode footer chip**: A `[F]`/`[A]`/`[R]`/`[M]` indicator in the status bar shows the active sort mode when the library is visible.
+- **Command palette "Cycle sort mode"**: The sort mode can now be cycled from the command palette in addition to the `S` key.
+- **Settings undo visual marker**: A dim `↩` appears next to settings rows that have an undo entry available, so you know which rows can be reverted.
+- **Stale notice suppression**: The "stations failing for 30+ days" startup notice is now suppressed for 7 days after being shown, preventing repeated alerts.
+- **`config show` includes sort_mode**: The CLI `pulsedeck config show` command now emits the `sort_mode` field.
+
+### Improved
+- **Keybinding watcher startup cooldown**: A 500ms cooldown at startup prevents spurious "Keybindings reloaded" notices caused by editor save-rename patterns during launch.
+- **Unified MtimeDebounce helper**: Both `ConfigWatcher` and `KeybindingWatcher` now delegate to a shared `MtimeDebounce` struct, reducing duplicated mtime+debounce logic.
+- **Test isolation**: Tests no longer read from or write to the user's real config directory. All test builds use `AppConfig::default()`, eliminating cross-test pollution and environment-dependent failures.
+
+### Removed
+- **Dead `sort_with_favorites` function**: Removed unused function and its 5 associated tests from `src/app/favorites_actions.rs`.
+
+### Fixed
+- **Keybinding watcher test flakiness**: The filesystem-dependent `test_file_modification_after_initial_reload` is now marked `#[ignore]`; equivalent behavior is covered by deterministic `MtimeDebounce` unit tests with injected time values.
+
+### Internal
+- 1331 tests pass, zero clippy warnings.
+- New module: `src/mtime_debounce.rs`.
+- `UiConfig` gains `sort_mode: String` field with parse validation and serialize support.
+- `UiState` gains `stale_dismissed_at: Option<u64>` for suppression tracking.
+- `UiModel` gains `settings_undo_available` array and `sort_mode` field.
+
+---
+
 ## [0.10.0] - Unreleased
 
 ### Added

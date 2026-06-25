@@ -21,6 +21,7 @@ pub enum PaletteCommand {
     Discover,
     OpenHelp,
     ShowKeybindings,
+    CycleSortMode,
 }
 
 const ALWAYS_AVAILABLE_COMMANDS: &[PaletteCommand] = &[
@@ -34,6 +35,7 @@ const ALWAYS_AVAILABLE_COMMANDS: &[PaletteCommand] = &[
     PaletteCommand::Discover,
     PaletteCommand::OpenHelp,
     PaletteCommand::ShowKeybindings,
+    PaletteCommand::CycleSortMode,
 ];
 
 pub fn command_label(command: PaletteCommand) -> &'static str {
@@ -50,6 +52,7 @@ pub fn command_label(command: PaletteCommand) -> &'static str {
         PaletteCommand::Discover => "Discover stations",
         PaletteCommand::OpenHelp => "Open help",
         PaletteCommand::ShowKeybindings => "Show keybindings",
+        PaletteCommand::CycleSortMode => "Cycle sort mode",
     }
 }
 
@@ -67,6 +70,7 @@ pub fn command_action(command: PaletteCommand) -> Action {
         PaletteCommand::Discover => Action::Discover,
         PaletteCommand::OpenHelp => Action::ToggleHelp,
         PaletteCommand::ShowKeybindings => Action::ShowKeybindings,
+        PaletteCommand::CycleSortMode => Action::CycleSortMode,
     }
 }
 
@@ -347,5 +351,45 @@ mod tests {
             command_action(PaletteCommand::ShowKeybindings),
             Action::ShowKeybindings
         );
+    }
+
+    #[test]
+    fn cycle_sort_mode_appears_in_unfiltered_list() {
+        let app = test_app();
+
+        let commands = filtered_commands("", &app);
+
+        assert!(commands.contains(&PaletteCommand::CycleSortMode));
+    }
+
+    #[test]
+    fn filtering_on_sort_includes_cycle_sort_mode() {
+        let app = test_app();
+
+        let commands = filtered_commands("sort", &app);
+
+        assert!(commands.contains(&PaletteCommand::CycleSortMode));
+    }
+
+    #[test]
+    fn filtering_on_cycle_includes_cycle_sort_mode() {
+        let app = test_app();
+
+        let commands = filtered_commands("cycle", &app);
+
+        assert!(commands.contains(&PaletteCommand::CycleSortMode));
+    }
+
+    #[test]
+    fn cycle_sort_mode_command_advances_sort_mode() {
+        let mut app = test_app();
+        let initial_mode = app.sort_mode;
+
+        app.update(Action::OpenCommandPalette);
+        app.ui.command_palette.query = "cycle sort".to_string();
+        app.update(Action::CommandPaletteConfirm);
+
+        assert_ne!(app.sort_mode, initial_mode);
+        assert_eq!(app.sort_mode, initial_mode.next());
     }
 }

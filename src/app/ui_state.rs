@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
 const VISUALIZER_MODE_COUNT: usize = 3;
+/// Suppression window: 7 days in seconds.
+const STALE_SUPPRESSION_SECONDS: u64 = 604_800;
 #[cfg(not(test))]
 const UI_STATE_FILE: &str = "ui-state.json";
 
@@ -21,6 +23,16 @@ pub(super) struct UiState {
     visualizer_mode: usize,
     #[serde(default = "default_display_mode_key")]
     display_mode: String,
+    #[serde(default)]
+    pub stale_dismissed_at: Option<u64>,
+}
+
+/// Returns `true` when the stale notice should be suppressed (dismissed < 7 days ago).
+pub(super) fn should_suppress_stale_notice(dismissed_at: Option<u64>, now_epoch: u64) -> bool {
+    match dismissed_at {
+        None => false,
+        Some(at) => now_epoch.saturating_sub(at) < STALE_SUPPRESSION_SECONDS,
+    }
 }
 
 impl Default for UiState {
@@ -31,6 +43,7 @@ impl Default for UiState {
             layout_mode: default_layout_mode_key(),
             visualizer_mode: 0,
             display_mode: default_display_mode_key(),
+            stale_dismissed_at: None,
         }
     }
 }
@@ -64,6 +77,7 @@ impl UiState {
         layout_mode: LayoutMode,
         visualizer_mode: VisualizerMode,
         display_mode: DisplayMode,
+        stale_dismissed_at: Option<u64>,
     ) -> Self {
         Self {
             volume,
@@ -71,6 +85,7 @@ impl UiState {
             layout_mode: layout_mode_key(layout_mode).to_string(),
             visualizer_mode: visualizer_mode.to_index(),
             display_mode: display_mode_key(display_mode).to_string(),
+            stale_dismissed_at,
         }
         .sanitized()
     }
@@ -93,6 +108,10 @@ impl UiState {
 
     pub(super) fn visualizer_mode(&self) -> usize {
         self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1)
+    }
+
+    pub(super) fn stale_dismissed_at(&self) -> Option<u64> {
+        self.stale_dismissed_at
     }
 
     #[cfg(not(test))]
@@ -193,6 +212,7 @@ mod tests {
             layout_mode: "garbage".to_string(),
             visualizer_mode: 99,
             display_mode: "garbage".to_string(),
+            stale_dismissed_at: None,
         };
 
         let state = state.sanitized();
@@ -252,6 +272,7 @@ mod tests {
             LayoutMode::RightOnly,
             VisualizerMode::SimOscilloscope,
             DisplayMode::Mini,
+            None,
         );
 
         assert_eq!(state.volume(), 65);
@@ -259,5 +280,48 @@ mod tests {
         assert_eq!(state.layout_mode(), LayoutMode::RightOnly);
         assert_eq!(state.display_mode(), DisplayMode::Mini);
         assert_eq!(state.visualizer_mode(), 2);
+    }
+
+    #[test]
+    fn should_suppress_stale_notice_none_not_suppressed() {
+        assert!(!should_suppress_stale_notice(None, 1_700_000_000));
+    }
+
+    #[test]
+    fn should_suppress_stale_notice_recent_timestamp_suppressed() {
+        let now = 1_700_000_000;
+        let dismissed = now - 3600; // 1 hour ago
+        assert!(should_suppress_stale_notice(Some(dismissed), now));
+    }
+
+    #[test]
+    fn should_suppress_stale_notice_seven_plus_days_not_suppressed() {
+        let now = 1_700_000_000;
+        let dismissed = now - 604_800; // exactly 7 days ago
+        assert!(!should_suppress_stale_notice(Some(dismissed), now));
+
+        let dismissed_older = now - 700_000; // more than 7 days
+        assert!(!should_suppress_stale_notice(Some(dismissed_older), now));
+    }
+
+    #[test]
+    fn should_suppress_stale_notice_future_timestamp_suppressed() {
+        let now = 1_700_000_000;
+        let dismissed = now + 3600; // future timestamp
+        assert!(should_suppress_stale_notice(Some(dismissed), now));
+    }
+
+    #[test]
+    fn from_app_values_preserves_stale_dismissed_at() {
+        let state = UiState::from_app_values(
+            80,
+            false,
+            LayoutMode::Split,
+            VisualizerMode::RealOscilloscope,
+            DisplayMode::Normal,
+            Some(1_700_000_000),
+        );
+
+        assert_eq!(state.stale_dismissed_at(), Some(1_700_000_000));
     }
 }

@@ -48,6 +48,10 @@ fn set_ui_section(table: &mut toml::map::Map<String, toml::Value>, ui: &UiConfig
         "stream_metadata_enabled".into(),
         toml::Value::Boolean(ui.stream_metadata_enabled),
     );
+    sec.insert(
+        "sort_mode".into(),
+        toml::Value::String(ui.sort_mode.clone()),
+    );
 }
 
 fn set_playback_section(
@@ -181,6 +185,15 @@ mod property_tests {
         prop::collection::vec("[A-Z]{2}", 0..=5)
     }
 
+    fn valid_sort_mode_strategy() -> impl Strategy<Value = String> {
+        prop::sample::select(vec![
+            "favorites_first".to_string(),
+            "alphabetical".to_string(),
+            "recently_added".to_string(),
+            "most_played".to_string(),
+        ])
+    }
+
     fn valid_app_config_strategy() -> impl Strategy<Value = AppConfig> {
         let base = (
             any::<Option<String>>(),
@@ -188,6 +201,7 @@ mod property_tests {
             valid_theme_strategy(),
             any::<bool>(),
             any::<bool>(),
+            valid_sort_mode_strategy(),
             any::<bool>(),
             any::<bool>(),
             any::<Option<String>>(),
@@ -214,6 +228,7 @@ mod property_tests {
                     theme,
                     notifications_enabled,
                     stream_metadata_enabled,
+                    sort_mode,
                     autoplay_last,
                     save_history,
                     keybindings_path,
@@ -235,6 +250,7 @@ mod property_tests {
                         theme,
                         notifications_enabled,
                         stream_metadata_enabled,
+                        sort_mode,
                     },
                     playback: PlaybackConfig {
                         autoplay_last,
@@ -290,6 +306,7 @@ mod tests {
                 theme: "Retrowave".to_string(),
                 notifications_enabled: false,
                 stream_metadata_enabled: true,
+                sort_mode: "favorites_first".to_string(),
             },
             playback: PlaybackConfig {
                 autoplay_last: true,
@@ -458,6 +475,7 @@ stream_metadata_enabled = true
                 theme: "Terminal".to_string(),
                 notifications_enabled: false,
                 stream_metadata_enabled: false,
+                sort_mode: "alphabetical".to_string(),
             },
             playback: PlaybackConfig {
                 autoplay_last: true,
@@ -484,5 +502,24 @@ stream_metadata_enabled = true
         let result = parse_toml(&output).unwrap();
 
         assert_eq!(result.config, config);
+    }
+
+    #[test]
+    fn test_serialize_toml_sort_mode_included_in_output() {
+        let config = AppConfig {
+            ui: UiConfig {
+                sort_mode: "alphabetical".to_string(),
+                ..UiConfig::default()
+            },
+            ..AppConfig::default()
+        };
+
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let output = serialize_toml(&config, &preserved);
+
+        assert!(output.contains("sort_mode = \"alphabetical\""));
+
+        let result = parse_toml(&output).unwrap();
+        assert_eq!(result.config.ui.sort_mode, "alphabetical");
     }
 }

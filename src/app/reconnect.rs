@@ -398,6 +398,7 @@ mod tests {
                 LayoutMode::Split,
                 VisualizerMode::RealOscilloscope,
                 DisplayMode::Normal,
+                None,
             ),
             ui_state_warning: None,
             history: crate::history::History::default(),

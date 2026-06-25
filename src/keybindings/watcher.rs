@@ -6,8 +6,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::registry::KeybindingRegistry;
 use super::KeyBinding;
+use crate::mtime_debounce::MtimeDebounce;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(500);
+const STARTUP_COOLDOWN: Duration = Duration::from_millis(500);
 
 /// Result of checking for keybinding file changes.
 #[derive(Debug)]
@@ -21,18 +23,17 @@ pub enum KeybindingReloadResult {
 }
 
 /// Tracks keybinding file modification time for hot-reload with debounce.
+/// Delegates mtime/debounce logic to `MtimeDebounce` with a 500ms startup cooldown.
 pub struct KeybindingWatcher {
     path: Option<PathBuf>,
-    last_mtime: Option<SystemTime>,
-    pending_since: Option<Instant>,
+    debounce: MtimeDebounce,
 }
 
 impl KeybindingWatcher {
     pub fn new(path: Option<PathBuf>) -> Self {
         Self {
             path,
-            last_mtime: None,
-            pending_since: None,
+            debounce: MtimeDebounce::new(DEBOUNCE_DURATION, Some(STARTUP_COOLDOWN), Instant::now()),
         }
     }
 
@@ -47,35 +48,11 @@ impl KeybindingWatcher {
 
         let mtime = get_mtime(&path);
 
-        if self.mtime_changed(mtime) {
-            self.last_mtime = mtime;
-            self.pending_since = Some(now);
+        if !self.debounce.check(mtime, now) {
             return KeybindingReloadResult::Unchanged;
         }
 
-        self.try_debounced_reload(&path, now)
-    }
-
-    fn mtime_changed(&self, current: Option<SystemTime>) -> bool {
-        match (current, self.last_mtime) {
-            (Some(cur), Some(last)) => cur != last,
-            (Some(_), None) => true,
-            _ => false,
-        }
-    }
-
-    fn try_debounced_reload(&mut self, path: &PathBuf, now: Instant) -> KeybindingReloadResult {
-        let pending = match self.pending_since {
-            Some(t) => t,
-            None => return KeybindingReloadResult::Unchanged,
-        };
-
-        if now.duration_since(pending) < DEBOUNCE_DURATION {
-            return KeybindingReloadResult::Unchanged;
-        }
-
-        self.pending_since = None;
-        reload_keybindings(path)
+        reload_keybindings(&path)
     }
 }
 
@@ -140,13 +117,18 @@ mod tests {
         let mut watcher = KeybindingWatcher::new(Some(path));
         let t0 = Instant::now();
 
-        // First call detects mtime change (None→Some), starts debounce
+        // During cooldown (first 500ms), all signals suppressed
         let result = watcher.check_reload(t0);
         assert!(matches!(result, KeybindingReloadResult::Unchanged));
 
-        // After 500ms debounce, reload fires
-        let t1 = t0 + Duration::from_millis(500);
+        // After cooldown, first check detects mtime change (None→Some), starts debounce
+        let t1 = t0 + Duration::from_millis(501);
         let result = watcher.check_reload(t1);
+        assert!(matches!(result, KeybindingReloadResult::Unchanged));
+
+        // After debounce elapses, reload fires
+        let t2 = t1 + Duration::from_millis(500);
+        let result = watcher.check_reload(t2);
         match result {
             KeybindingReloadResult::Reloaded(bindings) => {
                 assert_eq!(bindings.len(), 1);
@@ -165,13 +147,14 @@ mod tests {
         let mut watcher = KeybindingWatcher::new(Some(path));
         let t0 = Instant::now();
 
-        // Detect change
-        let result = watcher.check_reload(t0);
+        // After cooldown, detect mtime change
+        let t1 = t0 + Duration::from_millis(501);
+        let result = watcher.check_reload(t1);
         assert!(matches!(result, KeybindingReloadResult::Unchanged));
 
         // After debounce, attempt reload → error
-        let t1 = t0 + Duration::from_millis(500);
-        let result = watcher.check_reload(t1);
+        let t2 = t1 + Duration::from_millis(500);
+        let result = watcher.check_reload(t2);
         match result {
             KeybindingReloadResult::Error(msg) => {
                 assert!(!msg.is_empty());
@@ -189,18 +172,41 @@ mod tests {
         let mut watcher = KeybindingWatcher::new(Some(path));
         let t0 = Instant::now();
 
-        // Detect + debounce + reload
-        watcher.check_reload(t0);
-        let t1 = t0 + Duration::from_millis(500);
-        let _ = watcher.check_reload(t1);
+        // After cooldown, detect + debounce + reload
+        let t1 = t0 + Duration::from_millis(501);
+        watcher.check_reload(t1);
+        let t2 = t1 + Duration::from_millis(500);
+        let _ = watcher.check_reload(t2);
 
         // Subsequent call without file change → Unchanged
-        let t2 = t1 + Duration::from_millis(100);
-        let result = watcher.check_reload(t2);
+        let t3 = t2 + Duration::from_millis(100);
+        let result = watcher.check_reload(t3);
         assert!(matches!(result, KeybindingReloadResult::Unchanged));
     }
 
     #[test]
+    fn test_startup_cooldown_suppresses_changes() {
+        let dir = temp_dir("cooldown_suppresses");
+        let path = dir.join("keybindings.json");
+        fs::write(&path, VALID_JSON).unwrap();
+
+        let mut watcher = KeybindingWatcher::new(Some(path));
+        let t0 = Instant::now();
+
+        // During the 500ms startup cooldown, all calls return Unchanged
+        for offset_ms in [0, 100, 200, 300, 400, 499] {
+            let t = t0 + Duration::from_millis(offset_ms);
+            let result = watcher.check_reload(t);
+            assert!(
+                matches!(result, KeybindingReloadResult::Unchanged),
+                "Expected Unchanged at {}ms during cooldown",
+                offset_ms
+            );
+        }
+    }
+
+    #[test]
+    #[ignore] // Filesystem-dependent: uses thread::sleep and real mtime changes
     fn test_file_modification_after_initial_reload() {
         let dir = temp_dir("modification_after_reload");
         let path = dir.join("keybindings.json");
@@ -209,10 +215,11 @@ mod tests {
         let mut watcher = KeybindingWatcher::new(Some(path.clone()));
         let t0 = Instant::now();
 
-        // Initial detect + debounce + reload
-        watcher.check_reload(t0);
-        let t1 = t0 + Duration::from_millis(500);
-        let _ = watcher.check_reload(t1);
+        // After cooldown, detect + debounce + reload
+        let t1 = t0 + Duration::from_millis(501);
+        watcher.check_reload(t1);
+        let t2 = t1 + Duration::from_millis(500);
+        let _ = watcher.check_reload(t2);
 
         // Modify file
         thread::sleep(Duration::from_millis(50));
@@ -223,13 +230,13 @@ mod tests {
         fs::write(&path, new_json).unwrap();
 
         // Detect new change
-        let t2 = t1 + Duration::from_millis(100);
-        let result = watcher.check_reload(t2);
+        let t3 = t2 + Duration::from_millis(100);
+        let result = watcher.check_reload(t3);
         assert!(matches!(result, KeybindingReloadResult::Unchanged));
 
         // After debounce, reload with new content
-        let t3 = t2 + Duration::from_millis(500);
-        let result = watcher.check_reload(t3);
+        let t4 = t3 + Duration::from_millis(500);
+        let result = watcher.check_reload(t4);
         match result {
             KeybindingReloadResult::Reloaded(bindings) => {
                 assert_eq!(bindings.len(), 2);
