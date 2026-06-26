@@ -15,13 +15,6 @@ pub struct StationSlots {
 }
 
 impl StationSlots {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self {
-            slots: Default::default(),
-        }
-    }
-
     /// Assign a station URL to a slot (1-indexed).
     /// Returns false if index is out of range (0 or >5).
     pub fn assign(&mut self, index: usize, url: &str) -> bool {
@@ -40,9 +33,17 @@ impl StationSlots {
         }
         self.slots[index - 1].as_deref()
     }
+}
+
+#[cfg(test)]
+impl StationSlots {
+    pub fn new() -> Self {
+        Self {
+            slots: Default::default(),
+        }
+    }
 
     /// Clear a slot (1-indexed).
-    #[allow(dead_code)]
     pub fn clear(&mut self, index: usize) {
         if index > 0 && index <= STATION_SLOTS_COUNT {
             self.slots[index - 1] = None;
@@ -50,7 +51,6 @@ impl StationSlots {
     }
 
     /// Check if a slot is occupied (1-indexed).
-    #[allow(dead_code)]
     pub fn is_assigned(&self, index: usize) -> bool {
         self.get(index).is_some()
     }

@@ -1162,7 +1162,12 @@ exclude_countries = ["US", "", "  ", "GB"]
 
     #[test]
     fn test_sort_mode_valid_value_parsed() {
-        for mode in ["favorites_first", "alphabetical", "recently_added", "most_played"] {
+        for mode in [
+            "favorites_first",
+            "alphabetical",
+            "recently_added",
+            "most_played",
+        ] {
             let input = format!("[ui]\nsort_mode = \"{}\"\n", mode);
             let result = parse_toml(&input).unwrap();
             assert_eq!(result.config.ui.sort_mode, mode);

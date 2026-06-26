@@ -146,9 +146,8 @@ impl<'a> From<&'a App> for UiModel<'a> {
             exclude_tags: app.config.discover.exclude_tags.clone(),
             exclude_countries: app.config.discover.exclude_countries.clone(),
             search_history_empty: app.search_history.is_empty(),
-            settings_undo_available: SettingRow::ALL.map(|row| {
-                app.settings_undo.has_entry(row.index())
-            }),
+            settings_undo_available: SettingRow::ALL
+                .map(|row| app.settings_undo.has_entry(row.index())),
             sort_mode: app.sort_mode,
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
@@ -356,8 +355,10 @@ mod tests {
         use crate::app::SettingSnapshot;
 
         let mut app = App::new(Library::in_memory(vec![]));
-        app.settings_undo
-            .capture(SettingRow::Notifications.index(), SettingSnapshot::Bool(true));
+        app.settings_undo.capture(
+            SettingRow::Notifications.index(),
+            SettingSnapshot::Bool(true),
+        );
 
         let model = UiModel::from(&app);
 
@@ -369,8 +370,10 @@ mod tests {
         use crate::app::SettingSnapshot;
 
         let mut app = App::new(Library::in_memory(vec![]));
-        app.settings_undo
-            .capture(SettingRow::Theme.index(), SettingSnapshot::String("dark".to_string()));
+        app.settings_undo.capture(
+            SettingRow::Theme.index(),
+            SettingSnapshot::String("dark".to_string()),
+        );
         app.settings_undo.take(SettingRow::Theme.index());
 
         let model = UiModel::from(&app);

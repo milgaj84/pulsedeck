@@ -558,10 +558,22 @@ mod tests {
 
     #[test]
     fn test_from_key_parses_valid_strings() {
-        assert_eq!(SortMode::from_key("favorites_first"), Some(SortMode::FavoritesFirst));
-        assert_eq!(SortMode::from_key("alphabetical"), Some(SortMode::Alphabetical));
-        assert_eq!(SortMode::from_key("recently_added"), Some(SortMode::RecentlyAdded));
-        assert_eq!(SortMode::from_key("most_played"), Some(SortMode::MostPlayed));
+        assert_eq!(
+            SortMode::from_key("favorites_first"),
+            Some(SortMode::FavoritesFirst)
+        );
+        assert_eq!(
+            SortMode::from_key("alphabetical"),
+            Some(SortMode::Alphabetical)
+        );
+        assert_eq!(
+            SortMode::from_key("recently_added"),
+            Some(SortMode::RecentlyAdded)
+        );
+        assert_eq!(
+            SortMode::from_key("most_played"),
+            Some(SortMode::MostPlayed)
+        );
     }
 
     #[test]

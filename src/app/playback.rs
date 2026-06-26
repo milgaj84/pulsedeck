@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn play_selected_surfaces_dead_audio_engine() {
         let mut app = test_app();
-        app.playback.audio = crate::audio::AudioEngine::disconnected_for_test();
+        app.playback.audio = Box::new(crate::audio::MockAudioSink::disconnected());
 
         app.play_selected();
 
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn sync_volume_reports_dead_audio_engine_without_changing_playback_state() {
         let mut app = test_app();
-        app.playback.audio = crate::audio::AudioEngine::disconnected_for_test();
+        app.playback.audio = Box::new(crate::audio::MockAudioSink::disconnected());
         app.playback.view.state = PlaybackState::Playing;
 
         assert!(!app.sync_volume());

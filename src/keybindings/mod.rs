@@ -11,17 +11,7 @@ pub use registry::format_key_description;
 pub use registry::format_mode_name;
 pub use registry::KeybindingRegistry;
 
-/// Input mode for keybinding resolution.
-/// Mirrors app-layer InputMode but lives in the domain layer to avoid circular deps.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub enum InputMode {
-    Normal,
-    Search,
-    CommandPalette,
-    SleepTimer,
-    LibraryFilter,
-}
+pub use crate::input_mode::InputMode;
 
 /// Key specification matching crossterm KeyCode names.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

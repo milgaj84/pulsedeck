@@ -161,7 +161,6 @@ fn decoder_state_label(state: &DecoderState) -> &'static str {
         DecoderState::Connecting => "Connecting",
         DecoderState::Probing => "Probing",
         DecoderState::Playing => "Playing",
-        DecoderState::Ended => "Ended",
         DecoderState::Failed => "Failed",
     }
 }
@@ -229,7 +228,6 @@ mod tests {
         assert_eq!(decoder_state_label(&DecoderState::Connecting), "Connecting");
         assert_eq!(decoder_state_label(&DecoderState::Probing), "Probing");
         assert_eq!(decoder_state_label(&DecoderState::Playing), "Playing");
-        assert_eq!(decoder_state_label(&DecoderState::Ended), "Ended");
         assert_eq!(decoder_state_label(&DecoderState::Failed), "Failed");
     }
 

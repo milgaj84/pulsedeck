@@ -1,6 +1,9 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::{app::App, radio, recommend::deduplicate_stations};
+use crate::{
+    app::App, radio, radio::RadioApi, radio::RadioBrowserApi, recommend::deduplicate_stations,
+};
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 /// Per-query timeout for discover fetches. Each query in a multi-query strategy
@@ -12,7 +15,8 @@ type SearchWorkerResponse = (String, Result<Vec<radio::Station>, String>);
 type MetadataRefreshWorkerResponse = Result<(usize, Vec<radio::Station>, usize), String>;
 type DiscoverWorkerResponse = Result<Vec<radio::Station>, String>;
 
-pub struct AppDriver {
+pub struct AppDriver<A: RadioApi = RadioBrowserApi> {
+    api: Arc<A>,
     search_tx: tokio::sync::mpsc::UnboundedSender<SearchWorkerResponse>,
     search_rx: tokio::sync::mpsc::UnboundedReceiver<SearchWorkerResponse>,
     metadata_tx: tokio::sync::mpsc::UnboundedSender<MetadataRefreshWorkerResponse>,
@@ -26,12 +30,13 @@ pub struct AppDriver {
     pending_fallback_tag: Option<String>,
 }
 
-impl AppDriver {
-    pub fn new() -> Self {
+impl<A: RadioApi + 'static> AppDriver<A> {
+    pub fn new(api: A) -> Self {
         let (search_tx, search_rx) = tokio::sync::mpsc::unbounded_channel();
         let (metadata_tx, metadata_rx) = tokio::sync::mpsc::unbounded_channel();
         let (discover_tx, discover_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
+            api: Arc::new(api),
             search_tx,
             search_rx,
             metadata_tx,
@@ -81,10 +86,9 @@ impl AppDriver {
 
         if app.mark_search_started(&query) {
             let tx = self.search_tx.clone();
+            let api = Arc::clone(&self.api);
             tokio::spawn(async move {
-                let result = radio::search_stations(&query)
-                    .await
-                    .map_err(|err| err.to_string());
+                let result = api.search_stations(&query).await;
                 let _ = tx.send((query, result));
             });
         }
@@ -137,14 +141,15 @@ impl AppDriver {
 
     fn spawn_discover_fetch(&self, tag: &str) {
         let tx = self.discover_tx.clone();
-        let query = format!("tag:{tag}");
+        let api = Arc::clone(&self.api);
+        let tag = tag.to_string();
         tokio::spawn(async move {
             let result =
-                tokio::time::timeout(DISCOVER_FETCH_TIMEOUT, radio::search_stations(&query)).await;
+                tokio::time::timeout(DISCOVER_FETCH_TIMEOUT, api.discover_stations(&tag)).await;
 
             let mapped = match result {
                 Ok(Ok(stations)) => Ok(stations),
-                Ok(Err(e)) => Err(e.to_string()),
+                Ok(Err(e)) => Err(e),
                 Err(_elapsed) => Err("Discover: fetch timed out".to_string()),
             };
             let _ = tx.send(mapped);
@@ -188,9 +193,9 @@ impl AppDriver {
     }
 }
 
-impl Default for AppDriver {
+impl Default for AppDriver<RadioBrowserApi> {
     fn default() -> Self {
-        Self::new()
+        Self::new(RadioBrowserApi)
     }
 }
 
@@ -200,12 +205,28 @@ mod tests {
     use crate::app::{InputMode, SearchStatus};
     use crate::favorites::Library;
 
+    /// Minimal mock RadioApi for unit tests that never makes network calls.
+    struct MockRadioApi;
+
+    impl RadioApi for MockRadioApi {
+        async fn search_stations(&self, _query: &str) -> Result<Vec<radio::Station>, String> {
+            Ok(Vec::new())
+        }
+
+        async fn discover_stations(&self, _tag: &str) -> Result<Vec<radio::Station>, String> {
+            Ok(Vec::new())
+        }
+    }
+
     fn test_app() -> App {
         App::new(Library::in_memory(vec![]))
     }
 
-    fn driver_with_search_debounce(query: impl Into<String>, deadline: Instant) -> AppDriver {
-        let mut driver = AppDriver::new();
+    fn driver_with_search_debounce(
+        query: impl Into<String>,
+        deadline: Instant,
+    ) -> AppDriver<MockRadioApi> {
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.search_debounce = Some((query.into(), deadline));
         driver
     }
@@ -268,7 +289,7 @@ mod tests {
 
     #[test]
     fn driver_drains_metadata_refresh_responses_into_app() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         let mut app = test_app();
         driver.metadata_tx.send(Ok((0, Vec::new(), 0))).unwrap();
 
@@ -289,7 +310,7 @@ mod tests {
 
     #[test]
     fn handle_discover_response_sufficient_results_skips_fallback() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
         let mut app = test_app();
 
@@ -305,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_discover_response_few_results_triggers_fallback() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
         let mut app = test_app();
 
@@ -322,7 +343,7 @@ mod tests {
 
     #[test]
     fn handle_discover_response_second_fetch_combines_and_deduplicates() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         // Simulate state after primary returned < 5 results
         driver.pending_primary_results =
             Some(vec![make_station("http://a"), make_station("http://b")]);
@@ -343,7 +364,7 @@ mod tests {
 
     #[test]
     fn handle_discover_response_no_fallback_sends_directly() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = None;
         let mut app = test_app();
 
@@ -357,7 +378,7 @@ mod tests {
 
     #[test]
     fn handle_discover_response_error_skips_fallback() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
         let mut app = test_app();
 
@@ -374,7 +395,7 @@ mod tests {
 
     #[test]
     fn handle_discover_response_second_fetch_error_uses_primary_only() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_primary_results =
             Some(vec![make_station("http://a"), make_station("http://b")]);
         let mut app = test_app();
@@ -388,7 +409,7 @@ mod tests {
 
     #[test]
     fn needs_fallback_fetch_true_when_below_threshold_with_tag() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
 
         let result: Result<Vec<radio::Station>, String> = Ok(vec![make_station("http://a")]);
@@ -397,7 +418,7 @@ mod tests {
 
     #[test]
     fn needs_fallback_fetch_false_when_at_threshold() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
 
         let stations: Vec<radio::Station> = (0..5)
@@ -409,7 +430,7 @@ mod tests {
 
     #[test]
     fn needs_fallback_fetch_false_when_no_fallback_tag() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = None;
 
         let result: Result<Vec<radio::Station>, String> = Ok(vec![make_station("http://a")]);
@@ -418,7 +439,7 @@ mod tests {
 
     #[test]
     fn needs_fallback_fetch_false_on_error() {
-        let mut driver = AppDriver::new();
+        let mut driver = AppDriver::new(MockRadioApi);
         driver.pending_fallback_tag = Some("jazz".to_string());
 
         let result: Result<Vec<radio::Station>, String> = Err("error".to_string());

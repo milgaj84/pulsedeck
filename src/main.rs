@@ -10,6 +10,7 @@ mod event;
 mod favorites;
 mod favorites_set;
 mod history;
+pub(crate) mod input_mode;
 mod keybindings;
 mod library_filter;
 pub mod library_sort;
@@ -59,7 +60,7 @@ async fn main() -> Result<()> {
 
     let mut terminal = ratatui::init();
     let _terminal_restore = TerminalRestoreGuard;
-    let mut driver = runtime::AppDriver::new();
+    let mut driver = runtime::AppDriver::new(radio::RadioBrowserApi);
 
     loop {
         terminal.draw(|frame| ui::draw(frame, &app))?;

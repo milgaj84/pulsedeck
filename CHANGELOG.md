@@ -4,6 +4,30 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.10.3] - Unreleased
+
+### Improved
+- **Strict business/UI layer separation**: Removed crossterm dependency from `src/app/` — mini mode key mapping moved to the event layer where all other terminal input handling lives.
+- **Unified InputMode enum**: Eliminated duplicate `InputMode` definitions in `app` and `keybindings` modules. A single canonical enum in `src/input_mode.rs` is now shared across the codebase, removing the error-prone bridge function.
+- **DecoderState diagnostics wired**: `Buffering` status now correctly maps to `DecoderState::Probing` (was incorrectly mapped to `Connecting`), enabling the Playback Doctor "stream unreachable" hint to trigger properly.
+- **lifecycle.rs decomposed by SRP**: Split into 5 focused modules (`startup.rs`, `audio_status.rs`, `hot_reload.rs`, `notice.rs`, `notification_cooldown.rs`) so each changes for exactly one reason.
+- **RadioApi trait abstraction**: Network calls behind an injectable `RadioApi` trait. `AppDriver` is now generic, enabling offline unit testing of search/discover logic.
+- **Notifier trait abstraction**: Desktop notification dispatch behind an injectable `Notifier` trait. Eliminates all `#[cfg(not(test))]` guards in favor of proper dependency injection.
+- **AudioSink trait abstraction**: Audio command dispatch behind an injectable `AudioSink` trait. Tests can now verify which `AudioCommand` variants are sent without spawning real audio threads.
+
+### Removed
+- Dead code: `Action::NumberJumpCancel`, `render_overlay_chrome`, `HealthClassification`, `classify_health_with_confidence`, `DecoderState::Ended` variant.
+- `AudioEngine::disconnected_for_test()` replaced by `MockAudioSink`.
+- Test-only `StationSlots` methods gated with `#[cfg(test)]` instead of `#[allow(dead_code)]`.
+
+### Internal
+- 1350 tests pass, zero clippy warnings.
+- New modules: `src/input_mode.rs`, `src/radio/api.rs`, `src/app/startup.rs`, `src/app/audio_status.rs`, `src/app/hot_reload.rs`, `src/app/notice.rs`, `src/app/notification_cooldown.rs`.
+- New traits: `AudioSink`, `RadioApi`, `Notifier`.
+- New test mocks: `MockAudioSink`, `MockRadioApi`, `CountingNotifier`.
+
+---
+
 ## [0.10.2] - Unreleased
 
 ### Added

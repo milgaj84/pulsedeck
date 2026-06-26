@@ -1,3 +1,4 @@
+mod api;
 mod client;
 pub mod health_classifier;
 mod map;
@@ -5,6 +6,8 @@ mod query;
 mod rank;
 pub mod stale_query;
 mod station;
+
+pub use api::RadioBrowserApi;
 
 pub use query::{has_unknown_prefix, prefix_examples_inline, SearchField, StationSearchQuery};
 pub use rank::{explain_station_match, rank_explanation_label};
@@ -14,6 +17,24 @@ pub use station::{
     sanitize_bitrate, station_identity_matches, station_url_matches, Station, StationHealth,
     StationIdentity,
 };
+
+/// Abstraction over the radio station search network layer.
+///
+/// Enables dependency injection for testability — production code uses
+/// `RadioBrowserApi`, tests use a mock returning predetermined results.
+pub trait RadioApi: Send + Sync {
+    /// Search stations by query string (name, tag:x, country:x, etc.)
+    fn search_stations(
+        &self,
+        query: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Station>, String>> + Send;
+
+    /// Discover stations by tag for the recommendation/discover feature.
+    fn discover_stations(
+        &self,
+        tag: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Station>, String>> + Send;
+}
 
 const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
     "https://de1.api.radio-browser.info",

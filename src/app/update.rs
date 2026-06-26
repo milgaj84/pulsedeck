@@ -99,7 +99,6 @@ impl App {
             // Number jump
             Action::NumberJumpDigit(c) => self.handle_number_jump_digit(c),
             Action::NumberJumpConfirm => self.handle_number_jump_confirm(),
-            Action::NumberJumpCancel => self.handle_number_jump_cancel(),
 
             Action::ToggleHelp => self.toggle_help(),
             Action::ToggleStationDetails => self.toggle_station_details(),

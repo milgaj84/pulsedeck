@@ -59,8 +59,6 @@ pub enum Action {
     /// Number jump
     NumberJumpDigit(char),
     NumberJumpConfirm,
-    #[allow(dead_code)]
-    NumberJumpCancel,
 
     /// Dynamic TUI Modules
     CycleLayout,

@@ -374,10 +374,10 @@ mod tests {
     /// **Validates: Requirements 3.1, 3.2**
     #[test]
     fn test_drive_reconnect_resets_elapsed_timer() {
-        use super::super::lifecycle::AppParts;
+        use super::super::startup::AppParts;
         use super::super::ui_state::UiState;
         use super::super::{App, DisplayMode, LayoutMode, VisualizerMode};
-        use crate::audio::AudioEngine;
+        use crate::audio::MockAudioSink;
         use crate::favorites::Library;
         use crate::radio::Station;
         use std::collections::VecDeque;
@@ -403,7 +403,7 @@ mod tests {
             ui_state_warning: None,
             history: crate::history::History::default(),
             history_warning: None,
-            audio: AudioEngine::disconnected_for_test(),
+            audio: Box::new(MockAudioSink::disconnected()),
             sample_buffer: Arc::new(Mutex::new(VecDeque::new())),
             config: crate::config_toml::AppConfig::default(),
             config_preserved: toml::Value::Table(toml::map::Map::new()),

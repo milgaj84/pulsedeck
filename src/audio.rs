@@ -49,6 +49,15 @@ pub enum AudioStatus {
     TrackChanged { url: String, title: String },
 }
 
+/// Abstraction for sending commands to and receiving status from an audio backend.
+pub trait AudioSink: Send {
+    /// Send a command to the audio engine. Returns true if sent successfully.
+    fn send(&self, command: AudioCommand) -> bool;
+
+    /// Non-blocking poll for the next audio status message.
+    fn try_recv_status(&self) -> Option<AudioStatus>;
+}
+
 /// Handle to communicate with the audio engine running on a background thread.
 pub struct AudioEngine {
     cmd_tx: mpsc::Sender<AudioCommand>,
@@ -76,20 +85,56 @@ impl AudioEngine {
 
         Self { cmd_tx, status_rx }
     }
+}
 
-    pub fn send(&self, cmd: AudioCommand) -> bool {
-        self.cmd_tx.send(cmd).is_ok()
+impl AudioSink for AudioEngine {
+    fn send(&self, command: AudioCommand) -> bool {
+        self.cmd_tx.send(command).is_ok()
+    }
+
+    fn try_recv_status(&self) -> Option<AudioStatus> {
+        self.status_rx.try_recv().ok()
+    }
+}
+
+/// Test mock that captures sent commands and returns queued statuses.
+#[cfg(test)]
+pub(crate) struct MockAudioSink {
+    pub commands: std::cell::RefCell<Vec<AudioCommand>>,
+    pub statuses: std::cell::RefCell<VecDeque<AudioStatus>>,
+    pub send_succeeds: bool,
+}
+
+#[cfg(test)]
+impl MockAudioSink {
+    /// Create a mock where send always succeeds.
+    pub fn new() -> Self {
+        Self {
+            commands: std::cell::RefCell::new(Vec::new()),
+            statuses: std::cell::RefCell::new(VecDeque::new()),
+            send_succeeds: true,
+        }
+    }
+
+    /// Create a mock simulating a disconnected engine (send always fails).
+    pub fn disconnected() -> Self {
+        Self {
+            commands: std::cell::RefCell::new(Vec::new()),
+            statuses: std::cell::RefCell::new(VecDeque::new()),
+            send_succeeds: false,
+        }
     }
 }
 
 #[cfg(test)]
-impl AudioEngine {
-    pub fn disconnected_for_test() -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
-        drop(cmd_rx);
-        let (_status_tx, status_rx) = mpsc::channel::<AudioStatus>();
+impl AudioSink for MockAudioSink {
+    fn send(&self, command: AudioCommand) -> bool {
+        self.commands.borrow_mut().push(command);
+        self.send_succeeds
+    }
 
-        Self { cmd_tx, status_rx }
+    fn try_recv_status(&self) -> Option<AudioStatus> {
+        self.statuses.borrow_mut().pop_front()
     }
 }
 
@@ -98,9 +143,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn audio_engine_send_returns_false_when_command_channel_is_closed() {
-        let engine = AudioEngine::disconnected_for_test();
+    fn mock_audio_sink_disconnected_returns_false_on_send() {
+        let mock = MockAudioSink::disconnected();
 
-        assert!(!engine.send(AudioCommand::Stop));
+        assert!(!mock.send(AudioCommand::Stop));
+        assert_eq!(mock.commands.borrow().len(), 1);
+    }
+
+    #[test]
+    fn mock_audio_sink_new_returns_true_on_send() {
+        let mock = MockAudioSink::new();
+
+        assert!(mock.send(AudioCommand::Pause));
+        assert_eq!(mock.commands.borrow().len(), 1);
+    }
+
+    #[test]
+    fn mock_audio_sink_returns_queued_statuses() {
+        let mock = MockAudioSink::new();
+        mock.statuses.borrow_mut().push_back(AudioStatus::Playing);
+        mock.statuses.borrow_mut().push_back(AudioStatus::Stopped);
+
+        assert!(matches!(mock.try_recv_status(), Some(AudioStatus::Playing)));
+        assert!(matches!(mock.try_recv_status(), Some(AudioStatus::Stopped)));
+        assert!(mock.try_recv_status().is_none());
     }
 }

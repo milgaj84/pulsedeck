@@ -215,6 +215,9 @@ mod tests {
             now,
         );
 
-        assert_eq!(debounce.cooldown_until, Some(now + Duration::from_millis(300)));
+        assert_eq!(
+            debounce.cooldown_until,
+            Some(now + Duration::from_millis(300))
+        );
     }
 }

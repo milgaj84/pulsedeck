@@ -300,7 +300,11 @@ fn health_confidence_label(station: &crate::radio::Station) -> String {
     if confidence == 0.0 {
         return "N/A".to_string();
     }
-    format!("{:.0}% ({})", confidence * 100.0, confidence_label(confidence))
+    format!(
+        "{:.0}% ({})",
+        confidence * 100.0,
+        confidence_label(confidence)
+    )
 }
 
 fn failure_is_after_success(success: &str, failure: &str) -> bool {

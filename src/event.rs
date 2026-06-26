@@ -1,6 +1,6 @@
 use crate::action::Action;
 use crate::app::{DisplayMode, InputMode};
-use crate::keybindings::{self, KeySpec, KeybindingRegistry, Modifier, NamedKey};
+use crate::keybindings::{KeySpec, KeybindingRegistry, Modifier, NamedKey};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 
@@ -34,7 +34,7 @@ fn map_key_with_registry(
 
     // Mini display mode has its own restricted table (not registry-based).
     if *display_mode == DisplayMode::Mini && *mode == InputMode::Normal {
-        return crate::app::mini_mode::map_mini_mode_key(key);
+        return map_mini_mode_key(key);
     }
 
     if let Some(action) = resolve_from_registry(key, mode, registry) {
@@ -93,7 +93,7 @@ fn map_key(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Optio
 #[cfg(test)]
 fn map_key_inner(key: KeyEvent, mode: &InputMode, display_mode: &DisplayMode) -> Option<Action> {
     if *display_mode == DisplayMode::Mini && *mode == InputMode::Normal {
-        return crate::app::mini_mode::map_mini_mode_key(key);
+        return map_mini_mode_key(key);
     }
 
     match mode {
@@ -113,8 +113,7 @@ fn resolve_from_registry(
 ) -> Option<Action> {
     let key_spec = key_code_to_spec(key.code)?;
     let modifiers = key_modifiers_to_vec(key.modifiers);
-    let kb_mode = input_mode_to_keybinding(mode);
-    registry.resolve(&key_spec, &modifiers, &kb_mode)
+    registry.resolve(&key_spec, &modifiers, mode)
 }
 
 /// Convert crossterm KeyCode to keybinding KeySpec.
@@ -156,14 +155,19 @@ fn key_modifiers_to_vec(modifiers: KeyModifiers) -> Vec<Modifier> {
     result
 }
 
-/// Convert app-layer InputMode to keybindings-layer InputMode.
-fn input_mode_to_keybinding(mode: &InputMode) -> keybindings::InputMode {
-    match mode {
-        InputMode::Normal => keybindings::InputMode::Normal,
-        InputMode::Search => keybindings::InputMode::Search,
-        InputMode::CommandPalette => keybindings::InputMode::CommandPalette,
-        InputMode::SleepTimer => keybindings::InputMode::SleepTimer,
-        InputMode::LibraryFilter => keybindings::InputMode::LibraryFilter,
+/// Map a key event to an Action when in Mini display mode.
+/// Only a restricted set of playback controls are available.
+fn map_mini_mode_key(key: KeyEvent) -> Option<Action> {
+    match (key.modifiers, key.code) {
+        (_, KeyCode::Char(' ')) => Some(Action::TogglePause),
+        (_, KeyCode::Char('+')) | (_, KeyCode::Char('=')) => Some(Action::VolumeUp),
+        (_, KeyCode::Char('-')) => Some(Action::VolumeDown),
+        (_, KeyCode::Char('s')) => Some(Action::Stop),
+        (_, KeyCode::Char('q')) => Some(Action::Quit),
+        (mods, KeyCode::Char('c')) if mods.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        (_, KeyCode::Char('m')) => Some(Action::ToggleMute),
+        (_, KeyCode::F(6)) => Some(Action::ToggleMiniMode),
+        _ => None,
     }
 }
 
@@ -1205,14 +1209,117 @@ mod tests {
             Some(Action::ToggleMiniMode)
         );
     }
+
+    // --- Mini mode key mapping tests ---
+
+    #[test]
+    fn mini_mode_space_toggles_pause() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char(' '))),
+            Some(Action::TogglePause),
+        );
+    }
+
+    #[test]
+    fn mini_mode_plus_and_equals_volume_up() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('+'))),
+            Some(Action::VolumeUp),
+        );
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('='))),
+            Some(Action::VolumeUp),
+        );
+    }
+
+    #[test]
+    fn mini_mode_minus_volume_down() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('-'))),
+            Some(Action::VolumeDown),
+        );
+    }
+
+    #[test]
+    fn mini_mode_s_stops_playback() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('s'))),
+            Some(Action::Stop),
+        );
+    }
+
+    #[test]
+    fn mini_mode_q_quits() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('q'))),
+            Some(Action::Quit),
+        );
+    }
+
+    #[test]
+    fn mini_mode_ctrl_c_quits() {
+        assert_eq!(
+            map_mini_mode_key(modified_key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Some(Action::Quit),
+        );
+    }
+
+    #[test]
+    fn mini_mode_m_toggles_mute() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::Char('m'))),
+            Some(Action::ToggleMute),
+        );
+    }
+
+    #[test]
+    fn mini_mode_f6_toggles_mini_mode() {
+        assert_eq!(
+            map_mini_mode_key(key(KeyCode::F(6))),
+            Some(Action::ToggleMiniMode),
+        );
+    }
+
+    #[test]
+    fn mini_mode_disallowed_keys_return_none() {
+        let disallowed = [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Char('/'),
+            KeyCode::Char(':'),
+            KeyCode::Char('?'),
+            KeyCode::Char('h'),
+            KeyCode::Char('i'),
+            KeyCode::Char('g'),
+            KeyCode::Char('d'),
+            KeyCode::Char('b'),
+            KeyCode::Char(','),
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Enter,
+            KeyCode::Char('t'),
+            KeyCode::Char('e'),
+        ];
+
+        for code in disallowed {
+            assert_eq!(
+                map_mini_mode_key(key(code)),
+                None,
+                "Expected None for {:?}",
+                code,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod registry_integration_tests {
     use super::*;
-    use crate::keybindings::{InputMode as KbMode, KeyBinding, KeySpec, Modifier, NamedKey};
+    use crate::keybindings::{KeyBinding, KeySpec, Modifier, NamedKey};
 
-    fn binding(key: KeySpec, mods: Vec<Modifier>, action: Action, mode: KbMode) -> KeyBinding {
+    fn binding(key: KeySpec, mods: Vec<Modifier>, action: Action, mode: InputMode) -> KeyBinding {
         KeyBinding {
             key,
             modifiers: mods,
@@ -1229,7 +1336,7 @@ mod registry_integration_tests {
             KeySpec::Char('q'),
             vec![],
             Action::Stop,
-            KbMode::Normal,
+            InputMode::Normal,
         ));
 
         let key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
@@ -1307,7 +1414,7 @@ mod registry_integration_tests {
             KeySpec::Char('x'),
             vec![Modifier::Ctrl],
             Action::ExportLibrary,
-            KbMode::Normal,
+            InputMode::Normal,
         ));
 
         let key_event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
@@ -1329,7 +1436,7 @@ mod registry_integration_tests {
             KeySpec::Char('x'),
             vec![],
             Action::VolumeUp,
-            KbMode::Search,
+            InputMode::Search,
         ));
 
         // In Normal mode, 'x' should be unmapped (no default for 'x' in Normal).
@@ -1351,7 +1458,7 @@ mod registry_integration_tests {
             KeySpec::Char('q'),
             vec![],
             Action::Stop,
-            KbMode::Normal,
+            InputMode::Normal,
         ));
 
         let mut key_event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
@@ -1425,23 +1532,5 @@ mod registry_integration_tests {
     fn key_modifiers_to_vec_returns_empty_for_none() {
         let result = key_modifiers_to_vec(KeyModifiers::NONE);
         assert!(result.is_empty());
-    }
-
-    #[test]
-    fn input_mode_to_keybinding_maps_all_modes() {
-        assert_eq!(input_mode_to_keybinding(&InputMode::Normal), KbMode::Normal);
-        assert_eq!(input_mode_to_keybinding(&InputMode::Search), KbMode::Search);
-        assert_eq!(
-            input_mode_to_keybinding(&InputMode::CommandPalette),
-            KbMode::CommandPalette
-        );
-        assert_eq!(
-            input_mode_to_keybinding(&InputMode::SleepTimer),
-            KbMode::SleepTimer
-        );
-        assert_eq!(
-            input_mode_to_keybinding(&InputMode::LibraryFilter),
-            KbMode::LibraryFilter
-        );
     }
 }

@@ -7,14 +7,6 @@ pub enum HealthLevel {
     Failed,
 }
 
-/// Combined classification result with confidence level.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
-pub struct HealthClassification {
-    pub level: HealthLevel,
-    pub confidence: f32,
-}
-
 const DECAY_THRESHOLD_SECS: u64 = 7 * 24 * 3600; // 7 days
 const CONFIDENCE_SATURATION: f32 = 10.0;
 
@@ -24,19 +16,6 @@ const CONFIDENCE_SATURATION: f32 = 10.0;
 pub fn classify_health(health: &StationHealth, now: &str) -> Option<HealthLevel> {
     let base = classify_base(health);
     apply_decay(base, health.last_failure_at.as_deref(), now)
-}
-
-/// Like `classify_health` but also returns a confidence score.
-#[allow(dead_code)]
-pub fn classify_health_with_confidence(
-    health: &StationHealth,
-    now: &str,
-) -> Option<HealthClassification> {
-    let level = classify_health(health, now)?;
-    Some(HealthClassification {
-        level,
-        confidence: calculate_confidence(health),
-    })
 }
 
 /// Compute confidence as a value in [0.0, 1.0] based on total data points.
@@ -487,35 +466,5 @@ mod tests {
     fn confidence_label_low_below_half() {
         assert_eq!(confidence_label(0.0), "low confidence");
         assert_eq!(confidence_label(0.49), "low confidence");
-    }
-
-    #[test]
-    fn classify_with_confidence_returns_both() {
-        let health = StationHealth {
-            last_success_at: Some("2024-01-02T00:00:00Z".to_string()),
-            success_count: Some(10),
-            ..StationHealth::default()
-        };
-        let result = classify_health_with_confidence(&health, NOW_RECENT).unwrap();
-        assert_eq!(result.level, HealthLevel::Healthy);
-        assert_eq!(result.confidence, 1.0);
-    }
-
-    #[test]
-    fn classify_with_confidence_low_data() {
-        let health = StationHealth {
-            last_success_at: Some("2024-01-02T00:00:00Z".to_string()),
-            success_count: Some(1),
-            ..StationHealth::default()
-        };
-        let result = classify_health_with_confidence(&health, NOW_RECENT).unwrap();
-        assert_eq!(result.level, HealthLevel::Healthy);
-        assert_eq!(result.confidence, 0.1);
-    }
-
-    #[test]
-    fn classify_with_confidence_none_for_empty() {
-        let health = StationHealth::default();
-        assert_eq!(classify_health_with_confidence(&health, NOW_RECENT), None);
     }
 }

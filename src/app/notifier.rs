@@ -1,39 +1,75 @@
 #[cfg(not(test))]
 use std::process::{Command, Stdio};
 
-// In test builds, the actual notification dispatch is skipped entirely.
-// The notification_count field on App tracks calls for test assertions.
-#[cfg(not(test))]
-const APP_NOTIFICATION_TITLE: &str = "PulseDeck - Now Playing";
+/// Abstraction for desktop notification dispatch.
+/// Enables test isolation without `#[cfg(not(test))]` guards.
+pub trait Notifier: Send {
+    fn notify_now_playing(&self, title: &str, station_name: &str);
 
-pub(super) fn notify_now_playing(_title: &str, _station_name: &str) {
-    #[cfg(not(test))]
-    {
-        notify_now_playing_impl(_title, _station_name);
+    /// Returns the number of notifications dispatched. Used for test assertions.
+    #[allow(dead_code)]
+    fn notification_count(&self) -> u32 {
+        0
     }
 }
 
+/// Production notifier using notify-rust on Linux and PowerShell toast on WSL.
 #[cfg(not(test))]
-fn notify_now_playing_impl(title: &str, station_name: &str) {
-    if is_wsl() {
-        let _ = spawn_windows_toast(APP_NOTIFICATION_TITLE, title, station_name);
-        return;
+pub struct DesktopNotifier;
+
+#[cfg(not(test))]
+const APP_NOTIFICATION_TITLE: &str = "PulseDeck - Now Playing";
+
+#[cfg(not(test))]
+impl Notifier for DesktopNotifier {
+    fn notify_now_playing(&self, title: &str, station_name: &str) {
+        if is_wsl() {
+            let _ = spawn_windows_toast(APP_NOTIFICATION_TITLE, title, station_name);
+            return;
+        }
+
+        let body = format!("♫ {title}\nStation: {station_name}");
+        let mut notification = notify_rust::Notification::new();
+        notification
+            .summary(APP_NOTIFICATION_TITLE)
+            .body(&body)
+            .icon("audio-card")
+            .timeout(4000);
+
+        #[cfg(target_os = "linux")]
+        {
+            notification.hint(notify_rust::Hint::SuppressSound(true));
+        }
+
+        let _ = notification.show();
+    }
+}
+
+/// Test-only notifier that counts dispatch calls.
+/// Enables assertions on notification count without OS side effects.
+#[cfg(test)]
+pub(crate) struct CountingNotifier {
+    pub count: std::cell::Cell<u32>,
+}
+
+#[cfg(test)]
+impl CountingNotifier {
+    pub fn new() -> Self {
+        Self {
+            count: std::cell::Cell::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Notifier for CountingNotifier {
+    fn notify_now_playing(&self, _title: &str, _station_name: &str) {
+        self.count.set(self.count.get() + 1);
     }
 
-    let body = format!("♫ {title}\nStation: {station_name}");
-    let mut notification = notify_rust::Notification::new();
-    notification
-        .summary(APP_NOTIFICATION_TITLE)
-        .body(&body)
-        .icon("audio-card")
-        .timeout(4000);
-
-    #[cfg(target_os = "linux")]
-    {
-        notification.hint(notify_rust::Hint::SuppressSound(true));
+    fn notification_count(&self) -> u32 {
+        self.count.get()
     }
-
-    let _ = notification.show();
 }
 
 #[cfg(not(test))]

@@ -157,7 +157,7 @@ impl App {
             if let Some(dir) = &self.config_dir {
                 let _ = self
                     .search_history
-                    .save(&dir.join(lifecycle::SEARCH_HISTORY_FILE));
+                    .save(&dir.join(startup::SEARCH_HISTORY_FILE));
             }
         }
 

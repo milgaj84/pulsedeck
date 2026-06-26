@@ -1,5 +1,5 @@
 use super::*;
-use crate::audio::AudioEngine;
+use crate::audio::AudioSink;
 use crate::elapsed_timer::ElapsedTimer;
 
 /// Groups playback configuration parameters for PlaybackRuntime construction.
@@ -18,7 +18,7 @@ pub struct PlaybackRuntime {
     pub reconnect: Reconnect,
     pub diagnostics: PlaybackDiagnostics,
     pub sleep_timer: SleepTimer,
-    pub audio: AudioEngine,
+    pub audio: Box<dyn AudioSink>,
     pub sample_buffer: Arc<Mutex<VecDeque<f32>>>,
     pub elapsed_timer: ElapsedTimer,
 }
@@ -27,7 +27,7 @@ impl PlaybackRuntime {
     pub(super) fn new(
         ui_state: &super::ui_state::UiState,
         options: PlaybackOptions,
-        audio: AudioEngine,
+        audio: Box<dyn AudioSink>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
     ) -> Self {
         Self {
@@ -62,6 +62,7 @@ impl PlaybackRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::MockAudioSink;
     use crate::favorites::Library;
     use crate::radio::Station;
 
@@ -85,7 +86,7 @@ mod tests {
         );
         let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
-        let audio = AudioEngine::disconnected_for_test();
+        let audio = MockAudioSink::disconnected();
 
         let options = PlaybackOptions {
             output_device: crate::audio::output_device_display_name(
@@ -96,7 +97,7 @@ mod tests {
             reconnect_backoff_seconds: vec![3, 6, 12],
         };
 
-        let runtime = PlaybackRuntime::new(&ui_state, options, audio, sample_buffer);
+        let runtime = PlaybackRuntime::new(&ui_state, options, Box::new(audio), sample_buffer);
 
         assert_eq!(runtime.volume, 37);
         assert!(runtime.muted);
@@ -110,7 +111,7 @@ mod tests {
 #[cfg(test)]
 mod property_tests {
     use super::*;
-    use crate::audio::AudioEngine;
+    use crate::audio::MockAudioSink;
     use proptest::prelude::*;
 
     /// Helper to construct a PlaybackRuntime with specific volume and muted values.
@@ -124,14 +125,14 @@ mod property_tests {
             None,
         );
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
-        let audio = AudioEngine::disconnected_for_test();
+        let audio = MockAudioSink::disconnected();
         let options = PlaybackOptions {
             output_device: "Test".to_string(),
             metadata_enabled: false,
             reconnect_max_attempts: 3,
             reconnect_backoff_seconds: vec![3, 6, 12],
         };
-        PlaybackRuntime::new(&ui_state, options, audio, sample_buffer)
+        PlaybackRuntime::new(&ui_state, options, Box::new(audio), sample_buffer)
     }
 
     proptest! {

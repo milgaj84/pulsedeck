@@ -275,7 +275,6 @@ fn parse_simple_action(input: &str) -> Option<Action> {
         "library_filter_confirm" => Some(Action::LibraryFilterConfirm),
         "toggle_favorite" => Some(Action::ToggleFavorite),
         "number_jump_confirm" => Some(Action::NumberJumpConfirm),
-        "number_jump_cancel" => Some(Action::NumberJumpCancel),
         "cycle_layout" => Some(Action::CycleLayout),
         "toggle_help" => Some(Action::ToggleHelp),
         "toggle_station_details" => Some(Action::ToggleStationDetails),
@@ -1096,7 +1095,6 @@ mod property_tests {
             Action::LibraryFilterConfirm => "library_filter_confirm",
             Action::ToggleFavorite => "toggle_favorite",
             Action::NumberJumpConfirm => "number_jump_confirm",
-            Action::NumberJumpCancel => "number_jump_cancel",
             Action::CycleLayout => "cycle_layout",
             Action::ToggleHelp => "toggle_help",
             Action::ToggleStationDetails => "toggle_station_details",
@@ -1230,7 +1228,6 @@ mod property_tests {
             Just(Action::LibraryFilterConfirm),
             Just(Action::ToggleFavorite),
             Just(Action::NumberJumpConfirm),
-            Just(Action::NumberJumpCancel),
             Just(Action::CycleLayout),
         ]
     }

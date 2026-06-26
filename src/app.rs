@@ -1,13 +1,15 @@
+mod audio_status;
 mod command_palette;
 mod discover;
 pub mod doctor_suggestions;
 mod favorites_actions;
+mod hot_reload;
 mod idle;
 mod library;
 mod library_filter;
-mod lifecycle;
-pub mod mini_mode;
 mod nav;
+mod notice;
+mod notification_cooldown;
 mod notifier;
 mod number_jump_handler;
 mod overlays;
@@ -22,6 +24,7 @@ mod selectors;
 mod settings;
 mod settings_undo;
 mod sleep_timer;
+mod startup;
 mod types;
 mod ui_runtime;
 mod ui_state;
@@ -44,8 +47,8 @@ use std::sync::{Arc, Mutex};
 
 pub use command_palette::{command_label, CommandPaletteState, PaletteCommand};
 pub use discover::DiscoverFetchRequest;
-pub use lifecycle::NoticeState;
 pub use nav::Navigation;
+pub use notice::NoticeState;
 pub use overlays::{ActiveOverlay, Overlays};
 pub use playback::PlaybackView;
 pub use playback_error::playback_error_action_hint;
@@ -54,9 +57,9 @@ pub(crate) use playback_error::{classify_playback_error, PlaybackErrorKind};
 pub use playback_runtime::{PlaybackOptions, PlaybackRuntime};
 pub use reconnect::Reconnect;
 pub use search::SearchState;
-pub use settings_undo::SettingsUndoStack;
 #[cfg(test)]
 pub(crate) use settings_undo::SettingSnapshot;
+pub use settings_undo::SettingsUndoStack;
 pub use sleep_timer::{SleepTimer, SLEEP_MAX_MINUTES, SLEEP_PRESETS, SLEEP_STEP_MINUTES};
 pub use types::{
     AppNotice, DecoderState, DisplayMode, InputMode, LayoutMode, PlaybackDiagnostics,
@@ -95,7 +98,10 @@ pub struct App {
     pub keybinding_registry: KeybindingRegistry,
 
     /// Cooldown state for notification rate-limiting.
-    pub(crate) notification_cooldown: lifecycle::NotificationCooldown,
+    pub(crate) notification_cooldown: notification_cooldown::NotificationCooldown,
+
+    /// Injected notifier for "now playing" desktop notifications.
+    pub(crate) notifier: Box<dyn notifier::Notifier>,
 
     /// Discovery results from the recommendation engine.
     pub discover_results: Vec<ScoredStation>,
@@ -129,8 +135,4 @@ pub struct App {
 
     /// Epoch timestamp when the stale notice was last dismissed.
     pub stale_dismissed_at: Option<u64>,
-
-    /// Test-only counter for how many notifications were dispatched.
-    #[cfg(test)]
-    pub(crate) notification_count: u32,
 }

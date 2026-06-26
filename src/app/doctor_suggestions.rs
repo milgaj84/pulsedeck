@@ -37,8 +37,7 @@ fn is_stream_unreachable(diagnostics: &PlaybackDiagnostics) -> bool {
 }
 
 fn is_station_offline(diagnostics: &PlaybackDiagnostics) -> bool {
-    diagnostics.reconnect_limit > 0
-        && diagnostics.reconnect_attempts >= diagnostics.reconnect_limit
+    diagnostics.reconnect_limit > 0 && diagnostics.reconnect_attempts >= diagnostics.reconnect_limit
 }
 
 fn has_high_reconnect_count(diagnostics: &PlaybackDiagnostics) -> bool {
