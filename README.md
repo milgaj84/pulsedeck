@@ -2,395 +2,275 @@
 
 # ✦ PulseDeck ✦
 
-**A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback.**
-
-*Search, preview, save, and stream public radio stations without leaving the command line.*
+**Internet radio in your terminal. Search, tune in, listen.**
 
 [![Crates.io](https://img.shields.io/crates/v/pulsedeck.svg)](https://crates.io/crates/pulsedeck)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
-[![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#-installation)
+[![Platform: Windows | Linux | macOS](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)](#installation)
 [![CI](https://github.com/milgaj84/pulsedeck/actions/workflows/ci.yml/badge.svg)](https://github.com/milgaj84/pulsedeck/actions/workflows/ci.yml)
 
 </div>
-
----
 
 ![PulseDeck - Cyber-Deck TUI Interface](assets/screenshot.png)
 
 ---
 
-## What is PulseDeck?
+## You want to listen to radio. You open a terminal.
 
-PulseDeck is a **focused terminal internet radio player** with a retrowave soul, built in Rust. It helps you discover, preview, save, and stream public radio stations from your terminal with fast search, polished playback controls, themes, visualizers, and resilient audio handling.
+You don't want to open a browser tab that eats 300MB of RAM. You don't want an Electron app. You don't want to wrestle with `ffplay` and stream URLs. You just want music playing while you work — something you can launch, tune, and forget about.
 
-It ships pre-loaded with handpicked synthwave, chiptune, and cyberpunk stations so it sounds great from the first keypress. But you can search, save, and play **any public internet radio station in the world**.
+**PulseDeck is that.**
 
-Think of it as: *a neon radio console for the terminal: quick to launch, easy to tune, and built for listening.*
-
-> PulseDeck was formerly named DriftFM. The project was renamed to avoid confusion with existing and historical radio-related uses of the old name. Existing DriftFM config is copied into the new PulseDeck config directory on first launch.
-
----
-
-## What makes it different?
-
-Most TUI radio players just wrap ffplay. PulseDeck is purpose-built from scratch in Rust with features you'd otherwise only find in native desktop apps:
-
-- 📡 **Search 30,000+ stations** from the global radio-browser.info catalog by name, tag, country, language, or codec, with mirror failover and local result ranking for cleaner discovery
-- 🔊 **Smooth tuning transitions**: switching stations fades out the current stream and fades in the new one, like turning an analog dial
-- 🎧 **Preview before saving**: in search, `Space` auditions a station without saving, while `Enter` saves it to your Library and plays it
-- 🎨 **6 built-in themes**: Retrowave, all 4 Catppuccin flavors (Mocha, Macchiato, Frappé, Latte), and a Terminal theme that follows your emulator's ANSI palette
-- 🎛️ **Three-way dashboard layout**: press `b` to cycle Split View, Library Focus, and Signal Focus
-- 📊 **Deck visualizers**: press `v` to cycle RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope
-- 💾 **Library management**: saved stations persist between sessions, rows show compact country/bitrate/health metadata, and removals are undoable with `u`
-- 🔎 **Fuzzy library search**: press `Ctrl+l` to instantly filter saved stations by name, genre, or tag — no network, pure in-memory substring matching
-- ⭐ **Favorites & pinned stations**: star your daily drivers with `*` — they float to the top of their genre with a ★ indicator
-- ⏪ **Station preset slots**: `Ctrl+1`–`Ctrl+5` assigns the playing station to a slot; `Alt+1`–`Alt+5` plays it back — like TV preset buttons that never shift
-- 🔢 **Station quick-jump by number**: row numbers display next to stations; type `{n}G` to jump directly (vim-style)
-- 🪪 **Station details**: press `i` in normal mode to inspect grouped identity, playback, catalog, and health metadata for the highlighted station
-- 🧭 **Command palette**: press `:` or `Ctrl+p` to search and run common actions, including metadata refresh, settings, help, export, retry, and Playback Doctor
-- 🧾 **Persistent History**: opt-in settings to save song titles to `history.json` and persist across runs; view with `g`
-- 💤 **Sleep Timer**: press `t` to open a sleep-timer panel; nudge by 5 minutes with ↑ / ↓, jump to presets (15-120 min) with number keys, turn it off with `0` / `c`, and playback fades out and stops when time is up
-- 📥 **Import / Export**: export your library to `.m3u` in-app with `e`, or import/export via the command line with preview and enrich-only modes
-- 🩺 **Playback Doctor**: press `d` to inspect output, metadata, reconnect, decoder, recent events, and recovery hints while troubleshooting a stream — auto-suggestions now offer context-aware actions based on diagnostic state
-- 🔔 **Desktop notifications**: a quiet system notification shows the current track when a new song starts, rate-limited to one per 5 seconds to prevent notification floods during stream reconnects
-- 🎛️ **Resilient streaming**: PulseDeck uses a layered audio engine with a single-owner state machine, generation-guarded worker threads for instant station switching, bounded prebuffering with timeout, Symphonia probe-based multi-codec decoding (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV), ICY-aware stream reading with provable metadata/audio separation, and a non-blocking visualizer tap; auto-reconnect retries with configurable attempts and backoff on dropout (tunable in `pulsedeck.toml`), and manual retry with `r` also works
-- 🖥️ **Compact-screen protection**: terminal windows below 80x24 show a clean diagnostic instead of letting deck art and borders collapse into visual static
-- 🔁 **Audio output recovery**: default-device playback retries with configurable attempts and delay after hardware-style sink failures, helping PulseDeck recover from transient headset or Bluetooth dropouts
-- 📐 **Mini mode**: press `F6` to toggle a compact 1-2 line display showing station, track, volume, play state, and buffer percentage during connection — designed for small tmux panes and tiling WM corners
-- 🟢 **Station health dots**: color-coded indicators (green/yellow/red) next to stations in the library based on local connection history — spot unreliable stations at a glance; old failures decay after 7 days; Station Details shows confidence level based on data point count
-- ⏱️ **Elapsed listening time**: shows how long you've been tuned to the current station in the footer and mini mode
-- 🔍 **Station recommendations**: "Discover stations" in the command palette scores candidates against your favorites' genres, tags, and country with configurable weights and exclusion lists — expand your listening without manual search
-- ⌨️ **Keybinding customization**: drop a `keybindings.json` in your config directory to remap any key to any action, with mode-specific bindings and graceful fallback to defaults
-- 🕐 **Search history**: last 10 searches are saved and recallable with Up/Down arrows in search mode — quickly repeat frequent queries without retyping
-- ⚙️ **Unified config file (`pulsedeck.toml`)**: all settings in one place — audio output, volume, theme, notifications, autoplay, keybindings path, reconnect strategy, device recovery, and discover weights/exclusions — with backward-compatible migration from `library.json`
-
----
-
-## Installation
-
-**Prerequisites:** [Rust & Cargo](https://rustup.rs/) (1.75+)
-
-> On Linux, also install ALSA dev headers first:
-> ```bash
-> sudo apt-get install libasound2-dev   # Debian/Ubuntu
-> sudo dnf install alsa-lib-devel       # Fedora
-> ```
-
-### From crates.io (recommended)
+One command to install. One keypress to search 30,000+ stations worldwide. One more to start listening. It remembers what you like, switches stations with smooth fades, and reconnects automatically when streams drop. When you close it tomorrow, it picks up where you left off.
 
 ```bash
 cargo install pulsedeck
 ```
 
-### From source
+That's it. No config files. No API keys. Launch it and you're listening in seconds.
 
+---
+
+## Your first 30 seconds
+
+```
+$ pulsedeck
+```
+
+PulseDeck starts with handpicked stations ready to go. But you want something specific:
+
+1. Press `/` — search opens
+2. Type `tag:ambient` — results appear as you type
+3. Press `Space` on one to preview it (no commitment)
+4. Like it? Press `Enter` — saved to your library forever
+5. Press `Esc` to close search. You're listening.
+
+That's the loop. **Search → Preview → Save → Listen.** Everything else is optional.
+
+---
+
+## What you get
+
+<table>
+<tr><td>
+
+**🎵 Listening**
+- 30,000+ stations via radio-browser.info
+- Smooth fade transitions between stations
+- Auto-reconnect on stream dropout
+- Sleep timer (fade out and stop)
+- Desktop notifications for track changes
+
+</td><td>
+
+**📚 Your Library**
+- Stations persist between sessions
+- Favorites float to the top (★)
+- Genre tabs, fuzzy filter, sort modes
+- Station presets (like TV channel buttons)
+- Import/export as M3U or JSON
+
+</td></tr>
+<tr><td>
+
+**🎨 The Vibe**
+- 6 themes (Retrowave, Catppuccin ×4, Terminal)
+- 3 visualizers (Spectrum, Oscilloscope ×2)
+- 3 dashboard layouts
+- Mini mode for tmux panes
+- Station health dots (green/yellow/red)
+
+</td><td>
+
+**⚙️ Your Way**
+- Customizable keybindings (JSON)
+- Unified TOML config with hot-reload
+- Command palette (`:` or `Ctrl+p`)
+- CLI mode for import/export/backup
+- Works on Windows, Linux, macOS, WSL
+
+</td></tr>
+</table>
+
+---
+
+## Installation
+
+**You need:** [Rust & Cargo](https://rustup.rs/) (1.75+)
+
+```bash
+cargo install pulsedeck
+```
+
+> **Linux users** — install ALSA headers first:
+> ```bash
+> sudo apt-get install libasound2-dev   # Debian/Ubuntu
+> sudo dnf install alsa-lib-devel       # Fedora
+> ```
+
+Or build from source:
 ```bash
 git clone https://github.com/milgaj84/pulsedeck.git
 cd pulsedeck
 cargo run --release
 ```
 
-That's it. No config files to write. No API keys. Stations are pre-loaded and the player starts immediately.
-
 ---
 
-## How to use it
+## Controls
 
-PulseDeck is keyboard-driven. Press **`h`** at any time to see the full control reference.
+PulseDeck is keyboard-driven. Press `h` anytime for the full reference.
 
-### Core shortcuts
+**The essentials:**
 
-| Key | Where | What it does |
-| :--- | :--- | :--- |
-| `↑` / `↓` or `j` / `k` | Library or search | Move through the visible list |
-| `Enter` | Library | Play the highlighted saved station |
-| `Enter` | Search | Save the highlighted result to your **Library**, then play it |
-| `Space` | Search | Audition the highlighted result without saving it |
-| `Ctrl+Enter` | Search | Audition too, when your terminal reports the key combo |
-| `/` / `Ctrl+f` / `F3` | Anywhere in normal mode | Open worldwide station search |
-| `:` / `Ctrl+p` | Normal mode | Open the command palette |
-| `Esc` | Search or overlay | Leave search / close overlay |
-| `f` | Library only | Remove the highlighted station from your **Library** |
-| `u` | Library only | Undo the most recent station removal |
-| `Ctrl+l` | Library | Fuzzy filter saved stations (type to search) |
-| `*` | Library | Toggle favorite (★ pin to top of genre) |
-| `{n}G` or `{n}Enter` | Library | Jump to row number (vim-style) |
-| `Ctrl+1`–`Ctrl+5` | Normal mode | Assign playing station to preset slot |
-| `Alt+1`–`Alt+5` | Normal mode | Play station from preset slot |
-| `Tab` / `Shift+Tab` | Library | Switch genre categories |
-| `i` | Library | Show details for the highlighted station |
-| `d` | Library / playback | Open Playback Doctor diagnostics |
-| `g` | Library | Show Recent Tracks, or persistent Listening History when history saving is enabled |
-| `e` | Library | Export saved library to M3U format |
-| `Space` | Playback | Pause / resume |
-| `s` | Playback | Stop playback |
-| `r` | Playback error | Retry the current stream |
-| `t` | Playback | Open the sleep timer panel (±5 min, presets, off) |
-| `+` / `-` | Playback | Volume up / down with fine low-volume and faster high-volume steps |
-| `m` | Playback | Mute / unmute |
-| `Ctrl+-` / `Alt+-` | Search | Volume down without leaving search |
-| `Ctrl+=` / `Ctrl++` / `Alt+=` / `Alt++` | Search | Volume up without leaving search |
-| `Ctrl+m` / `Alt+m` | Search | Mute / unmute without leaving search |
-| `b` | View | Cycle Split View / Library Focus / Signal Focus |
-| `v` | View | Cycle RTA Spectrum / Real Osc / Sim Osc |
-| `F6` | Anywhere | Toggle mini mode (compact 1-2 line display) |
-| `,` | App | Open settings |
-| `h` / `?` | App | Show / hide help |
-| `q` | App | Quit, or close an open overlay first |
-
-`Enter` is the search commit action: it adds the highlighted search result to your saved Library and starts playback. `Space` auditions the highlighted result without saving it, so you can sample stations before committing them to `library.json`.
-
-While in search, plain printable characters continue to edit the query. Use the Ctrl/Alt audio shortcuts for volume and mute if the current stream needs adjustment without abandoning the active search.
-
----
-
-## Workflow
-
-**Finding and adding a new station:**
-
-1. Press `/`, `Ctrl+f`, or `F3` to open search, then type a station name or focused query such as `tag:ambient`, `country:BA`, `lang:english`, or `codec:mp3`. Search starts after **2+ characters** and waits briefly while you type, so quick typing does not send a request for every letter.
-2. Use `↑` / `↓` to highlight a result.
-3. Press `Space` to audition the highlighted station without saving it. You stay in search mode and can keep browsing.
-4. Press `Enter` to save that result to your **Library** and start playing it immediately. It will be available next time you launch PulseDeck.
-5. Press `Esc` instead to leave search without adding anything.
-
-Search results show saved stations with a star and include compact genre/country/bitrate/codec/check metadata when available. The highlighted result also explains why it matched, such as exact tag, country code, codec, last-check status, saved status, HTTPS, votes, or click signals. Long station names are truncated around the active search term when possible, so matching text stays visible even in narrow result rows. Search titles and the footer both reinforce the `Space` preview versus `Enter` save-and-play split.
-
-**Search prefixes:** plain text still searches station names, but you can focus Radio Browser searches with prefixes:
-
-| Prefix | Also accepts | Example | Searches |
-| :--- | :--- | :--- | :--- |
-| `name:` | `station:` | `name:lofi` | Station names |
-| `tag:` | `genre:` | `tag:ambient` | Genres and tags |
-| `country:` | `cc:` | `country:BA` | Country name or two-letter code |
-| `lang:` | `language:` | `lang:english` | Station language |
-| `codec:` | `format:` | `codec:mp3` | Stream codec |
-
-**Managing your library:**
-
-- Your Library is the saved station list shown on launch.
-- If the Library is empty, PulseDeck shows a starter card with the most useful first actions.
-- Rows show the selected station, currently playing station, country, bitrate, and local health hints without overflowing long names.
-- To inspect the highlighted station, press `i` for grouped Station Details: identity, playback, catalog, and health fields, including tags, country code, language, codec, bitrate, local health, last-check status, homepage, UUID, votes, recent click count, and stream URL when available.
-- Use the command palette (`:` / `Ctrl+p`) and run **Refresh library metadata** to enrich older saved stations with missing Radio Browser metadata without replacing your saved-facing station name, stream URL, or genre.
-- To remove a saved station, highlight it in the Library and press `f`.
-- After removal, press `u` to restore removed stations in reverse order. PulseDeck keeps a bounded history of the 10 most recent removals.
-- Switch between genre categories with `Tab` / `Shift+Tab`; PulseDeck remembers your last cursor position per category, falling back to the playing station when there is no saved position.
-
-**Using the signal deck:**
-
-- Press `b` to cycle between Split View, Library Focus, and Signal Focus.
-- Press `v` to cycle the signal display between RTA Spectrum, Real Oscilloscope, and Simulated Oscilloscope.
-- In RTA Spectrum mode, the signal screen shows a subtle tuning pulse during connection handshakes, so slow streams look active instead of blank.
-- During stop or station changes, the deck stays visually active while the audio fade-out completes.
-- Critical stream errors are mirrored inside help and settings overlays, so connection failures remain visible even when a modal is open.
-- Watch the footer chips for playback state, volume, layout, visualizer mode, and active sort mode.
-
-**Playback codec support:**
-
-PulseDeck's playback engine uses Symphonia probe-based decoding, supporting MP3, AAC, OGG/Vorbis, Opus, FLAC, and WAV streams. MP3 stations use a dedicated fast-path decoder for snappy startup. Stations with missing or unknown codec metadata are allowed to attempt playback because public radio directories can be incomplete. HLS/M3U8 streams are the only known unsupported format (they require a playlist/segment fetcher not yet implemented).
-
-The `codec:` search prefix filters station metadata. Station Details show `· playable`, `· playback will try`, or `· not playable yet` next to the codec field so the current capability is always visible without guessing.
-
-Audio capability checks live in `src/audio/capability.rs` so UI, search copy, and playback gating share one codec policy.
-
-**Playback stability model:**
-
-PulseDeck treats internet radio as a live stream, not a seekable file. The audio engine runs on a dedicated OS thread with a single-owner state machine (`EngineState`) that governs all transitions. A `ConnectionSupervisor` with generation IDs ensures rapid station switching discards stale workers instantly — no retry storms, no zombie connections. A bounded prebuffer with a fill timeout guarantees the engine can never sit in `Connecting` indefinitely.
-
-The decode pipeline uses Symphonia probing (via rodio) for multi-codec support, with an MP3 fast-path that skips full probing when the stream is known to be MP3. ICY metadata is stripped by a dedicated `StreamSource` reader that provably never delivers metadata bytes to the decoder.
-
-The visualizer is a passive tap on the decoded audio source. It copies small batches only when the UI sample buffer is available (`try_lock`), so visual rendering does not block the audio path.
-
-If the internal audio engine stops accepting commands, PulseDeck surfaces a visible playback error instead of silently ignoring play, pause, stop, or retry actions.
-
-**Recovering from playback errors:**
-
-- Press `r` to retry the current stream when an error leaves PulseDeck with a stream URL to retry.
-- Press `s` to stop playback if the stream or output device is no longer useful.
-- Press `d` to open Playback Doctor and inspect output, metadata, reconnect, decoder, recent event diagnostics, and recovery hints.
-- Press `,` and check **Audio Output** if a headset, Bluetooth sink, PulseAudio, or PipeWire route changed.
-- Press `/` to search for another station if the current stream itself is offline.
-
-**Coming back tomorrow:**
-
-- PulseDeck remembers your library between sessions.
-- PulseDeck also remembers your volume, mute state, layout mode, visualizer mode, and selected theme in config files.
-- Settings such as auto-resume, audio output, notifications, history persistence, and theme are saved automatically.
-- If *Save song history* is enabled, the `g` panel becomes persistent Listening History backed by `history.json`; when it is disabled, `g` remains a session-only Recent Tracks list.
-- Enable *Auto-resume last station* in settings (`,`) and it starts playing where you left off automatically.
-
----
-
-## Command Line Interface (CLI)
-
-PulseDeck features a headless CLI mode to backup or migrate your library of stations:
-
-- **Export Library**:
-  ```bash
-  pulsedeck export ~/my_library.m3u
-  pulsedeck export ~/my_library.json
-  ```
-  This writes your current library to the specified path in M3U or JSON format (auto-detected by file extension).
-
-- **Import / Merge Library**:
-  ```bash
-  pulsedeck import ~/my_library.m3u
-  pulsedeck import ~/my_library.json
-  pulsedeck import ~/my_library.m3u --preview
-  pulsedeck import ~/my_library.json --enrich-only
-  ```
-  This parses the input file and merges all unique stations into your library, deduplicated by Radio Browser UUID when available and normalized stream URL otherwise. `--preview` shows new, duplicate, enrichment, and skipped counts without saving. `--enrich-only` refreshes matching saved stations without adding new stations.
-
-- **Config Init**:
-  ```bash
-  pulsedeck config init
-  ```
-  Generates a commented default `pulsedeck.toml` in your config directory. Skips if the file already exists.
-
-- **Keybindings Validate**:
-  ```bash
-  pulsedeck keybindings validate
-  pulsedeck keybindings validate ~/my-keys.json
-  ```
-  Checks a keybindings file for errors. Prints all warnings; exits 0 if valid, 1 if any warnings.
-
-- **Help / Version**:
-  ```bash
-  pulsedeck --help
-  pulsedeck --version
-  ```
-
----
-
-## Settings
-
-Press `,` to open the settings panel. Current options:
-
-- **Desktop notifications**: show current track changes while you listen. On WSL, PulseDeck uses Windows toast notifications directly. All notifications are silent (no sound) so they don't interrupt your music.
-- **Auto-resume last station on startup**: start the previous station automatically on launch.
-- **Save song history**: when enabled, the `g` panel shows persistent Listening History saved to `history.json`; when disabled, `g` shows session-only Recent Tracks.
-- **Audio Output**: choose `Default` or a detected output device such as `pulse`, `pipewire`, speakers, or Bluetooth headphones exposed by the audio backend. In `Default` mode, PulseDeck retries once after hardware-style sink failures so transient output changes can recover without a restart. If only `pulse` or `pipewire` appears, select that in PulseDeck and route it to your headphones in PipeWire/PulseAudio with `wpctl`, `pavucontrol`, or your desktop sound settings.
-- **Theme**: cycle between Retrowave, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, Catppuccin Latte, and Terminal. The Terminal theme uses reset backgrounds and ANSI colors so PulseDeck follows your terminal emulator palette.
-- **Stream Song Info Metadata**: request ICY now-playing metadata when stations support it. Turn this off if a rare stream behaves better with clean audio bytes only.
-
-Use `↑` / `↓` or `j` / `k` to move between settings. Use `Space`, `Right`, `l`, or `d` to step values forward; use `Left`, `h`, or `a` to step values backward. Native ALSA/JACK probe diagnostics are suppressed during audio device discovery so backend chatter does not overwrite the TUI. Settings are saved automatically to a JSON file in your config directory.
-
----
-
-## Migration from DriftFM
-
-PulseDeck automatically copies existing DriftFM config files into the new config directory on first launch:
-
-| Old path | New path |
+| Key | What happens |
 | :--- | :--- |
-| `~/.config/driftfm/library.json` | `~/.config/pulsedeck/library.json` |
-| `~/.config/driftfm/ui-state.json` | `~/.config/pulsedeck/ui-state.json` |
+| `/` | Open search |
+| `Enter` | Play (or save + play from search) |
+| `Space` | Pause/resume (or preview in search) |
+| `j`/`k` or `↑`/`↓` | Navigate |
+| `+`/`-` | Volume |
+| `m` | Mute |
+| `b` | Cycle layout |
+| `v` | Cycle visualizer |
+| `q` | Quit |
 
-The old `~/.config/driftfm` directory is left untouched as a backup. Future saves go to `~/.config/pulsedeck`.
+**Search prefixes** for focused queries:
+
+| Type | Example |
+| :--- | :--- |
+| `tag:ambient` | Search by genre/tag |
+| `country:JP` | Search by country |
+| `lang:english` | Search by language |
+| `codec:mp3` | Search by stream format |
+
+**Power user shortcuts:**
+
+| Key | What |
+| :--- | :--- |
+| `:` / `Ctrl+p` | Command palette |
+| `*` | Toggle favorite |
+| `Ctrl+l` | Filter library |
+| `Ctrl+1`–`5` | Assign preset slot |
+| `Alt+1`–`5` | Play from preset |
+| `t` | Sleep timer |
+| `F6` | Mini mode |
+| `i` | Station details |
+| `d` | Playback doctor |
 
 ---
 
-## Configuration File (`pulsedeck.toml`)
+## Making it yours
 
-PulseDeck supports a unified TOML configuration file at `~/.config/pulsedeck/pulsedeck.toml` (Linux), `~/Library/Application Support/pulsedeck/pulsedeck.toml` (macOS), or `%APPDATA%\pulsedeck\pulsedeck.toml` (Windows).
-
-If no TOML file exists, settings are read from `library.json` for backward compatibility. Once you change a setting through the app, `pulsedeck.toml` is created automatically.
+Press `,` to open settings, or edit `~/.config/pulsedeck/pulsedeck.toml`:
 
 ```toml
 [audio]
-output_device = "Built-in Speakers"  # optional, omit for default
-default_volume = 80                   # 0–100
+output_device = "Built-in Speakers"
+default_volume = 80
 
 [ui]
-theme = "Retrowave"                   # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal
+theme = "Retrowave"        # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal
 notifications_enabled = true
-stream_metadata_enabled = true
-sort_mode = "favorites_first"         # favorites_first | alphabetical | recently_added | most_played
 
 [playback]
-autoplay_last = false
-save_history = false
-reconnect_max_attempts = 3            # 1–10, how many times to retry on stream dropout
-reconnect_backoff_seconds = [3, 6, 12] # delay between retries (last value repeats)
-device_recovery_attempts = 2          # 1–5, retries for Bluetooth/headset disconnects
-device_recovery_delay_ms = 1000       # 100–5000, ms between device recovery attempts
+autoplay_last = true       # pick up where you left off
+save_history = true        # remember every song title
+reconnect_max_attempts = 3
+reconnect_backoff_seconds = [3, 6, 12]
 
 [discover]
-genre_weight = 3                      # 0–10, weight for genre match in scoring
-tag_weight = 1                        # 0–10, weight for tag matches in scoring
-country_weight = 1                    # 0–10, weight for country match in scoring
-exclude_tags = []                     # tags/genres to never recommend (lowercased)
-exclude_countries = []                # country codes to never recommend (uppercased)
-
-[keybindings]
-path = "keybindings.json"             # optional, relative to config dir
+genre_weight = 3
+exclude_tags = ["news", "talk"]
 ```
 
-Unknown keys and sections are preserved when PulseDeck writes back — you can add custom fields for scripts without losing them.
+Config hot-reloads — edit the file and PulseDeck picks up changes without restart.
 
----
-
-## Custom Keybindings
-
-Place a `keybindings.json` in your config directory to override default key mappings:
+Drop a `keybindings.json` next to it to remap anything:
 
 ```json
 [
   {"key": "char(k)", "modifiers": ["ctrl"], "action": "prev_station", "mode": "Normal"},
-  {"key": "char(j)", "modifiers": ["ctrl"], "action": "next_station", "mode": "Normal"},
   {"key": "f5", "modifiers": [], "action": "toggle_mute"}
 ]
 ```
 
-- **key**: `"char(x)"`, `"enter"`, `"esc"`, `"up"`, `"down"`, `"f1"`–`"f12"`, `"tab"`, `"backspace"`, `"home"`, `"end"`, `"pageup"`, `"pagedown"`, `"delete"`, `"insert"`
-- **modifiers**: `[]`, `["ctrl"]`, `["alt"]`, `["shift"]`, or combinations
-- **action**: any action in snake_case (e.g., `"play_selected"`, `"volume_up"`, `"quit"`, `"toggle_mute"`)
-- **mode** (optional): `"Normal"`, `"Search"`, `"CommandPalette"`, `"SleepTimer"`, `"LibraryFilter"` — defaults to `"Normal"`
+---
 
-Invalid entries are skipped with a warning; a malformed file falls back to built-in defaults. Custom bindings override defaults; last entry wins for duplicates.
+## CLI
+
+PulseDeck also works headless for library management:
+
+```bash
+pulsedeck export ~/backup.m3u        # export library
+pulsedeck import ~/stations.m3u      # merge new stations
+pulsedeck import file.json --preview # dry run, show what would change
+pulsedeck config init                # generate default pulsedeck.toml
+pulsedeck keybindings validate       # check your keybindings file
+```
 
 ---
 
-## Platform Support
+## Coming back tomorrow
+
+PulseDeck remembers everything: your library, volume, theme, layout, visualizer mode, mute state. Enable **Auto-resume** in settings and it starts playing your last station on launch. No setup, no ceremony. Open terminal → music plays.
+
+---
+
+## Platform support
 
 | Platform | Status |
 | :--- | :--- |
-| Windows | ✅ Full support (native WASAPI audio) |
-| Linux | ✅ Full support (ALSA/PulseAudio/PipeWire via CPAL/Rodio, with selectable outputs) |
-| macOS | ✅ Full support (CoreAudio) |
-| WSL | ✅ Supported with native Windows toast notifications |
+| Linux | ✅ ALSA / PulseAudio / PipeWire |
+| macOS | ✅ CoreAudio |
+| Windows | ✅ WASAPI |
+| WSL | ✅ with native Windows toast notifications |
 
 ---
 
-## Code Quality
+## How it works (for the curious)
 
-PulseDeck's CI checks:
+<details>
+<summary>Audio engine architecture</summary>
 
-- Rust formatting with `cargo fmt --check`
-- Clippy across all targets and features with warnings treated as errors
-- Tests across all targets and features
-- Release build verification
-- RustSec dependency audit with `cargo audit`
+PulseDeck treats internet radio as a live stream, not a seekable file. The audio engine runs on a dedicated OS thread with a single-owner state machine. Generation-guarded worker threads ensure rapid station switching discards stale connections instantly. A bounded prebuffer with timeout guarantees the engine never hangs in `Connecting`.
 
-The codebase keeps UI colors routed through the semantic palette in `theme.rs`, renders through `src/ui/model.rs::UiModel` instead of handing every widget the full app controller, groups UI-only runtime state in `UiRuntimeState`, groups playback/audio runtime state in `PlaybackRuntime`, isolates blocking audio work from the TUI event loop, keeps runtime search/metadata workers in `src/runtime.rs::AppDriver`, separates production startup loading from pure app state construction with `AppParts`, backs off failed persistence writes so transient save errors do not hammer the filesystem every UI tick, and uses regression tests to guard playback, startup, search, settings, library, persistence, runtime grouping, and compact-layout behavior.
+Codec support: MP3 (fast-path), AAC, OGG/Vorbis, Opus, FLAC, WAV via Symphonia probing. ICY metadata is stripped by a dedicated reader that provably never leaks metadata bytes into the decoder. The visualizer is a passive tap that never blocks audio.
 
-**1350 tests** cover unit tests, state-transition tests, and property-based tests (via `proptest`) verifying correctness properties across station normalization, playlist serialization round-trips, volume computation, genre filtering, FFT analysis, ICY metadata parsing, reconnect backoff timing, sleep timer state transitions, notification cooldown, library filtering, favorites sorting, station slots, number jump clamping, recommendation scoring, keybinding serialization round-trips, TOML configuration round-trips, discover cursor bounds, search history ring cycling, config clamping invariants, exclusion filtering, scoring formula correctness, hot-reload propagation, Unicode truncation, buffer animation determinism, library sort permutation and ordering, stale station classification, config validation round-trips, settings undo semantics, mtime debounce invariants, sort mode serialization round-trips, stale notice suppression thresholds, doctor suggestion determinism, and health confidence bounds.
+If something goes wrong, press `d` for the Playback Doctor — it shows diagnostics and context-aware recovery hints.
+
+</details>
+
+<details>
+<summary>Code quality</summary>
+
+- Zero clippy warnings (`cargo clippy -- -D warnings`)
+- 1350 tests: unit, state-transition, and property-based (proptest)
+- Strict architecture: business logic has zero UI dependencies
+- Trait-abstracted I/O (audio, network, notifications) for testability
+- CI: fmt, clippy, test, release build, dependency audit
+
+</details>
+
+<details>
+<summary>Built with</summary>
+
+All native Rust — no ffmpeg, no Python, no Electron. A single self-contained binary.
+
+- [Ratatui](https://ratatui.rs/) — Terminal UI
+- [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) — Audio
+- [Tokio](https://tokio.rs/) — Async runtime
+- [reqwest](https://docs.rs/reqwest) — HTTP + ICY streaming
+
+</details>
 
 ---
 
-## Built with
+<div align="center">
 
-*All native Rust: no ffmpeg, no Python, no Electron. A single self-contained binary.*
+*A neon radio console for the terminal. Quick to launch, easy to tune, built for listening.*
 
-- [Ratatui](https://ratatui.rs/) - Terminal UI framework
-- [Rodio](https://github.com/RustAudio/rodio) + [CPAL](https://github.com/RustAudio/cpal) + [Symphonia](https://github.com/pdeljanov/Symphonia) - Audio output and multi-codec playback (MP3, AAC, OGG/Vorbis, Opus, FLAC, WAV) with MP3 fast-path and Symphonia probe for other formats
-- [Tokio](https://tokio.rs/) - Async runtime for API search
-- [reqwest](https://docs.rs/reqwest) - HTTP streaming with ICY metadata support
+MIT License — [see LICENSE](LICENSE)
 
----
-
-## License
-
-MIT - see [LICENSE](LICENSE) for details.
+</div>
