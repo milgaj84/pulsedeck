@@ -4,6 +4,22 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.10.4] - Unreleased
+
+### Fixed
+- All clippy warnings resolved: zero warnings across all targets with `-D warnings`.
+- `ReloadResult::Reloaded` variant boxed to eliminate large enum variant size difference.
+- Unnecessary parentheses, manual assign operations, and needless borrows cleaned up in tests.
+- `vec!` replaced with fixed array where contents are compile-time known.
+- Manual `RangeInclusive::contains` implementations replaced with idiomatic `(a..=b).contains(&x)`.
+
+### Internal
+- Version bumped to 0.10.4.
+- `cargo clippy --all-targets --all-features -- -D warnings` passes clean.
+- 1350 tests pass, zero failures.
+
+---
+
 ## [0.10.3] - Unreleased
 
 ### Improved

@@ -1343,6 +1343,7 @@ mod property_tests {
     }
 
     /// Generate a random subset of config fields to include in the TOML.
+    #[allow(clippy::type_complexity)]
     fn arb_partial_config() -> impl Strategy<
         Value = (
             Option<u8>,     // default_volume
@@ -1477,7 +1478,7 @@ mod property_tests {
             let attempts = result.config.playback.reconnect_max_attempts;
 
             // Must always be in [1, 10]
-            prop_assert!(attempts >= 1 && attempts <= 10,
+            prop_assert!((1..=10).contains(&attempts),
                 "reconnect_max_attempts {} out of [1, 10] for input {}", attempts, value);
 
             // Verify exact clamping behavior
@@ -1514,12 +1515,12 @@ mod property_tests {
                     "empty input should produce default [3, 6, 12]");
             } else {
                 // Result list length must be in [1, 10]
-                prop_assert!(backoff.len() >= 1 && backoff.len() <= 10,
+                prop_assert!(!backoff.is_empty() && backoff.len() <= 10,
                     "backoff list length {} out of [1, 10]", backoff.len());
 
                 // Each element must be in [1, 60]
                 for &elem in backoff.iter() {
-                    prop_assert!(elem >= 1 && elem <= 60,
+                    prop_assert!((1..=60).contains(&elem),
                         "backoff element {} out of [1, 60]", elem);
                 }
             }
@@ -1538,7 +1539,7 @@ mod property_tests {
             let attempts = result.config.playback.device_recovery_attempts;
 
             // Must always be in [1, 5]
-            prop_assert!(attempts >= 1 && attempts <= 5,
+            prop_assert!((1..=5).contains(&attempts),
                 "device_recovery_attempts {} out of [1, 5] for input {}", attempts, value);
         }
     }
@@ -1555,7 +1556,7 @@ mod property_tests {
             let delay = result.config.playback.device_recovery_delay_ms;
 
             // Must always be in [100, 5000]
-            prop_assert!(delay >= 100 && delay <= 5000,
+            prop_assert!((100..=5000).contains(&delay),
                 "device_recovery_delay_ms {} out of [100, 5000] for input {}", delay, value);
         }
     }

@@ -80,8 +80,8 @@ mod property_tests {
             // Generate stations inline with fixed now_epoch
             let stations: Vec<Station> = (0..10).map(|i| {
                 let mut station = Station::basic(
-                    &format!("S{}", i),
-                    &format!("http://s{}", i),
+                    format!("S{}", i),
+                    format!("http://s{}", i),
                     "Genre", "US", 128,
                 );
                 // Vary health data deterministically from index

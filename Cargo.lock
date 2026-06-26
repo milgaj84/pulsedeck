@@ -2148,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "pulsedeck"
-version = "0.7.1"
+version = "0.10.4"
 dependencies = [
  "anyhow",
  "cpal",

@@ -267,7 +267,7 @@ mod tests {
         for i in 0..5 {
             rec.arm(url.clone(), t);
             let backoff = [1, 2, 4][i.min(2)];
-            t = t + Duration::from_secs(backoff);
+            t += Duration::from_secs(backoff);
             assert_eq!(rec.take_due(t), Some(url.clone()));
         }
         assert!(rec.exhausted());
@@ -470,7 +470,7 @@ mod property_tests {
             for i in 0..=attempt_index {
                 rec.arm(url.clone(), now);
 
-                let expected_backoff = backoff_list[((i as usize)).min(backoff_list.len() - 1)];
+                let expected_backoff = backoff_list[(i as usize).min(backoff_list.len() - 1)];
                 let expected_delay = Duration::from_secs(expected_backoff);
 
                 // 1 nanosecond before expected delay → not due yet

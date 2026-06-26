@@ -9,7 +9,8 @@ impl App {
 
         match self.config_watcher.check_reload(now) {
             ReloadResult::Unchanged => {}
-            ReloadResult::Reloaded(new_config, new_preserved) => {
+            ReloadResult::Reloaded(boxed) => {
+                let (new_config, new_preserved) = *boxed;
                 self.apply_hot_reload(new_config, new_preserved);
                 self.set_info_notice("Config reloaded");
             }
@@ -347,8 +348,7 @@ mod hot_reload_proptests {
             let parts = test_parts(Library::in_memory(vec![]));
             let mut app = App::from_parts(parts);
 
-            let mut new_config = AppConfig::default();
-            new_config.discover = discover.clone();
+            let mut new_config = AppConfig { discover: discover.clone(), ..Default::default() };
             new_config.playback.reconnect_max_attempts = max_attempts;
             new_config.playback.reconnect_backoff_seconds = backoff_seconds.clone();
 

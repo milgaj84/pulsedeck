@@ -14,7 +14,7 @@ pub enum ReloadResult {
     /// File has not changed since last check.
     Unchanged,
     /// File changed and was re-parsed successfully.
-    Reloaded(AppConfig, toml::Value),
+    Reloaded(Box<(AppConfig, toml::Value)>),
     /// File changed but re-parse failed.
     Error(String),
 }
@@ -56,7 +56,7 @@ impl ConfigWatcher {
         };
 
         match parse_toml(&content) {
-            Ok(result) => ReloadResult::Reloaded(result.config, result.preserved),
+            Ok(result) => ReloadResult::Reloaded(Box::new((result.config, result.preserved))),
             Err(e) => ReloadResult::Error(e.to_string()),
         }
     }
@@ -108,7 +108,8 @@ mod tests {
         let t1 = t0 + Duration::from_millis(500);
         let result = watcher.check_reload(t1);
         match result {
-            ReloadResult::Reloaded(config, _) => {
+            ReloadResult::Reloaded(boxed) => {
+                let (config, _) = *boxed;
                 assert_eq!(config.audio.default_volume, 70);
             }
             _ => panic!("expected Reloaded, got {:?}", result),
@@ -162,7 +163,8 @@ mod tests {
         let t3 = t2 + Duration::from_millis(500);
         let result = watcher.check_reload(t3);
         match result {
-            ReloadResult::Reloaded(config, _) => {
+            ReloadResult::Reloaded(boxed) => {
+                let (config, _) = *boxed;
                 assert_eq!(config.audio.default_volume, 42);
             }
             _ => panic!("expected Reloaded, got {:?}", result),
@@ -199,7 +201,8 @@ mod tests {
         let t3 = t1 + Duration::from_millis(500);
         let result = watcher.check_reload(t3);
         match result {
-            ReloadResult::Reloaded(config, _) => {
+            ReloadResult::Reloaded(boxed) => {
+                let (config, _) = *boxed;
                 assert_eq!(config.audio.default_volume, 42);
             }
             _ => panic!("expected Reloaded, got {:?}", result),

@@ -1433,7 +1433,7 @@ mod property_tests {
 
     /// Two distinct InputModes guaranteed to differ.
     fn arb_distinct_modes() -> impl Strategy<Value = (InputMode, InputMode)> {
-        let modes = vec![
+        let modes = [
             InputMode::Normal,
             InputMode::Search,
             InputMode::CommandPalette,
