@@ -39,6 +39,13 @@ impl App {
             which
         };
 
+        // Start fade-in animation when opening an overlay.
+        if next != ActiveOverlay::None && self.ui.overlays.active == ActiveOverlay::None {
+            self.ui.overlay_animation = crate::app::animation::AnimationState::start(0.0, 1.0);
+        } else if next == ActiveOverlay::None {
+            self.ui.overlay_animation = crate::app::animation::AnimationState::idle();
+        }
+
         self.ui.overlays.active = next;
         if next == ActiveOverlay::SleepTimer {
             self.ui.input_mode = InputMode::SleepTimer;

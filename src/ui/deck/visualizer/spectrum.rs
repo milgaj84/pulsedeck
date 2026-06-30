@@ -1,3 +1,4 @@
+use crate::app::visualizer::gradient::{color_band_for_row, ColorBand};
 use crate::ui::model::UiModel;
 use crate::ui::theme;
 use ratatui::prelude::*;
@@ -13,24 +14,17 @@ pub(super) fn render_spectrum_analyzer(frame: &mut Frame, area: Rect, app: &UiMo
         return;
     }
 
+    let palette = theme::active_palette();
     let mut lines = Vec::with_capacity(height);
     for row in 0..height {
         let mut spans = Vec::with_capacity(width);
-        let y_factor = (height - 1 - row) as f32 / (height.max(2) - 1) as f32;
-        let color = if y_factor < 0.35 {
-            theme::highlight()
-        } else if y_factor < 0.7 {
-            theme::accent_secondary()
-        } else {
-            theme::warm()
-        };
-        let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
 
         for col in 0..width {
             let (band, is_spacer) = spectrum_column_slot(col, width, peaks.len());
             let val = if is_spacer { 0.0 } else { peaks[band] };
-            let h = val * height.saturating_sub(1).max(1) as f32;
-            let height_in_row = h - (height - 1 - row) as f32;
+            let bar_height_f = val * height.saturating_sub(1).max(1) as f32;
+            let bar_height = bar_height_f.round() as usize;
+            let height_in_row = bar_height_f - (height - 1 - row) as f32;
 
             let char_str = if height_in_row <= 0.0 {
                 " "
@@ -42,6 +36,27 @@ pub(super) fn render_spectrum_analyzer(frame: &mut Frame, area: Rect, app: &UiMo
                 blocks[level.min(8)]
             };
 
+            // Per-bar gradient: row position within this bar's height
+            let row_in_bar = if height_in_row > 0.0 {
+                bar_height
+                    .saturating_sub(1)
+                    .saturating_sub(height - 1 - row)
+            } else {
+                0
+            };
+
+            let color = if height_in_row <= 0.0 {
+                palette.bg
+            } else {
+                match color_band_for_row(row_in_bar, bar_height) {
+                    Some(ColorBand::Bottom) => palette.success,
+                    Some(ColorBand::Middle) => palette.highlight,
+                    Some(ColorBand::Top) => palette.accent,
+                    None => palette.accent,
+                }
+            };
+
+            let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
             spans.push(Span::styled(char_str, style));
         }
         lines.push(Line::from(spans));

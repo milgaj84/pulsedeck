@@ -190,6 +190,7 @@ impl App {
         let next = step_choice(ThemeName::ALL, current, forward);
         self.config.ui.theme = next.key().to_string();
         self.library.settings.theme = next.key().to_string();
+        self.mark_library_dirty();
         crate::ui::theme::set_active(next);
         true
     }
