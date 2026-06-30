@@ -38,14 +38,14 @@ impl ThemeName {
         }
     }
 
-    /// Resolve from a persisted string key.
+    /// Resolve from a persisted string (accepts both key and label format).
     pub fn from_key(key: &str) -> Self {
         match key {
             "Retrowave" => ThemeName::Retrowave,
-            "CatppuccinMocha" => ThemeName::CatppuccinMocha,
-            "CatppuccinMacchiato" => ThemeName::CatppuccinMacchiato,
-            "CatppuccinFrappe" => ThemeName::CatppuccinFrappe,
-            "CatppuccinLatte" => ThemeName::CatppuccinLatte,
+            "CatppuccinMocha" | "Catppuccin Mocha" => ThemeName::CatppuccinMocha,
+            "CatppuccinMacchiato" | "Catppuccin Macchiato" => ThemeName::CatppuccinMacchiato,
+            "CatppuccinFrappe" | "Catppuccin Frappé" => ThemeName::CatppuccinFrappe,
+            "CatppuccinLatte" | "Catppuccin Latte" => ThemeName::CatppuccinLatte,
             "Terminal" => ThemeName::Terminal,
             _ => ThemeName::Retrowave,
         }

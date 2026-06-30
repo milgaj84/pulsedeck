@@ -176,6 +176,10 @@ impl App {
         let count = self.visible_count();
         if count > 0 {
             self.ui.nav.selected = (self.ui.nav.selected + 1) % count;
+            debug_assert!(
+                self.ui.nav.selected < count,
+                "selected index out of bounds after next"
+            );
         }
     }
 
@@ -191,6 +195,10 @@ impl App {
             } else {
                 self.ui.nav.selected - 1
             };
+            debug_assert!(
+                self.ui.nav.selected < count,
+                "selected index out of bounds after prev"
+            );
         }
     }
 }
