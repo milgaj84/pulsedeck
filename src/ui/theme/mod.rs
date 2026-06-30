@@ -135,13 +135,6 @@ pub fn title() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Scanline effect — slightly different background for alternating rows
-#[allow(dead_code)]
-pub fn scanline() -> Style {
-    let p = active();
-    Style::default().fg(p.text_primary).bg(p.surface)
-}
-
 /// Non-selected list item on even rows: dimmed text + default bg
 pub fn dim_row_even() -> Style {
     let p = active();

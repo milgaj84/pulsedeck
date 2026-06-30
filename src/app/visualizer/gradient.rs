@@ -1,3 +1,6 @@
+//! Per-bar gradient color band assignment for the spectrum visualizer.
+//! Maps row positions within a bar to Bottom (green) / Middle (cyan) / Top (magenta) bands.
+
 /// Identifies which color band a given row belongs to within a spectrum bar.
 /// The UI layer maps each band to a theme palette color:
 /// - Bottom → success (green family)

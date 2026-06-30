@@ -1,3 +1,8 @@
+//! Startup audio device self-check.
+//! Verifies audio output availability on launch; shows a notice if unavailable.
+//! Integration into the startup sequence is pending.
+#![allow(dead_code)] // Module exercised by tests; startup wiring pending
+
 /// Result of the startup audio device check.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioCheckResult {

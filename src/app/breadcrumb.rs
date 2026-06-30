@@ -1,3 +1,6 @@
+//! Breadcrumb navigation indicator computation.
+//! Pure function computing the persistent location text from app state (overlay, mode, query, genre).
+
 use crate::app::ActiveOverlay;
 use crate::input_mode::InputMode;
 

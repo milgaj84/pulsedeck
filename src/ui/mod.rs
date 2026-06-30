@@ -6,7 +6,6 @@ pub mod discover_widget;
 pub mod header;
 pub mod help;
 pub mod keybindings_widget;
-#[allow(unused)]
 pub mod layout;
 pub mod mini;
 pub mod model;

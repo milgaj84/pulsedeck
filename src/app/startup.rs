@@ -160,6 +160,22 @@ impl App {
         Self::from_parts(AppParts::load(library))
     }
 
+    /// Construct the App from pre-loaded parts.
+    ///
+    /// # Startup Sequence & Override Precedence
+    ///
+    /// 1. **Library** loaded from `library.json` (stations, favorites, settings.theme)
+    /// 2. **UiState** loaded from `ui-state.json` (volume, mute, layout, visualizer, display mode)
+    /// 3. **Config (TOML)** loaded from `pulsedeck.toml` (overrides library settings when file exists)
+    /// 4. **Keybindings** loaded from `keybindings.json` (custom overrides defaults)
+    /// 5. **Search history** loaded from `search_history.json`
+    /// 6. **Watchers** created for config and keybinding hot-reload
+    ///
+    /// ## Override rules:
+    /// - If `pulsedeck.toml` exists: TOML values override library.json settings (theme, volume, etc.)
+    /// - If `pulsedeck.toml` does NOT exist: library.json settings are used as-is
+    /// - `main.rs` sets theme from library FIRST, then `apply_config_to_settings` re-sets from TOML
+    /// - UiState (volume, layout) is independent of TOML config
     pub(super) fn from_parts(parts: AppParts) -> Self {
         let config = parts.config;
         let config_preserved = parts.config_preserved;

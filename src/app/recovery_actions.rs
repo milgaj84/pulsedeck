@@ -1,3 +1,7 @@
+//! Numbered actionable recovery fixes for the Playback Doctor.
+//! Builds selectable actions from diagnostic suggestions and tracks execution status.
+#![allow(dead_code)] // Types exercised by tests; action execution wiring pending
+
 /// Maximum number of recovery actions displayed (keyed to number keys 1-9).
 pub const MAX_RECOVERY_ACTIONS: usize = 9;
 

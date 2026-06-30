@@ -138,6 +138,7 @@ impl App {
     /// Persist the current config to TOML. Shows an error notice on failure.
     pub(super) fn persist_config_change(&mut self) {
         let Some(config_dir) = self.config_dir.as_ref() else {
+            eprintln!("[persist] config_dir is None — settings change will not be saved");
             return;
         };
         if let Err(msg) =

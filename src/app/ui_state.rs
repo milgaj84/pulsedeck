@@ -325,3 +325,54 @@ mod tests {
         assert_eq!(state.stale_dismissed_at(), Some(1_700_000_000));
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Feature: v0113-code-quality, Property 3: UiState JSON Round-Trip
+    // For all valid field combinations, serialize → deserialize produces identical values.
+    proptest! {
+        #[test]
+        fn prop_ui_state_json_round_trip(
+            volume in 0u8..=100,
+            muted in proptest::bool::ANY,
+            layout_idx in 0usize..3,
+            vis_idx in 0usize..3,
+            display_idx in 0usize..2,
+            stale_at in proptest::option::of(0u64..2_000_000_000)
+        ) {
+            let layouts = [LayoutMode::Split, LayoutMode::LeftOnly, LayoutMode::RightOnly];
+            let vis_modes = [
+                VisualizerMode::Spectrum,
+                VisualizerMode::RealOscilloscope,
+                VisualizerMode::SimOscilloscope,
+            ];
+            let displays = [DisplayMode::Normal, DisplayMode::Mini];
+
+            let state = UiState::from_app_values(
+                volume,
+                muted,
+                layouts[layout_idx],
+                vis_modes[vis_idx],
+                displays[display_idx],
+                stale_at,
+            );
+
+            // Serialize to JSON
+            let json = serde_json::to_string(&state).expect("serialize");
+
+            // Deserialize back
+            let reloaded: UiState = serde_json::from_str(&json).expect("deserialize");
+
+            // Verify all fields survived
+            prop_assert_eq!(reloaded.volume(), state.volume());
+            prop_assert_eq!(reloaded.muted(), state.muted());
+            prop_assert_eq!(reloaded.layout_mode(), state.layout_mode());
+            prop_assert_eq!(reloaded.visualizer_mode(), state.visualizer_mode());
+            prop_assert_eq!(reloaded.display_mode(), state.display_mode());
+            prop_assert_eq!(reloaded.stale_dismissed_at(), state.stale_dismissed_at());
+        }
+    }
+}

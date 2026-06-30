@@ -1,3 +1,7 @@
+//! Radio Browser API availability tracking.
+//! First-notice-only suppression: shows a degradation notice on the first failure,
+//! suppresses subsequent failures until the service recovers.
+
 /// Tracks whether the Radio Browser API is currently unavailable and whether
 /// the user has already been notified in this session.
 ///

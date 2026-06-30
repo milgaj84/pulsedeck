@@ -1,3 +1,7 @@
+//! Overlay fade-in and scroll transition animation state.
+//! Provides `AnimationState` for 2-frame interpolation with clamp/restart support.
+#![allow(dead_code)] // All methods exercised by tests; UI rendering use pending
+
 /// Step size per frame: completes in 2 frames at 10 FPS (200ms total).
 pub const ANIMATION_STEP: f32 = 0.5;
 

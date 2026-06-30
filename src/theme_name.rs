@@ -126,3 +126,29 @@ mod tests {
         assert_eq!(ThemeName::ALL.len(), 6);
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Feature: v0113-code-quality, Property 2: ThemeName key round-trip
+    // For all ThemeName variants, from_key(key()) returns the same variant,
+    // and validate_theme accepts the key without warnings.
+    proptest! {
+        #[test]
+        fn prop_theme_key_round_trip(idx in 0..ThemeName::ALL.len()) {
+            let variant = ThemeName::ALL[idx];
+            let key = variant.key();
+
+            // from_key round-trips correctly
+            prop_assert_eq!(ThemeName::from_key(key), variant);
+
+            // validate_theme in the parser also accepts the key format
+            let mut warnings = Vec::new();
+            let result = crate::config_toml::parse::validate_theme_for_test(key, &mut warnings);
+            prop_assert_eq!(result.as_str(), key, "validate_theme should preserve key");
+            prop_assert!(warnings.is_empty(), "no warnings for valid key");
+        }
+    }
+}

@@ -1,3 +1,7 @@
+//! Overlay layout computation helpers.
+//! Provides vertical margin calculations based on terminal and content size.
+#![allow(dead_code)] // Exercised by tests; overlay rendering integration pending
+
 /// Minimum terminal height to allow vertical inner margins on overlays.
 const MIN_HEIGHT_FOR_VERTICAL_MARGIN: u16 = 30;
 
