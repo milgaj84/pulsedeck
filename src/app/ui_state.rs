@@ -273,7 +273,11 @@ mod tests {
 
     #[test]
     fn layout_mode_keys_roundtrip() {
-        for mode in [LayoutMode::Split, LayoutMode::LeftOnly, LayoutMode::RightOnly] {
+        for mode in [
+            LayoutMode::Split,
+            LayoutMode::LeftOnly,
+            LayoutMode::RightOnly,
+        ] {
             assert_eq!(parse_layout_mode_key(layout_mode_key(mode)), Some(mode));
         }
     }
