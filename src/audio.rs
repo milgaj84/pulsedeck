@@ -48,14 +48,17 @@ pub enum AudioStatus {
     Buffering { percent: u8 },
     FadingOut { current_volume: f32 },
     TrackChanged { url: String, title: String },
+    OutputDeviceChanged { active: Option<String> },
+    OutputDeviceChangeFailed {
+        requested: Option<String>,
+        active: Option<String>,
+        error: String,
+    },
 }
 
 /// Abstraction for sending commands to and receiving status from an audio backend.
 pub trait AudioSink: Send {
-    /// Send a command to the audio engine. Returns true if sent successfully.
     fn send(&self, command: AudioCommand) -> bool;
-
-    /// Non-blocking poll for the next audio status message.
     fn try_recv_status(&self) -> Option<AudioStatus>;
 }
 
@@ -66,7 +69,6 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    /// Spawn the audio engine on a dedicated OS thread.
     pub fn spawn(
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         recovery_config: DeviceRecoveryConfig,
@@ -98,7 +100,6 @@ impl AudioSink for AudioEngine {
     }
 }
 
-/// Test mock that captures sent commands and returns queued statuses.
 #[cfg(test)]
 pub(crate) struct MockAudioSink {
     pub commands: std::cell::RefCell<Vec<AudioCommand>>,
@@ -108,7 +109,6 @@ pub(crate) struct MockAudioSink {
 
 #[cfg(test)]
 impl MockAudioSink {
-    /// Create a mock where send always succeeds.
     pub fn new() -> Self {
         Self {
             commands: std::cell::RefCell::new(Vec::new()),
@@ -117,7 +117,6 @@ impl MockAudioSink {
         }
     }
 
-    /// Create a mock simulating a disconnected engine (send always fails).
     pub fn disconnected() -> Self {
         Self {
             commands: std::cell::RefCell::new(Vec::new()),
@@ -146,7 +145,6 @@ mod tests {
     #[test]
     fn mock_audio_sink_disconnected_returns_false_on_send() {
         let mock = MockAudioSink::disconnected();
-
         assert!(!mock.send(AudioCommand::Stop));
         assert_eq!(mock.commands.borrow().len(), 1);
     }
@@ -154,7 +152,6 @@ mod tests {
     #[test]
     fn mock_audio_sink_new_returns_true_on_send() {
         let mock = MockAudioSink::new();
-
         assert!(mock.send(AudioCommand::Pause));
         assert_eq!(mock.commands.borrow().len(), 1);
     }
@@ -168,5 +165,23 @@ mod tests {
         assert!(matches!(mock.try_recv_status(), Some(AudioStatus::Playing)));
         assert!(matches!(mock.try_recv_status(), Some(AudioStatus::Stopped)));
         assert!(mock.try_recv_status().is_none());
+    }
+
+    #[test]
+    fn output_switch_failure_status_keeps_requested_and_active_values() {
+        let status = AudioStatus::OutputDeviceChangeFailed {
+            requested: Some("USB DAC".to_string()),
+            active: None,
+            error: "not found".to_string(),
+        };
+
+        assert!(matches!(
+            status,
+            AudioStatus::OutputDeviceChangeFailed {
+                requested: Some(_),
+                active: None,
+                ..
+            }
+        ));
     }
 }
