@@ -60,8 +60,8 @@ pub fn save_json<T: Serialize>(file: &str, value: &T) -> Result<()> {
         return Ok(());
     };
 
-    fs::create_dir_all(&dir)?;
-    fs::write(dir.join(file), serde_json::to_string_pretty(value)?)?;
+    let bytes = serde_json::to_vec_pretty(value)?;
+    crate::persistence::atomic_write(&dir.join(file), &bytes)?;
     Ok(())
 }
 
