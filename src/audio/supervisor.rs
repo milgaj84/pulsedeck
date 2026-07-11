@@ -53,14 +53,18 @@ impl ConnectionSupervisor {
         req: ConnectRequest,
         event_tx: mpsc::Sender<EngineEvent>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    ) -> Result<(), EngineError> {
+    ) {
         self.retire_active();
         self.reap_finished();
 
         if self.outstanding_worker_count() >= MAX_OUTSTANDING_WORKERS {
-            return Err(EngineError::Connect(format!(
-                "too many stalled connection workers ({MAX_OUTSTANDING_WORKERS}); wait for previous attempts to finish"
-            )));
+            let _ = event_tx.send(EngineEvent::Failed {
+                generation: req.generation,
+                error: EngineError::Connect(format!(
+                    "too many stalled connection workers ({MAX_OUTSTANDING_WORKERS}); wait for previous attempts to finish"
+                )),
+            });
+            return;
         }
 
         let active_gen_arc = Arc::clone(&self.active_generation);
@@ -68,7 +72,6 @@ impl ConnectionSupervisor {
             super::decode::run_worker(req, event_tx, active_gen_arc, sample_buffer);
         });
         self.worker = Some(handle);
-        Ok(())
     }
 
     /// Mark the current worker stale without blocking the control thread.
