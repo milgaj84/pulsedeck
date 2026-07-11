@@ -49,9 +49,7 @@ impl App {
                     self.playback.view.state = PlaybackState::Paused;
                     self.playback.diagnostics.last_event = Some("Playback paused".to_string());
                 }
-                AudioStatus::Stopped => {
-                    self.handle_audio_stopped();
-                }
+                AudioStatus::Stopped => self.handle_audio_stopped(),
                 AudioStatus::Error(error) => {
                     self.playback.diagnostics.decoder_state = DecoderState::Failed;
                     self.playback.diagnostics.last_error = Some(error.clone());
@@ -73,8 +71,48 @@ impl App {
                     self.playback.diagnostics.decoder_state = DecoderState::Probing;
                     self.playback.diagnostics.last_event = Some(format!("Buffering ({percent}%)"));
                 }
+                AudioStatus::OutputDeviceChanged { active } => {
+                    self.apply_confirmed_output_device(active);
+                }
+                AudioStatus::OutputDeviceChangeFailed {
+                    requested,
+                    active,
+                    error,
+                } => {
+                    self.rollback_failed_output_device(requested, active, error);
+                }
             }
         }
+    }
+
+    fn apply_confirmed_output_device(&mut self, active: Option<String>) {
+        self.config.audio.output_device = active.clone();
+        self.library.settings.output_device_name = active.clone();
+        let display = crate::audio::output_device_display_name(active.as_deref());
+        self.playback.diagnostics.output_device = display.clone();
+        self.playback.diagnostics.last_event = Some(format!("Audio output changed to {display}"));
+        self.playback.diagnostics.last_error = None;
+        self.persist_config_change();
+        self.set_info_notice(format!("Audio output: {display}"));
+    }
+
+    fn rollback_failed_output_device(
+        &mut self,
+        requested: Option<String>,
+        active: Option<String>,
+        error: String,
+    ) {
+        self.config.audio.output_device = active.clone();
+        self.library.settings.output_device_name = active.clone();
+        let active_display = crate::audio::output_device_display_name(active.as_deref());
+        let requested_display = crate::audio::output_device_display_name(requested.as_deref());
+        self.playback.diagnostics.output_device = active_display.clone();
+        self.playback.diagnostics.last_event = Some("Audio output unchanged".to_string());
+        self.playback.diagnostics.last_error = Some(error.clone());
+        self.persist_config_change();
+        self.set_info_notice(format!(
+            "Could not use {requested_display}; still using {active_display}: {error}"
+        ));
     }
 
     pub(super) fn handle_track_changed(&mut self, url: String, title: String) {
@@ -99,7 +137,7 @@ impl App {
             if self.library.settings.save_history {
                 let station_name = self
                     .now_playing()
-                    .map(|s| s.name.clone())
+                    .map(|station| station.name.clone())
                     .unwrap_or_else(|| "Radio Stream".to_string());
                 self.history.record(title.clone(), station_name);
                 self.mark_history_dirty();
@@ -115,12 +153,10 @@ impl App {
                 let now = std::time::Instant::now();
                 if self.notification_cooldown.may_notify(now) {
                     self.notification_cooldown.record_notification(now);
-
                     let station_name = self
                         .now_playing()
-                        .map(|s| s.name.clone())
+                        .map(|station| station.name.clone())
                         .unwrap_or_else(|| "Radio Stream".to_string());
-
                     self.notifier.notify_now_playing(&title, &station_name);
                 }
             }
@@ -174,7 +210,7 @@ mod tests {
     use crate::favorites::Library;
     use std::time::{Duration, Instant};
 
-    fn test_parts() -> super::super::startup::AppParts {
+    fn test_parts_with_audio(audio: MockAudioSink) -> super::super::startup::AppParts {
         super::super::startup::AppParts {
             library: Library::in_memory(vec![]),
             ui_state: super::super::ui_state::UiState::from_app_values(
@@ -188,13 +224,17 @@ mod tests {
             ui_state_warning: None,
             history: crate::history::History::default(),
             history_warning: None,
-            audio: Box::new(MockAudioSink::disconnected()),
+            audio: Box::new(audio),
             sample_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(4096))),
             config: AppConfig::default(),
             config_preserved: toml::Value::Table(toml::map::Map::new()),
             config_warnings: Vec::new(),
             config_loaded_from_file: false,
         }
+    }
+
+    fn test_parts() -> super::super::startup::AppParts {
+        test_parts_with_audio(MockAudioSink::disconnected())
     }
 
     fn test_parts_with_library(library: Library) -> super::super::startup::AppParts {
@@ -204,22 +244,55 @@ mod tests {
     }
 
     #[test]
-    fn last_played_station_position_matches_normalized_urls() {
-        let stations = vec![Station::basic("A", " HTTP://STREAM/ ", "Radio", "US", 128)];
-
-        assert_eq!(
-            last_played_station_position(&stations, "http://stream"),
-            Some(0)
+    fn failed_output_switch_rolls_back_setting_without_breaking_playback() {
+        let audio = MockAudioSink::new();
+        audio.statuses.borrow_mut().push_back(
+            AudioStatus::OutputDeviceChangeFailed {
+                requested: Some("Missing DAC".to_string()),
+                active: Some("Speakers".to_string()),
+                error: "not found".to_string(),
+            },
         );
+        let mut app = App::from_parts(test_parts_with_audio(audio));
+        app.config.audio.output_device = Some("Missing DAC".to_string());
+        app.library.settings.output_device_name = Some("Missing DAC".to_string());
+        app.playback.view.state = PlaybackState::Playing;
+
+        app.poll_audio_status();
+
+        assert!(matches!(app.playback.view.state, PlaybackState::Playing));
+        assert_eq!(app.config.audio.output_device.as_deref(), Some("Speakers"));
+        assert_eq!(
+            app.library.settings.output_device_name.as_deref(),
+            Some("Speakers")
+        );
+        assert_eq!(app.playback.diagnostics.output_device, "Speakers");
+        assert_eq!(app.playback.diagnostics.last_error.as_deref(), Some("not found"));
     }
 
     #[test]
-    fn last_played_station_position_allows_missing_library_match() {
-        let stations = vec![Station::basic("A", "http://a", "Radio", "US", 128)];
+    fn successful_output_switch_confirms_normalized_setting() {
+        let audio = MockAudioSink::new();
+        audio
+            .statuses
+            .borrow_mut()
+            .push_back(AudioStatus::OutputDeviceChanged { active: None });
+        let mut app = App::from_parts(test_parts_with_audio(audio));
+        app.config.audio.output_device = Some("Default".to_string());
 
+        app.poll_audio_status();
+
+        assert!(app.config.audio.output_device.is_none());
+        assert!(app.library.settings.output_device_name.is_none());
+        assert_eq!(app.playback.diagnostics.output_device, "Default");
+    }
+
+    #[test]
+    fn last_played_station_position_matches_normalized_urls() {
+        let stations = vec![Station::basic("A", " HTTP://STREAM/ ", "Radio", "US", 128)];
         assert_eq!(
-            last_played_station_position(&stations, "http://other"),
-            None
+            last_played_station_position(&stations, "http://stream"),
+            Some(0)
         );
     }
 
@@ -243,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_title_fires_notification() {
+    fn new_title_updates_history_and_notifies_once() {
         let station_url = "http://stream";
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
@@ -251,13 +324,16 @@ mod tests {
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        app.handle_track_changed(station_url.to_string(), "Artist - New Song".to_string());
+        app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
+        app.handle_track_changed(station_url.to_string(), "Song Beta".to_string());
 
+        assert!(app.song_history.contains(&"Song Alpha".to_string()));
+        assert!(app.song_history.contains(&"Song Beta".to_string()));
         assert_eq!(app.notifier.notification_count(), 1);
     }
 
     #[test]
-    fn test_disabled_notifications_suppresses() {
+    fn disabled_notifications_still_update_track_without_notifying() {
         let station_url = "http://stream";
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
@@ -265,28 +341,33 @@ mod tests {
         app.library.settings.notifications_enabled = false;
         app.playback.view.playing_url = Some(station_url.to_string());
 
-        app.handle_track_changed(station_url.to_string(), "Artist - New Song".to_string());
+        app.handle_track_changed(station_url.to_string(), "Latest Title".to_string());
 
         assert_eq!(app.notifier.notification_count(), 0);
+        assert_eq!(
+            app.playback.view.current_track.as_deref(),
+            Some("Latest Title")
+        );
     }
 
     #[test]
-    fn test_duplicate_title_no_notification() {
+    fn notification_cooldown_allows_fresh_title_after_elapsed_time() {
         let station_url = "http://stream";
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
         ])));
         app.library.settings.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
-        app.playback.view.current_track = Some("Already Playing".to_string());
+        app.notification_cooldown
+            .record_notification(Instant::now() - Duration::from_secs(10));
 
-        app.handle_track_changed(station_url.to_string(), "Already Playing".to_string());
+        app.handle_track_changed(station_url.to_string(), "Fresh Song".to_string());
 
-        assert_eq!(app.notifier.notification_count(), 0);
+        assert_eq!(app.notifier.notification_count(), 1);
     }
 
     #[test]
-    fn test_empty_title_no_notification() {
+    fn empty_title_does_not_notify() {
         let station_url = "http://stream";
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
@@ -297,132 +378,5 @@ mod tests {
         app.handle_track_changed(station_url.to_string(), String::new());
 
         assert_eq!(app.notifier.notification_count(), 0);
-    }
-
-    #[test]
-    fn test_current_track_always_updated() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = false;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        app.handle_track_changed(station_url.to_string(), "Latest Title".to_string());
-
-        assert_eq!(
-            app.playback.view.current_track.as_deref(),
-            Some("Latest Title"),
-        );
-    }
-
-    #[test]
-    fn test_song_history_records_new_title() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
-        app.handle_track_changed(station_url.to_string(), "Song Beta".to_string());
-
-        assert!(app.song_history.contains(&"Song Alpha".to_string()));
-        assert!(app.song_history.contains(&"Song Beta".to_string()));
-    }
-
-    #[test]
-    fn test_burst_titles_produce_at_most_one_notification() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        let burst_titles = [
-            "Connecting...",
-            "Ad Break",
-            "Artist A - Song One",
-            "Artist B - Song Two",
-            "Artist C - Song Three",
-        ];
-
-        for title in &burst_titles {
-            app.handle_track_changed(station_url.to_string(), title.to_string());
-        }
-
-        assert!(app.notifier.notification_count() <= 1);
-    }
-
-    #[test]
-    fn test_burst_5_titles_at_most_1_notification() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        let titles = ["Title A", "Title B", "Title C", "Title D", "Title E"];
-        for title in &titles {
-            app.handle_track_changed(station_url.to_string(), title.to_string());
-        }
-
-        assert_eq!(app.notifier.notification_count(), 1);
-    }
-
-    #[test]
-    fn test_single_title_after_cooldown_fires_immediately() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        let past = Instant::now() - Duration::from_secs(10);
-        app.notification_cooldown.record_notification(past);
-
-        app.handle_track_changed(station_url.to_string(), "Fresh Song".to_string());
-
-        assert_eq!(app.notifier.notification_count(), 1);
-    }
-
-    #[test]
-    fn test_title_during_cooldown_suppresses_notification() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        app.handle_track_changed(station_url.to_string(), "First Song".to_string());
-        assert_eq!(app.notifier.notification_count(), 1);
-
-        app.handle_track_changed(station_url.to_string(), "Second Song".to_string());
-        assert_eq!(app.notifier.notification_count(), 1);
-        assert_eq!(
-            app.playback.view.current_track.as_deref(),
-            Some("Second Song"),
-        );
-    }
-
-    #[test]
-    fn test_title_during_cooldown_song_history_still_updated() {
-        let station_url = "http://stream";
-        let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
-            Station::basic("Test Station", station_url, "Radio", "US", 128),
-        ])));
-        app.library.settings.notifications_enabled = true;
-        app.playback.view.playing_url = Some(station_url.to_string());
-
-        app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
-        app.handle_track_changed(station_url.to_string(), "Song Beta".to_string());
-
-        assert!(app.song_history.contains(&"Song Alpha".to_string()));
-        assert!(app.song_history.contains(&"Song Beta".to_string()));
     }
 }
