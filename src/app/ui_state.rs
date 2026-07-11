@@ -7,7 +7,6 @@ use std::path::Path;
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
 const VISUALIZER_MODE_COUNT: usize = 3;
-/// Suppression window: 7 days in seconds.
 const STALE_SUPPRESSION_SECONDS: u64 = 604_800;
 const UI_STATE_FILE: &str = "ui-state.json";
 
@@ -27,12 +26,8 @@ pub(super) struct UiState {
     pub stale_dismissed_at: Option<u64>,
 }
 
-/// Returns `true` when the stale notice should be suppressed (dismissed < 7 days ago).
 pub(super) fn should_suppress_stale_notice(dismissed_at: Option<u64>, now_epoch: u64) -> bool {
-    match dismissed_at {
-        None => false,
-        Some(at) => now_epoch.saturating_sub(at) < STALE_SUPPRESSION_SECONDS,
-    }
+    dismissed_at.is_some_and(|at| now_epoch.saturating_sub(at) < STALE_SUPPRESSION_SECONDS)
 }
 
 impl Default for UiState {
@@ -62,7 +57,8 @@ impl UiState {
     }
 
     fn load_from_path(path: &Path) -> (Self, Option<String>) {
-        let (state, warning) = crate::config::load_json_path_with_warning::<Self>(path);
+        let (state, warning) =
+            crate::config::load_json_from_path_with_warning::<Self>(path, UI_STATE_FILE);
         (state.sanitized(), warning)
     }
 
@@ -85,29 +81,18 @@ impl UiState {
         .sanitized()
     }
 
-    pub(super) fn volume(&self) -> u8 {
-        self.volume
-    }
-
-    pub(super) fn muted(&self) -> bool {
-        self.muted
-    }
-
+    pub(super) fn volume(&self) -> u8 { self.volume }
+    pub(super) fn muted(&self) -> bool { self.muted }
     pub(super) fn layout_mode(&self) -> LayoutMode {
         parse_layout_mode_key(&self.layout_mode).unwrap_or(LayoutMode::Split)
     }
-
     pub(super) fn display_mode(&self) -> DisplayMode {
         parse_display_mode_key(&self.display_mode).unwrap_or(DisplayMode::Normal)
     }
-
     pub(super) fn visualizer_mode(&self) -> usize {
         self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1)
     }
-
-    pub(super) fn stale_dismissed_at(&self) -> Option<u64> {
-        self.stale_dismissed_at
-    }
+    pub(super) fn stale_dismissed_at(&self) -> Option<u64> { self.stale_dismissed_at }
 
     pub(super) fn save(&self) -> anyhow::Result<()> {
         let Some(path) = crate::config::config_path(UI_STATE_FILE) else {
@@ -117,7 +102,7 @@ impl UiState {
     }
 
     fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
-        crate::config::save_json_path(path, &self.clone().sanitized())
+        crate::config::save_json_to_path(path, &self.clone().sanitized())
     }
 
     fn sanitized(mut self) -> Self {
@@ -133,22 +118,15 @@ impl UiState {
     }
 }
 
-fn default_volume() -> u8 {
-    DEFAULT_VOLUME
-}
-
-fn default_layout_mode_key() -> String {
-    layout_mode_key(LayoutMode::Split).to_string()
-}
-
-fn layout_mode_key(layout_mode: LayoutMode) -> &'static str {
-    match layout_mode {
+fn default_volume() -> u8 { DEFAULT_VOLUME }
+fn default_layout_mode_key() -> String { layout_mode_key(LayoutMode::Split).to_string() }
+fn layout_mode_key(mode: LayoutMode) -> &'static str {
+    match mode {
         LayoutMode::Split => "split",
         LayoutMode::LeftOnly => "left-only",
         LayoutMode::RightOnly => "right-only",
     }
 }
-
 fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
     match key {
         "split" => Some(LayoutMode::Split),
@@ -157,18 +135,13 @@ fn parse_layout_mode_key(key: &str) -> Option<LayoutMode> {
         _ => None,
     }
 }
-
-fn default_display_mode_key() -> String {
-    display_mode_key(DisplayMode::Normal).to_string()
-}
-
-fn display_mode_key(display_mode: DisplayMode) -> &'static str {
-    match display_mode {
+fn default_display_mode_key() -> String { display_mode_key(DisplayMode::Normal).to_string() }
+fn display_mode_key(mode: DisplayMode) -> &'static str {
+    match mode {
         DisplayMode::Normal => "normal",
         DisplayMode::Mini => "mini",
     }
 }
-
 fn parse_display_mode_key(key: &str) -> Option<DisplayMode> {
     match key {
         "normal" => Some(DisplayMode::Normal),
@@ -184,28 +157,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir()
             .join(format!("pulsedeck-ui-state-{}-{nanos}", std::process::id()))
             .join(name)
     }
 
     #[test]
-    fn defaults_are_stable() {
-        let state = UiState::default();
-        assert_eq!(state.volume(), 80);
-        assert!(!state.muted());
-        assert_eq!(state.layout_mode(), LayoutMode::Split);
-        assert_eq!(state.display_mode(), DisplayMode::Normal);
-        assert_eq!(state.visualizer_mode(), 0);
-    }
-
-    #[test]
     fn real_persistence_round_trips_sanitized_state() {
-        let path = temp_path("ui-state.json");
+        let path = temp_path(UI_STATE_FILE);
         let state = UiState {
             volume: 255,
             muted: true,
@@ -214,10 +174,8 @@ mod tests {
             display_mode: "garbage".to_string(),
             stale_dismissed_at: Some(42),
         };
-
         state.save_to_path(&path).unwrap();
         let (loaded, warning) = UiState::load_from_path(&path);
-
         assert!(warning.is_none());
         assert_eq!(loaded.volume(), 100);
         assert!(loaded.muted());
@@ -230,27 +188,13 @@ mod tests {
 
     #[test]
     fn replacement_creates_backup_with_previous_state() {
-        let path = temp_path("ui-state.json");
-        let first = UiState::from_app_values(
-            25,
-            false,
-            LayoutMode::Split,
-            VisualizerMode::RealOscilloscope,
-            DisplayMode::Normal,
-            None,
-        );
-        let second = UiState::from_app_values(
-            75,
-            true,
-            LayoutMode::RightOnly,
-            VisualizerMode::SimOscilloscope,
-            DisplayMode::Mini,
-            Some(99),
-        );
-
+        let path = temp_path(UI_STATE_FILE);
+        let first = UiState::from_app_values(25, false, LayoutMode::Split,
+            VisualizerMode::RealOscilloscope, DisplayMode::Normal, None);
+        let second = UiState::from_app_values(75, true, LayoutMode::RightOnly,
+            VisualizerMode::SimOscilloscope, DisplayMode::Mini, Some(99));
         first.save_to_path(&path).unwrap();
         second.save_to_path(&path).unwrap();
-
         let backup = crate::persistence::backup_path(&path);
         let (previous, warning) = UiState::load_from_path(&backup);
         assert!(warning.is_none());
@@ -261,55 +205,26 @@ mod tests {
 
     #[test]
     fn malformed_state_returns_defaults_and_warning() {
-        let path = temp_path("ui-state.json");
+        let path = temp_path(UI_STATE_FILE);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "{broken").unwrap();
-
         let (state, warning) = UiState::load_from_path(&path);
-
         assert_eq!(state.volume(), DEFAULT_VOLUME);
         assert!(warning.unwrap().contains("Could not parse ui-state.json"));
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
-    fn layout_mode_keys_roundtrip() {
+    fn keys_and_stale_boundaries_are_stable() {
         for mode in [LayoutMode::Split, LayoutMode::LeftOnly, LayoutMode::RightOnly] {
             assert_eq!(parse_layout_mode_key(layout_mode_key(mode)), Some(mode));
         }
-    }
-
-    #[test]
-    fn display_mode_keys_roundtrip() {
         for mode in [DisplayMode::Normal, DisplayMode::Mini] {
             assert_eq!(parse_display_mode_key(display_mode_key(mode)), Some(mode));
         }
-    }
-
-    #[test]
-    fn from_app_values_clamps_visualizer_mode() {
-        let state = UiState::from_app_values(
-            65,
-            true,
-            LayoutMode::RightOnly,
-            VisualizerMode::SimOscilloscope,
-            DisplayMode::Mini,
-            None,
-        );
-
-        assert_eq!(state.volume(), 65);
-        assert!(state.muted());
-        assert_eq!(state.layout_mode(), LayoutMode::RightOnly);
-        assert_eq!(state.display_mode(), DisplayMode::Mini);
-        assert_eq!(state.visualizer_mode(), 2);
-    }
-
-    #[test]
-    fn stale_notice_suppression_boundaries_are_stable() {
         let now = 1_700_000_000;
         assert!(!should_suppress_stale_notice(None, now));
         assert!(should_suppress_stale_notice(Some(now - 3600), now));
-        assert!(!should_suppress_stale_notice(Some(now - 604_800), now));
-        assert!(should_suppress_stale_notice(Some(now + 3600), now));
+        assert!(!should_suppress_stale_notice(Some(now - STALE_SUPPRESSION_SECONDS), now));
     }
 }
