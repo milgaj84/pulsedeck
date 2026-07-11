@@ -14,3 +14,6 @@ pub struct HistoryEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct History {
+    #[serde(default = "default_version")]
+    version: u32,
+    #[serde
