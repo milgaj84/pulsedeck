@@ -139,9 +139,7 @@ fn codec_from_content_type(content_type: &str) -> Option<CodecHint> {
 
     match media_type.as_str() {
         "audio/mpeg" | "audio/mp3" | "audio/x-mpeg" => Some(CodecHint::Mp3),
-        "audio/aac" | "audio/aacp" | "audio/x-aac" | "audio/vnd.dlna.adts" => {
-            Some(CodecHint::Aac)
-        }
+        "audio/aac" | "audio/aacp" | "audio/x-aac" | "audio/vnd.dlna.adts" => Some(CodecHint::Aac),
         "audio/opus" => Some(CodecHint::Opus),
         "audio/ogg" | "application/ogg" => Some(CodecHint::Ogg),
         "audio/flac" | "audio/x-flac" => Some(CodecHint::Flac),
@@ -176,7 +174,10 @@ fn codec_from_url(url: &str) -> Option<CodecHint> {
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && haystack.windows(needle.len()).any(|window| window == needle)
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 #[cfg(test)]
@@ -196,7 +197,10 @@ mod tests {
     #[test]
     fn adts_aac_is_not_misclassified_as_mp3() {
         for second in [0xF1, 0xF9] {
-            assert_eq!(codec_from_magic(&[0xFF, second, 0x50]), Some(CodecHint::Aac));
+            assert_eq!(
+                codec_from_magic(&[0xFF, second, 0x50]),
+                Some(CodecHint::Aac)
+            );
         }
     }
 
@@ -232,10 +236,7 @@ mod tests {
     #[test]
     fn flac_and_wav_magic_are_detected() {
         assert_eq!(codec_from_magic(b"fLaCmore"), Some(CodecHint::Flac));
-        assert_eq!(
-            codec_from_magic(b"RIFF1234WAVEfmt "),
-            Some(CodecHint::Wav)
-        );
+        assert_eq!(codec_from_magic(b"RIFF1234WAVEfmt "), Some(CodecHint::Wav));
     }
 
     #[test]

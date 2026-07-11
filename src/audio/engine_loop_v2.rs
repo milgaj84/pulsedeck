@@ -225,12 +225,13 @@ impl EngineLoop {
                 percent,
             } => {
                 let next = match &self.state {
-                    EngineState::Connecting { url, .. }
-                    | EngineState::Buffering { url, .. } => Some(EngineState::Buffering {
-                        generation,
-                        url: url.clone(),
-                        percent,
-                    }),
+                    EngineState::Connecting { url, .. } | EngineState::Buffering { url, .. } => {
+                        Some(EngineState::Buffering {
+                            generation,
+                            url: url.clone(),
+                            percent,
+                        })
+                    }
                     _ => None,
                 };
                 if let Some(next) = next {
@@ -417,7 +418,10 @@ mod tests {
 
     #[test]
     fn device_switch_resume_preserves_each_active_state() {
-        assert_eq!(device_switch_resume(&EngineState::Idle), DeviceSwitchResume::None);
+        assert_eq!(
+            device_switch_resume(&EngineState::Idle),
+            DeviceSwitchResume::None
+        );
         assert_eq!(
             device_switch_resume(&EngineState::Playing {
                 generation: 1,

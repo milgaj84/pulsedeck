@@ -45,10 +45,19 @@ pub enum AudioStatus {
     Stopped,
     Error(String),
     Connecting,
-    Buffering { percent: u8 },
-    FadingOut { current_volume: f32 },
-    TrackChanged { url: String, title: String },
-    OutputDeviceChanged { active: Option<String> },
+    Buffering {
+        percent: u8,
+    },
+    FadingOut {
+        current_volume: f32,
+    },
+    TrackChanged {
+        url: String,
+        title: String,
+    },
+    OutputDeviceChanged {
+        active: Option<String>,
+    },
     OutputDeviceChangeFailed {
         requested: Option<String>,
         active: Option<String>,

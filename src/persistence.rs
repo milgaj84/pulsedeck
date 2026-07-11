@@ -80,10 +80,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn write_complete_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(bytes)?;
     file.flush()?;
     file.sync_all()?;
@@ -110,7 +107,10 @@ fn create_unique_temp_path(path: &Path) -> io::Result<PathBuf> {
 
     Err(io::Error::new(
         io::ErrorKind::AlreadyExists,
-        format!("could not allocate temporary file beside {}", path.display()),
+        format!(
+            "could not allocate temporary file beside {}",
+            path.display()
+        ),
     ))
 }
 

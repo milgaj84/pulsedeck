@@ -139,10 +139,7 @@ fn fill_prebuffer<R: Read>(
             return Err(PrebufferFailure::Timeout);
         }
 
-        let remaining = request
-            .prebuffer
-            .max_bytes
-            .saturating_sub(prebuffer.len());
+        let remaining = request.prebuffer.max_bytes.saturating_sub(prebuffer.len());
         if remaining == 0 {
             break;
         }
@@ -215,11 +212,7 @@ fn send_abandoned(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation) 
     });
 }
 
-fn send_failure(
-    event_tx: &mpsc::Sender<EngineEvent>,
-    generation: Generation,
-    error: EngineError,
-) {
+fn send_failure(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation, error: EngineError) {
     let _ = event_tx.send(EngineEvent::Failed { generation, error });
 }
 
@@ -314,12 +307,7 @@ pub(super) fn run_worker(
         event_tx.clone(),
     );
 
-    let prebuffer = match fill_prebuffer(
-        &mut stream,
-        &request,
-        &event_tx,
-        &active_generation,
-    ) {
+    let prebuffer = match fill_prebuffer(&mut stream, &request, &event_tx, &active_generation) {
         Ok(prebuffer) => prebuffer,
         Err(PrebufferFailure::Abandoned) => {
             send_abandoned(&event_tx, generation);
@@ -374,11 +362,7 @@ mod tests {
     use crate::audio::types::{PlaybackOptions, PrebufferConfig};
     use proptest::prelude::*;
 
-    fn request(
-        fill_timeout: Duration,
-        min_bytes: usize,
-        max_bytes: usize,
-    ) -> ConnectRequest {
+    fn request(fill_timeout: Duration, min_bytes: usize, max_bytes: usize) -> ConnectRequest {
         ConnectRequest::new(
             1,
             "http://test.invalid/stream".to_string(),

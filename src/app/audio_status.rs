@@ -246,13 +246,14 @@ mod tests {
     #[test]
     fn failed_output_switch_rolls_back_setting_without_breaking_playback() {
         let audio = MockAudioSink::new();
-        audio.statuses.borrow_mut().push_back(
-            AudioStatus::OutputDeviceChangeFailed {
+        audio
+            .statuses
+            .borrow_mut()
+            .push_back(AudioStatus::OutputDeviceChangeFailed {
                 requested: Some("Missing DAC".to_string()),
                 active: Some("Speakers".to_string()),
                 error: "not found".to_string(),
-            },
-        );
+            });
         let mut app = App::from_parts(test_parts_with_audio(audio));
         app.config.audio.output_device = Some("Missing DAC".to_string());
         app.library.settings.output_device_name = Some("Missing DAC".to_string());
@@ -267,7 +268,10 @@ mod tests {
             Some("Speakers")
         );
         assert_eq!(app.playback.diagnostics.output_device, "Speakers");
-        assert_eq!(app.playback.diagnostics.last_error.as_deref(), Some("not found"));
+        assert_eq!(
+            app.playback.diagnostics.last_error.as_deref(),
+            Some("not found")
+        );
     }
 
     #[test]

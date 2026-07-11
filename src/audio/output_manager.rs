@@ -1,8 +1,6 @@
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
-use super::output::{
-    normalize_output_device_name, open_output_stream, open_output_stream_strict,
-};
+use super::output::{normalize_output_device_name, open_output_stream, open_output_stream_strict};
 use super::types::{DecodedSource, EngineError};
 
 /// Encapsulates cpal/rodio device selection, sink lifecycle, and recovery.
@@ -53,8 +51,8 @@ impl OutputManager {
             return Ok(normalized);
         }
 
-        let selection = open_output_stream_strict(normalized.as_deref())
-            .map_err(EngineError::Output)?;
+        let selection =
+            open_output_stream_strict(normalized.as_deref()).map_err(EngineError::Output)?;
 
         self.sink = None;
         self.handle = Some(selection.handle);
@@ -72,8 +70,8 @@ impl OutputManager {
     pub(super) fn reopen(&mut self) -> Result<(), EngineError> {
         self.recovery_retries = self.recovery_retries.saturating_add(1);
 
-        let selection = open_output_stream(self.preferred_device.as_deref())
-            .map_err(EngineError::Output)?;
+        let selection =
+            open_output_stream(self.preferred_device.as_deref()).map_err(EngineError::Output)?;
 
         self.sink = None;
         self.handle = Some(selection.handle);

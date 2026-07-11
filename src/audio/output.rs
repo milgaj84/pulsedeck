@@ -206,7 +206,10 @@ mod tests {
 
     #[test]
     fn output_device_display_name_uses_default_label() {
-        assert_eq!(output_device_display_name(None), DEFAULT_OUTPUT_DEVICE_LABEL);
+        assert_eq!(
+            output_device_display_name(None),
+            DEFAULT_OUTPUT_DEVICE_LABEL
+        );
         assert_eq!(
             output_device_display_name(Some("Default")),
             DEFAULT_OUTPUT_DEVICE_LABEL
