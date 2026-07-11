@@ -2,9 +2,6 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
-      - phase-1-safety-guardrails
   pull_request:
 
 permissions:
@@ -46,7 +43,7 @@ jobs:
           cargo --version
 
       - name: Format check
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
 
       - name: Security regression check
         shell: bash
@@ -57,13 +54,13 @@ jobs:
           fi
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test --all-targets --all-features
+        run: cargo test --locked --all-targets --all-features
 
       - name: Release build
-        run: cargo build --release
+        run: cargo build --locked --release
 
   audit:
     name: RustSec audit
