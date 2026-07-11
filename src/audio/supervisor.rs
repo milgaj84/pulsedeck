@@ -4,229 +4,253 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use super::types::{ConnectRequest, EngineEvent, Generation};
+use super::types::{ConnectRequest, EngineError, EngineEvent, Generation};
 
-// ---------------------------------------------------------------------------
-// ConnectionSupervisor
-// ---------------------------------------------------------------------------
+/// Hard ceiling for active plus retired connection workers.
+///
+/// A healthy retired worker exits after the next bounded network read. Refusing
+/// to spawn beyond this ceiling is safer than allowing a failing station or
+/// network stack to create an unbounded number of detached threads.
+const MAX_OUTSTANDING_WORKERS: usize = 8;
 
 /// Manages generation IDs and the lifecycle of connection/decode workers.
 ///
 /// Every `Play` command allocates a new monotonically increasing `Generation`.
-/// Workers carry their generation and check the shared `AtomicU64` on each
-/// blocking step; any result from a non-active generation is discarded as
-/// `Abandoned`.  This makes rapid station switching safe and eliminates
-/// stale-retry storms.
-///
-/// # Invariants
-/// - Generation 0 is the "abandoned / none" sentinel; real generations start at 1.
-/// - `active_generation` always equals `current` except during `abandon()`,
-///   where it is reset to 0.
-/// - The control thread never calls `join()` on a stale worker (non-blocking
-///   discard via `drop`).
+/// Workers carry their generation and check the shared `AtomicU64` before and
+/// after blocking stages. Stale workers are retired, retained until completion,
+/// and joined only after `JoinHandle::is_finished()` reports that joining cannot
+/// block the control loop.
 pub(super) struct ConnectionSupervisor {
-    /// Shared atomic counter read by workers to detect abandonment.
     active_generation: Arc<AtomicU64>,
-    /// The most recently allocated generation (mirrors `active_generation`
-    /// while a worker is live).
     current: Generation,
-    /// Handle to the most recently spawned worker thread, if any.
     worker: Option<JoinHandle<()>>,
+    retired_workers: VecDeque<JoinHandle<()>>,
 }
 
 impl ConnectionSupervisor {
-    /// Creates a new supervisor with generation 0 (no active worker).
     pub(super) fn new() -> Self {
         Self {
             active_generation: Arc::new(AtomicU64::new(0)),
             current: 0,
             worker: None,
+            retired_workers: VecDeque::new(),
         }
     }
 
-    /// Atomically bumps the active generation to the next value and returns it.
-    ///
-    /// The returned value is strictly greater than all previously returned
-    /// generations.  Generation 0 is skipped (reserved as the sentinel value
-    /// used by `abandon()`).
+    /// Allocate the next non-zero generation.
     pub(super) fn next_generation(&mut self) -> Generation {
-        self.current += 1;
+        self.current = self.current.wrapping_add(1);
+        if self.current == 0 {
+            self.current = 1;
+        }
         self.active_generation.store(self.current, SeqCst);
         self.current
     }
 
-    /// Spawns a worker thread for the given `ConnectRequest`.
-    ///
-    /// Any previously held worker handle is dropped (detached) without
-    /// joining, so the control thread is never blocked on the hot path.
-    /// The old worker will detect that its generation is no longer active on
-    /// its next `guard_active` check and exit promptly.
-    ///
-    /// The `sample_buffer` is cloned into the worker so it can push decoded
-    /// PCM samples into the shared visualizer tap.
+    /// Spawn a worker while retaining and bounding stale worker handles.
     pub(super) fn spawn(
         &mut self,
         req: ConnectRequest,
         event_tx: mpsc::Sender<EngineEvent>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-    ) {
-        // Drop the old handle without joining — non-blocking detach.
-        let _old = self.worker.take();
+    ) -> Result<(), EngineError> {
+        self.retire_active();
+        self.reap_finished();
+
+        if self.outstanding_worker_count() >= MAX_OUTSTANDING_WORKERS {
+            return Err(EngineError::Connect(format!(
+                "too many stalled connection workers ({MAX_OUTSTANDING_WORKERS}); wait for previous attempts to finish"
+            )));
+        }
 
         let active_gen_arc = Arc::clone(&self.active_generation);
-
         let handle = std::thread::spawn(move || {
             super::decode::run_worker(req, event_tx, active_gen_arc, sample_buffer);
         });
-
         self.worker = Some(handle);
+        Ok(())
     }
 
-    /// Abandons the current generation without blocking.
-    ///
-    /// Stores 0 to `active_generation` (SeqCst) so that any running worker
-    /// detects the change on its next `is_active` check and exits promptly.
-    /// The worker handle is dropped without joining.
+    /// Mark the current worker stale without blocking the control thread.
     pub(super) fn abandon(&mut self) {
         self.active_generation.store(0, SeqCst);
-        let _handle = self.worker.take(); // dropped here, no join
+        self.retire_active();
+        self.reap_finished();
     }
 
-    /// Returns `true` iff `gen` is the currently active generation.
-    ///
-    /// This is a pure read — no mutation occurs.
-    pub(super) fn is_active(&self, gen: Generation) -> bool {
-        gen == self.active_generation.load(SeqCst)
+    /// Join retired workers that have already finished.
+    pub(super) fn reap_finished(&mut self) {
+        let mut pending = VecDeque::with_capacity(self.retired_workers.len());
+        while let Some(handle) = self.retired_workers.pop_front() {
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                pending.push_back(handle);
+            }
+        }
+        self.retired_workers = pending;
     }
 
-    /// Clones the `Arc<AtomicU64>` so workers can share access to the active
-    /// generation counter without taking a lock.
+    pub(super) fn is_active(&self, generation: Generation) -> bool {
+        generation == self.active_generation.load(SeqCst)
+    }
+
+    fn retire_active(&mut self) {
+        if let Some(handle) = self.worker.take() {
+            self.retired_workers.push_back(handle);
+        }
+    }
+
+    fn outstanding_worker_count(&self) -> usize {
+        usize::from(self.worker.is_some()) + self.retired_workers.len()
+    }
+
     #[cfg(test)]
     pub(super) fn active_generation_arc(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.active_generation)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // -----------------------------------------------------------------------
-    // Unit tests
-    // -----------------------------------------------------------------------
+    use std::sync::mpsc as std_mpsc;
+    use std::time::Duration;
 
     #[test]
     fn next_generation_starts_at_one() {
-        let mut sup = ConnectionSupervisor::new();
-        let g = sup.next_generation();
-        assert_eq!(g, 1, "first generation should be 1 (0 is the sentinel)");
+        let mut supervisor = ConnectionSupervisor::new();
+        assert_eq!(supervisor.next_generation(), 1);
     }
 
     #[test]
     fn next_generation_is_strictly_increasing() {
-        let mut sup = ConnectionSupervisor::new();
-        let g1 = sup.next_generation();
-        let g2 = sup.next_generation();
-        let g3 = sup.next_generation();
-        assert!(g1 < g2, "g1={g1} must be < g2={g2}");
-        assert!(g2 < g3, "g2={g2} must be < g3={g3}");
+        let mut supervisor = ConnectionSupervisor::new();
+        let first = supervisor.next_generation();
+        let second = supervisor.next_generation();
+        let third = supervisor.next_generation();
+        assert!(first < second && second < third);
     }
 
     #[test]
-    fn is_active_true_for_current_generation() {
-        let mut sup = ConnectionSupervisor::new();
-        let g = sup.next_generation();
-        assert!(sup.is_active(g), "current generation should be active");
+    fn generation_wrap_skips_zero_sentinel() {
+        let mut supervisor = ConnectionSupervisor::new();
+        supervisor.current = u64::MAX;
+
+        assert_eq!(supervisor.next_generation(), 1);
+        assert!(supervisor.is_active(1));
     }
 
     #[test]
-    fn is_active_false_for_stale_generation() {
-        let mut sup = ConnectionSupervisor::new();
-        let g1 = sup.next_generation();
-        let _g2 = sup.next_generation();
-        assert!(
-            !sup.is_active(g1),
-            "previous generation should no longer be active"
-        );
-    }
+    fn is_active_rejects_stale_generation() {
+        let mut supervisor = ConnectionSupervisor::new();
+        let old = supervisor.next_generation();
+        let current = supervisor.next_generation();
 
-    #[test]
-    fn is_active_false_for_zero() {
-        let mut sup = ConnectionSupervisor::new();
-        // Generation 0 is the sentinel; it should never be "active" after
-        // a real generation has been allocated.
-        let _g = sup.next_generation();
-        assert!(
-            !sup.is_active(0),
-            "generation 0 is the sentinel, never active"
-        );
+        assert!(!supervisor.is_active(old));
+        assert!(supervisor.is_active(current));
     }
 
     #[test]
     fn abandon_sets_active_generation_to_zero() {
-        let mut sup = ConnectionSupervisor::new();
-        let g = sup.next_generation();
-        assert!(sup.is_active(g));
+        let mut supervisor = ConnectionSupervisor::new();
+        let generation = supervisor.next_generation();
+        assert!(supervisor.is_active(generation));
 
-        sup.abandon();
+        supervisor.abandon();
 
-        assert!(
-            !sup.is_active(g),
-            "after abandon, prior generation should be inactive"
-        );
-        assert_eq!(
-            sup.active_generation.load(SeqCst),
-            0,
-            "abandon must store 0 to active_generation"
-        );
-    }
-
-    #[test]
-    fn abandon_when_no_worker_does_not_panic() {
-        let mut sup = ConnectionSupervisor::new();
-        // Should be a no-op / no panic even with no worker.
-        sup.abandon();
-        assert_eq!(sup.active_generation.load(SeqCst), 0);
+        assert!(!supervisor.is_active(generation));
+        assert_eq!(supervisor.active_generation.load(SeqCst), 0);
     }
 
     #[test]
     fn active_generation_arc_shares_same_counter() {
-        let mut sup = ConnectionSupervisor::new();
-        let arc = sup.active_generation_arc();
-        let g = sup.next_generation();
-        // The Arc should reflect the updated value.
-        assert_eq!(arc.load(SeqCst), g);
+        let mut supervisor = ConnectionSupervisor::new();
+        let shared = supervisor.active_generation_arc();
+        let generation = supervisor.next_generation();
+        assert_eq!(shared.load(SeqCst), generation);
     }
 
-    // -----------------------------------------------------------------------
-    // Property-based test 5.1: generation strict monotonicity
-    //
-    // Property 3: Generation strict monotonicity
-    // For any N calls to `next_generation()`, the returned values form a
-    // strictly monotonically increasing sequence.
-    //
-    // Validates: Requirements 4.1
-    // -----------------------------------------------------------------------
+    #[test]
+    fn retire_active_keeps_handle_until_worker_finishes() {
+        let mut supervisor = ConnectionSupervisor::new();
+        let (release_tx, release_rx) = std_mpsc::channel::<()>();
+        supervisor.worker = Some(std::thread::spawn(move || {
+            let _ = release_rx.recv();
+        }));
+
+        supervisor.retire_active();
+
+        assert_eq!(supervisor.outstanding_worker_count(), 1);
+        assert!(supervisor.worker.is_none());
+        assert_eq!(supervisor.retired_workers.len(), 1);
+
+        release_tx.send(()).unwrap();
+        for _ in 0..50 {
+            supervisor.reap_finished();
+            if supervisor.outstanding_worker_count() == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(supervisor.outstanding_worker_count(), 0);
+    }
+
+    #[test]
+    fn reap_finished_keeps_running_workers_and_joins_finished_workers() {
+        let mut supervisor = ConnectionSupervisor::new();
+        let (release_tx, release_rx) = std_mpsc::channel::<()>();
+        supervisor
+            .retired_workers
+            .push_back(std::thread::spawn(|| {}));
+        supervisor
+            .retired_workers
+            .push_back(std::thread::spawn(move || {
+                let _ = release_rx.recv();
+            }));
+
+        for _ in 0..50 {
+            supervisor.reap_finished();
+            if supervisor.retired_workers.len() == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(supervisor.retired_workers.len(), 1);
+
+        release_tx.send(()).unwrap();
+        for _ in 0..50 {
+            supervisor.reap_finished();
+            if supervisor.retired_workers.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(supervisor.retired_workers.is_empty());
+    }
+
+    #[test]
+    fn outstanding_worker_count_includes_active_and_retired() {
+        let mut supervisor = ConnectionSupervisor::new();
+        supervisor.worker = Some(std::thread::spawn(|| {}));
+        supervisor
+            .retired_workers
+            .push_back(std::thread::spawn(|| {}));
+
+        assert_eq!(supervisor.outstanding_worker_count(), 2);
+    }
 
     use proptest::prelude::*;
 
     proptest! {
-        /// **Validates: Requirements 4.1**
         #[test]
-        fn prop_next_generation_strictly_monotonic(n in 1usize..=100usize) {
-            let mut sup = ConnectionSupervisor::new();
-            let mut prev = 0u64; // 0 is the sentinel; first real gen will be 1
-            for _ in 0..n {
-                let g = sup.next_generation();
-                prop_assert!(
-                    g > prev,
-                    "generation {g} must be strictly greater than previous {prev}"
-                );
-                prev = g;
+        fn prop_next_generation_strictly_monotonic(count in 1usize..=100usize) {
+            let mut supervisor = ConnectionSupervisor::new();
+            let mut previous = 0u64;
+            for _ in 0..count {
+                let generation = supervisor.next_generation();
+                prop_assert!(generation > previous);
+                previous = generation;
             }
         }
     }
