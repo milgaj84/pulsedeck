@@ -46,7 +46,7 @@ impl History {
         Self::load_from_path(&path)
     }
 
-    fn load_from_path(path: &Path) -> (Self, Option<String>) {
+    pub(crate) fn load_from_path(path: &Path) -> (Self, Option<String>) {
         let (history, warning) =
             crate::config::load_json_from_path_with_warning::<Self>(path, HISTORY_FILE);
         (history.sanitized(), warning)
