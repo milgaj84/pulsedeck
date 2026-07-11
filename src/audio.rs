@@ -1,4 +1,5 @@
 mod capability;
+mod codec;
 pub(super) mod decode;
 pub(super) mod engine_loop_v2;
 mod metadata;
