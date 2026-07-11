@@ -16,6 +16,7 @@ mod library_filter;
 pub mod library_sort;
 pub(crate) mod mtime_debounce;
 mod number_jump;
+mod persistence;
 mod playlist;
 mod playlist_export;
 mod radio;
