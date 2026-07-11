@@ -1,0 +1,48 @@
+name: Diagnose CI
+
+on:
+  push:
+    branches:
+      - feat/v0.11-release-polish
+    paths:
+      - .github/workflows/diagnose-ci.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/v0.11-release-polish
+          persist-credentials: true
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Capture formatter changes
+        shell: bash
+        run: |
+          cargo fmt --all
+          git diff -- src > rustfmt.diff
+
+      - name: Capture RustSec report
+        shell: bash
+        run: |
+          cargo audit --json > rustsec.json || true
+
+      - name: Commit diagnostic reports
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rustfmt.diff rustsec.json
+          git commit -m "ci: capture formatter and audit diagnostics"
+          git push origin HEAD:feat/v0.11-release-polish
