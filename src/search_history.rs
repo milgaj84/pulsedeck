@@ -99,7 +99,11 @@ impl SearchHistoryRing {
             if trimmed.len() < 2 || trimmed.len() > 200 {
                 continue;
             }
-            if let Some(position) = ring.entries.iter().position(|existing| existing == &trimmed) {
+            if let Some(position) = ring
+                .entries
+                .iter()
+                .position(|existing| existing == &trimmed)
+            {
                 ring.entries.remove(position);
             }
             ring.entries.push_back(trimmed);
@@ -150,7 +154,10 @@ mod tests {
         assert!(ring.push("  jazz  "));
         assert!(ring.push("lofi"));
         assert!(ring.push("jazz"));
-        assert_eq!(ring.entries().iter().cloned().collect::<Vec<_>>(), vec!["lofi", "jazz"]);
+        assert_eq!(
+            ring.entries().iter().cloned().collect::<Vec<_>>(),
+            vec!["lofi", "jazz"]
+        );
     }
 
     #[test]
@@ -171,7 +178,10 @@ mod tests {
             "bb".to_string(),
             "cc".to_string(),
         ]);
-        assert_eq!(ring.iter_recent().collect::<Vec<_>>(), vec!["cc", "bb", "aa"]);
+        assert_eq!(
+            ring.iter_recent().collect::<Vec<_>>(),
+            vec!["cc", "bb", "aa"]
+        );
     }
 
     #[test]
@@ -194,11 +204,10 @@ mod tests {
         ring.save(&path).unwrap();
 
         let loaded = SearchHistoryRing::load(&path);
-        assert_eq!(loaded.entries().iter().cloned().collect::<Vec<_>>(), vec![
-            "jazz",
-            "lofi beats",
-            "synthwave",
-        ]);
+        assert_eq!(
+            loaded.entries().iter().cloned().collect::<Vec<_>>(),
+            vec!["jazz", "lofi beats", "synthwave",]
+        );
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -212,7 +221,10 @@ mod tests {
 
         let backup = crate::persistence::backup_path(&path);
         let previous = SearchHistoryRing::load(&backup);
-        assert_eq!(previous.entries().iter().cloned().collect::<Vec<_>>(), vec!["jazz"]);
+        assert_eq!(
+            previous.entries().iter().cloned().collect::<Vec<_>>(),
+            vec!["jazz"]
+        );
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
