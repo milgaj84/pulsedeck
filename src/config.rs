@@ -108,7 +108,10 @@ mod tests {
 
     fn unique_temp_path(name: &str) -> PathBuf {
         std::env::temp_dir()
-            .join(format!("pulsedeck-config-test-{}-{name}", std::process::id()))
+            .join(format!(
+                "pulsedeck-config-test-{}-{name}",
+                std::process::id()
+            ))
             .join("state.json")
     }
 
@@ -152,8 +155,7 @@ mod tests {
 
         save_json_to_path(&path, &TestConfig { value: 41 }).unwrap();
         save_json_to_path(&path, &TestConfig { value: 42 }).unwrap();
-        let (loaded, warning) =
-            load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
+        let (loaded, warning) = load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
 
         assert_eq!(loaded, TestConfig { value: 42 });
         assert!(warning.is_none());
@@ -167,8 +169,7 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "{broken").unwrap();
 
-        let (loaded, warning) =
-            load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
+        let (loaded, warning) = load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
 
         assert_eq!(loaded, TestConfig::default());
         assert!(warning.unwrap().contains("Could not parse state.json"));
