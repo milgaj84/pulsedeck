@@ -41,15 +41,24 @@ pub fn load_json_with_warning<T: DeserializeOwned + Default>(file: &str) -> (T, 
         return (T::default(), None);
     };
 
+    load_json_from_path_with_warning(&path, file)
+}
+
+pub fn load_json_from_path_with_warning<T: DeserializeOwned + Default>(
+    path: &Path,
+    display_name: &str,
+) -> (T, Option<String>) {
     if !path.exists() {
         return (T::default(), None);
     }
 
-    match fs::read_to_string(&path) {
-        Ok(contents) => parse_json_with_warning(file, &contents),
+    match fs::read_to_string(path) {
+        Ok(contents) => parse_json_with_warning(display_name, &contents),
         Err(err) => (
             T::default(),
-            Some(format!("Could not read {file}; using defaults: {err}")),
+            Some(format!(
+                "Could not read {display_name}; using defaults: {err}"
+            )),
         ),
     }
 }
@@ -60,8 +69,12 @@ pub fn save_json<T: Serialize>(file: &str, value: &T) -> Result<()> {
         return Ok(());
     };
 
+    save_json_to_path(&dir.join(file), value)
+}
+
+pub fn save_json_to_path<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
-    crate::persistence::atomic_write(&dir.join(file), &bytes)?;
+    crate::persistence::atomic_write(path, &bytes)?;
     Ok(())
 }
 
@@ -85,12 +98,18 @@ fn parse_json_with_warning<T: DeserializeOwned + Default>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+    #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     struct TestConfig {
         #[serde(default)]
         value: u8,
+    }
+
+    fn unique_temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("pulsedeck-config-test-{}-{name}", std::process::id()))
+            .join("state.json")
     }
 
     #[test]
@@ -124,5 +143,34 @@ mod tests {
         assert!(warning
             .unwrap()
             .contains("Could not parse history.json; using defaults"));
+    }
+
+    #[test]
+    fn path_based_save_and_load_use_real_atomic_persistence() {
+        let path = unique_temp_path("round-trip");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+
+        save_json_to_path(&path, &TestConfig { value: 41 }).unwrap();
+        save_json_to_path(&path, &TestConfig { value: 42 }).unwrap();
+        let (loaded, warning) =
+            load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
+
+        assert_eq!(loaded, TestConfig { value: 42 });
+        assert!(warning.is_none());
+        assert!(crate::persistence::backup_path(&path).exists());
+    }
+
+    #[test]
+    fn path_based_load_reports_malformed_json() {
+        let path = unique_temp_path("malformed");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{broken").unwrap();
+
+        let (loaded, warning) =
+            load_json_from_path_with_warning::<TestConfig>(&path, "state.json");
+
+        assert_eq!(loaded, TestConfig::default());
+        assert!(warning.unwrap().contains("Could not parse state.json"));
     }
 }
