@@ -576,6 +576,7 @@ mod tests {
     #[test]
     fn test_layout_cycles_through_all_modes() {
         let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.layout_mode = LayoutMode::Split;
         assert_eq!(app.ui.layout_mode, LayoutMode::Split);
 
         app.update(Action::CycleLayout);

@@ -35,15 +35,6 @@ pub fn migrate_legacy(file: &str) {
     let _ = fs::copy(old_path, new_path);
 }
 
-#[cfg_attr(test, allow(dead_code))]
-pub fn load_json_with_warning<T: DeserializeOwned + Default>(file: &str) -> (T, Option<String>) {
-    let Some(path) = config_path(file) else {
-        return (T::default(), None);
-    };
-
-    load_json_from_path_with_warning(&path, file)
-}
-
 pub fn load_json_from_path_with_warning<T: DeserializeOwned + Default>(
     path: &Path,
     display_name: &str,
@@ -53,7 +44,13 @@ pub fn load_json_from_path_with_warning<T: DeserializeOwned + Default>(
     }
 
     match fs::read_to_string(path) {
-        Ok(contents) => parse_json_with_warning(display_name, &contents),
+        Ok(contents) => {
+            let (value, warning) = parse_json_with_warning(display_name, &contents);
+            if warning.is_some() {
+                let _ = crate::persistence::preserve_corrupt_copy(path);
+            }
+            (value, warning)
+        }
         Err(err) => (
             T::default(),
             Some(format!(
@@ -61,15 +58,6 @@ pub fn load_json_from_path_with_warning<T: DeserializeOwned + Default>(
             )),
         ),
     }
-}
-
-#[cfg_attr(test, allow(dead_code))]
-pub fn save_json<T: Serialize>(file: &str, value: &T) -> Result<()> {
-    let Some(dir) = config_dir() else {
-        return Ok(());
-    };
-
-    save_json_to_path(&dir.join(file), value)
 }
 
 pub fn save_json_to_path<T: Serialize>(path: &Path, value: &T) -> Result<()> {

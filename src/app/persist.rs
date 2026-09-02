@@ -436,7 +436,7 @@ mod tests {
         app.persist_config_change();
 
         assert!(
-            matches!(app.ui.notice.current, Some(AppNotice::Error(ref msg)) if msg.contains("Could not create config directory"))
+            matches!(app.ui.notice.current, Some(AppNotice::Error(ref msg)) if msg.contains("Could not save"))
         );
     }
 

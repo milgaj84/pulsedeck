@@ -258,8 +258,8 @@ mod tests {
         // The hardware-dependent lookup remains in one function, while this
         // invariant documents the contract used by startup versus user changes.
         assert_ne!(
-            open_output_stream as usize,
-            open_output_stream_strict as usize
+            open_output_stream as *const () as usize,
+            open_output_stream_strict as *const () as usize
         );
     }
 }

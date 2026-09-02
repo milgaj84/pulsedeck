@@ -160,7 +160,9 @@ mod tests {
     use crate::favorites::Library;
 
     fn test_app() -> App {
-        App::new(Library::in_memory(vec![]))
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.layout_mode = LayoutMode::Split;
+        app
     }
 
     #[test]

@@ -162,7 +162,12 @@ fn fill_prebuffer<R: Read>(
                 let percent = if request.prebuffer.min_bytes == 0 {
                     99
                 } else {
-                    (prebuffer.len() * 100 / request.prebuffer.min_bytes).min(99) as u8
+                    prebuffer
+                        .len()
+                        .checked_mul(100)
+                        .and_then(|scaled| scaled.checked_div(request.prebuffer.min_bytes))
+                        .map(|pct| pct.min(99) as u8)
+                        .unwrap_or(99)
                 };
                 let _ = event_tx.send(EngineEvent::Buffering {
                     generation,
@@ -361,6 +366,7 @@ mod tests {
     use crate::audio::codec::{CodecHint, CodecSource};
     use crate::audio::types::{PlaybackOptions, PrebufferConfig};
     use proptest::prelude::*;
+    use std::io::Seek;
 
     fn request(fill_timeout: Duration, min_bytes: usize, max_bytes: usize) -> ConnectRequest {
         ConnectRequest::new(
@@ -489,7 +495,7 @@ mod tests {
         let mut buffer = [0_u8; 3];
 
         assert_eq!(reader.read(&mut buffer).unwrap(), 3);
-        assert_eq!(reader.seek(io::SeekFrom::Current(0)).unwrap(), 3);
+        assert_eq!(reader.stream_position().unwrap(), 3);
         assert_eq!(
             reader.seek(io::SeekFrom::Start(0)).unwrap_err().kind(),
             io::ErrorKind::Unsupported
