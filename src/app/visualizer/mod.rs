@@ -1,6 +1,7 @@
 use super::*;
 
 mod fft;
+pub mod gradient;
 mod spectrum;
 
 use fft::*;

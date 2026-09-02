@@ -160,6 +160,22 @@ impl App {
         Self::from_parts(AppParts::load(library))
     }
 
+    /// Construct the App from pre-loaded parts.
+    ///
+    /// # Startup Sequence & Override Precedence
+    ///
+    /// 1. **Library** loaded from `library.json` (stations, favorites, settings.theme)
+    /// 2. **UiState** loaded from `ui-state.json` (volume, mute, layout, visualizer, display mode)
+    /// 3. **Config (TOML)** loaded from `pulsedeck.toml` (overrides library settings when file exists)
+    /// 4. **Keybindings** loaded from `keybindings.json` (custom overrides defaults)
+    /// 5. **Search history** loaded from `search_history.json`
+    /// 6. **Watchers** created for config and keybinding hot-reload
+    ///
+    /// ## Override rules:
+    /// - If `pulsedeck.toml` exists: TOML values override library.json settings (theme, volume, etc.)
+    /// - If `pulsedeck.toml` does NOT exist: library.json settings are used as-is
+    /// - `main.rs` sets theme from library FIRST, then `apply_config_to_settings` re-sets from TOML
+    /// - UiState (volume, layout) is independent of TOML config
     pub(super) fn from_parts(parts: AppParts) -> Self {
         let config = parts.config;
         let config_preserved = parts.config_preserved;
@@ -232,6 +248,8 @@ impl App {
             search_history,
             settings_undo: SettingsUndoStack::new(),
             stale_dismissed_at: parts.ui_state.stale_dismissed_at(),
+            radio_browser_status: super::radio_status::RadioBrowserStatus::new(),
+            audio_check_result: None,
         };
 
         if config_loaded_from_file {
@@ -240,6 +258,7 @@ impl App {
         app.sync_startup_audio_settings();
         app.apply_startup_warnings(parts.ui_state_warning, parts.history_warning);
         app.apply_config_warnings(parts.config_warnings);
+        app.apply_config_dir_warning();
         app.apply_stale_station_notice();
         app.apply_startup_autoplay();
         app
@@ -334,6 +353,14 @@ impl App {
     fn apply_config_warnings(&mut self, warnings: Vec<String>) {
         for warning in warnings {
             self.library.load_warnings.push(warning);
+        }
+    }
+
+    /// Warn the user if no config directory is available (settings won't persist).
+    fn apply_config_dir_warning(&mut self) {
+        #[cfg(not(test))]
+        if self.config_dir.is_none() {
+            self.set_info_notice("Settings won't persist — config directory unavailable");
         }
     }
 

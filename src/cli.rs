@@ -178,14 +178,15 @@ fn format_bindings_table(bindings: &[crate::keybindings::KeyBinding]) -> String 
             "── {} ──────────────────────────────────",
             format_mode_name(mode)
         )
-        .unwrap();
+        .expect("infallible: writing to String");
         for b in &mode_bindings {
             let key = format_key_description(&b.key, &b.modifiers);
             let mods = format!("{:?}", b.modifiers);
             let action = format!("{:?}", b.action);
-            writeln!(output, "{:<10}{:<12}{}", key, mods, action).unwrap();
+            writeln!(output, "{:<10}{:<12}{}", key, mods, action)
+                .expect("infallible: writing to String");
         }
-        writeln!(output).unwrap();
+        writeln!(output).expect("infallible: writing to String");
     }
     output
 }

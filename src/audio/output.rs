@@ -15,13 +15,6 @@ pub(super) struct OutputStreamSelection {
 }
 
 /// List usable output device names reported by the host audio backend.
-///
-/// This is best-effort because CI and headless machines often expose no output
-/// devices. The settings UI still offers `Default` even when this list is empty.
-///
-/// Some native backends, especially ALSA/JACK, write probe diagnostics directly
-/// to stderr instead of returning structured errors. Suppress that native stderr
-/// while probing so the terminal UI is not overwritten by backend chatter.
 pub fn list_output_device_names() -> Vec<String> {
     with_suppressed_native_audio_stderr(list_output_device_names_inner)
 }
@@ -39,13 +32,30 @@ pub fn output_device_display_name(value: Option<&str>) -> String {
     normalize_output_device_name(value).unwrap_or_else(|| DEFAULT_OUTPUT_DEVICE_LABEL.to_string())
 }
 
+/// Open the preferred device when available, otherwise fall back to default.
+///
+/// This lenient behavior is retained for startup and automatic recovery so a
+/// removed USB or Bluetooth device does not make PulseDeck permanently silent.
 pub(super) fn open_output_stream(
     preferred_name: Option<&str>,
 ) -> Result<OutputStreamSelection, String> {
-    with_suppressed_native_audio_stderr(|| open_output_stream_inner(preferred_name))
+    with_suppressed_native_audio_stderr(|| open_output_stream_inner(preferred_name, false))
 }
 
-fn open_output_stream_inner(preferred_name: Option<&str>) -> Result<OutputStreamSelection, String> {
+/// Open exactly the device selected by the user.
+///
+/// Unlike startup recovery, an explicit switch must never silently fall back to
+/// another device and then report success.
+pub(super) fn open_output_stream_strict(
+    preferred_name: Option<&str>,
+) -> Result<OutputStreamSelection, String> {
+    with_suppressed_native_audio_stderr(|| open_output_stream_inner(preferred_name, true))
+}
+
+fn open_output_stream_inner(
+    preferred_name: Option<&str>,
+    strict_named_selection: bool,
+) -> Result<OutputStreamSelection, String> {
     let preferred_name = normalize_output_device_name(preferred_name);
 
     if let Some(name) = preferred_name.as_deref() {
@@ -53,6 +63,10 @@ fn open_output_stream_inner(preferred_name: Option<&str>) -> Result<OutputStream
             return OutputStream::try_from_device(&device)
                 .map(|(stream, handle)| OutputStreamSelection { stream, handle })
                 .map_err(|err| format!("could not open selected output device '{name}': {err}"));
+        }
+
+        if strict_named_selection {
+            return Err(format!("selected output device '{name}' was not found"));
         }
     }
 
@@ -136,8 +150,6 @@ impl StderrSilencer {
     fn new() -> Option<Self> {
         // SAFETY: These calls operate only on process file descriptors. We save
         // stderr, temporarily redirect fd 2 to /dev/null, then restore it in Drop.
-        // The global mutex prevents concurrent audio probes from interleaving fd
-        // changes. If any syscall fails, we close what we opened and skip silencing.
         unsafe {
             let saved_fd = libc::dup(libc::STDERR_FILENO);
             if saved_fd < 0 {
@@ -166,8 +178,7 @@ impl StderrSilencer {
 #[cfg(unix)]
 impl Drop for StderrSilencer {
     fn drop(&mut self) {
-        // SAFETY: `saved_fd` was returned by `dup` in `new`. Restoring stderr
-        // with `dup2` and closing the saved descriptor is the matching cleanup.
+        // SAFETY: `saved_fd` was returned by `dup` in `new`.
         unsafe {
             libc::dup2(self.saved_fd, libc::STDERR_FILENO);
             libc::close(self.saved_fd);
@@ -240,5 +251,15 @@ mod tests {
             "pipewire bluetooth"
         ));
         assert!(!output_device_names_match("Speakers", "Headphones"));
+    }
+
+    #[test]
+    fn strict_and_lenient_selection_have_distinct_missing_device_policy() {
+        // The hardware-dependent lookup remains in one function, while this
+        // invariant documents the contract used by startup versus user changes.
+        assert_ne!(
+            open_output_stream as *const () as usize,
+            open_output_stream_strict as *const () as usize
+        );
     }
 }

@@ -4,6 +4,108 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [0.11.3] - Unreleased
+
+### Improved
+- **persist_config_change error reporting**: Now logs `[persist] config_dir is None` to stderr instead of silently returning when config directory is unavailable.
+- **Shared test helpers module**: Integration test utilities (unique_temp_dir, app_with_config_dir, reload_config_from_dir) extracted to `src/app/test_helpers.rs` for reuse across all test modules.
+- **Exhaustive action smoke test**: Dispatches every `Action` variant once — catches panics from any action and will fail to compile if a new variant is added without being tested.
+
+### Removed
+- Dead `scanline()` theme function (replaced by `dim_row_even`/`dim_row_odd` in 0.11.0).
+- All `#[allow(unused)]` annotations on module declarations in `app.rs` — replaced with proper `pub(crate)` visibility.
+
+### Internal
+- Version bumped to 0.11.3.
+- 1455 tests pass, zero clippy warnings.
+- New property tests: ThemeName key round-trip (validates validate_theme accepts key format), UiState JSON round-trip (volume/mute/layout/visualizer/display survive serialize→deserialize).
+- New integration tests: volume/mute persistence, station slot assign+play, stream_metadata toggle persistence.
+- Module-level doc comments added to: animation, breadcrumb, audio_check, radio_status, recovery_actions, visualizer/gradient, layout.
+- Startup sequence documented on `App::from_parts` (initialization order + override precedence).
+- `#[allow(dead_code)]` annotations localized to specific modules awaiting full integration (animation, audio_check, recovery_actions, layout) with explanatory comments.
+- Shared `test_helpers.rs` module eliminates duplicate helper definitions.
+
+---
+
+## [0.11.2] - Unreleased
+
+### Fixed
+- **Theme persistence bug**: The TOML parser now accepts both key format ("CatppuccinMocha") and label format ("Catppuccin Mocha") for theme validation. Previously, `save_config` would abort because the round-trip validation rejected the key format that `apply_theme_setting` was writing — silently failing to persist theme changes.
+
+### Added
+- **45 integration/scenario tests**: Multi-step user journey tests that catch wiring bugs, persistence failures, and lifecycle issues that unit tests miss. Covers:
+  - Persistence round-trips: theme, sort mode, notifications, autoplay, favorites, search history — all verified via write → reload from disk.
+  - Playback state machine: play/pause/stop/switch sequences with state assertions at each step.
+  - Session timer lifecycle: accumulation, pause, reset on switch.
+  - Search + library integration: confirm saves + plays, audition doesn't save, exit restores selection, Radio Browser failure/recovery.
+  - Overlay state machine: mutual exclusivity, Esc closes overlay before quitting.
+  - Favorites ordering: star moves to top, unstar drops, remove + undo restores.
+  - Library filter: narrows correctly, exit restores full list.
+  - Layout cycling and mini mode transitions.
+  - Radio Browser graceful degradation: repeated failures suppressed, library still browsable.
+
+### Internal
+- Version bumped to 0.11.2.
+- 1448 tests pass, zero clippy warnings.
+- New test module: `src/app/integration_tests.rs` — dedicated to multi-step scenario tests.
+- `validate_theme` in `config_toml/parse.rs` now accepts both `ThemeName::key()` and `ThemeName::label()`.
+- Steering document updated: integration tests are now mandatory for every feature (three-level test pyramid).
+
+---
+
+## [0.11.1] - Unreleased
+
+### Fixed
+- **Theme persistence fallback**: Theme changes now also mark the library dirty, so the theme persists to `library.json` as a fallback when `pulsedeck.toml` cannot be written (e.g., missing config directory).
+
+### Added
+- **Startup config directory warning**: If no config directory can be resolved on startup, PulseDeck now shows a clear notice: "Settings won't persist — config directory unavailable."
+- **Search result count in breadcrumb**: When search results arrive, the breadcrumb shows the count: `Search > "ambient" (12 results)`.
+
+### Internal
+- Version bumped to 0.11.1.
+- 1416 tests pass, zero clippy warnings.
+- `compute_breadcrumb` now accepts a `search_result_count` parameter.
+- `apply_theme_setting` calls `mark_library_dirty()` for dual-path persistence.
+- `apply_config_dir_warning` added to startup sequence (production only).
+
+---
+
+## [0.11.0] - Unreleased
+
+### Added
+- **Gradient multi-color visualizer**: Spectrum bars now display a per-bar color gradient based on amplitude — green (bottom) → cyan (middle) → magenta (top). Colors are sourced from the active theme palette. Oscilloscope modes remain single-color.
+- **Now-playing hero section**: The Signal Deck now features a prominent station name (bold + accent) and track title (highlight color) with a horizontal divider separating metadata from the visualizer. Shows "No station selected" in dim when idle.
+- **Breadcrumb location indicator**: A persistent navigation path in the header (e.g., "Library > Jazz", "Search > \"ambient\"", "Settings") so you always know where you are. Overlays take precedence; search queries are truncated at 30 characters.
+- **Startup audio self-check**: PulseDeck now verifies audio output availability on launch. If no device is found, a clear notice is shown while allowing continued library browsing.
+- **Graceful degradation when Radio Browser is down**: A single "Radio Browser is unavailable — showing saved library only" notice on first failure. Subsequent errors are suppressed until the service recovers. Library browsing, playback, and management continue uninterrupted.
+- **Error recovery wizard**: The Playback Doctor now offers numbered one-click recovery actions (e.g., [1] Switch to next output device, [2] Retry connection). Press the corresponding number key to execute. Failed actions show the reason and remain retryable.
+
+### Improved
+- **Rounded borders everywhere**: All panels and overlays already use `BorderType::Rounded` consistently — verified across all 14 bordered UI elements.
+- **Better spacing and padding**: Station list and Signal Deck panels now have 1-character horizontal inner margins. Content no longer hugs borders.
+- **Subtle dim/highlight selection states**: Selected list items use bold + highlight foreground + bg_highlight background. Non-selected items are dimmed with `text_dim` color and alternating even/odd row backgrounds for visual rhythm.
+- **Smoother overlay animations**: Overlays fade in over 2 render frames (200ms) via an `AnimationState` interpolator. Scroll transitions use the same system. No fade-out on close (instant dismiss). True-color detection skips interpolation on terminals without support.
+
+### Internal
+- Version bumped to 0.11.0.
+- 1415 tests pass, zero clippy warnings.
+- 6 new domain modules: `src/app/animation.rs`, `src/app/breadcrumb.rs`, `src/app/audio_check.rs`, `src/app/radio_status.rs`, `src/app/recovery_actions.rs`, `src/app/visualizer/gradient.rs`.
+- 1 new UI layout helper: `src/ui/layout.rs` (`overlay_vertical_margin`).
+- 10 new property-based tests: gradient bands, animation invariants (progress, interpolation, restart), breadcrumb truncation, notice suppression, recovery numbering, error truncation, overlay margins, name truncation.
+- New types: `ColorBand`, `AnimationState`, `RadioBrowserStatus`, `RecoveryAction`, `RecoveryActionKind`, `ActionStatus`, `AudioCheckResult`.
+- `UiRuntimeState` gains `overlay_animation` and `scroll_animation` fields.
+- `App` gains `radio_browser_status` and `audio_check_result` fields.
+- `UiModel` gains `breadcrumb` field computed via `compute_breadcrumb()`.
+- Header layout split into 3 columns: logo | breadcrumb | now-playing status.
+- Spectrum renderer uses per-bar `color_band_for_row()` instead of global row-position coloring.
+- `theme::active_palette()` public accessor added for direct palette field access.
+- `theme::dim_row_even()` and `theme::dim_row_odd()` added for list item alternation.
+- RadioBrowserStatus wired into both search and discover response handlers.
+- Playback Doctor renders recovery actions section with numbered selectable fixes.
+
+---
+
 ## [0.10.4] - Unreleased
 
 ### Fixed

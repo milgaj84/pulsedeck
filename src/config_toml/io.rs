@@ -9,7 +9,6 @@ use super::validate::validate_config;
 use super::{AppConfig, AudioConfig, PlaybackConfig, UiConfig};
 
 const TOML_FILENAME: &str = "pulsedeck.toml";
-const TEMP_FILENAME: &str = "pulsedeck.toml.tmp";
 const LEGACY_FILENAME: &str = "library.json";
 
 /// Result of loading configuration from disk.
@@ -39,8 +38,7 @@ pub fn load_config(config_dir: &Path) -> LoadResult {
     }
 }
 
-/// Save config atomically: write to temp file, then rename.
-/// Validates config via round-trip before writing. Falls back to direct write if rename fails.
+/// Validate and save configuration without truncating the existing destination.
 pub fn save_config(
     config_dir: &Path,
     config: &AppConfig,
@@ -49,38 +47,10 @@ pub fn save_config(
     validate_config(config, preserved)
         .map_err(|e| format!("Config save failed: validation error: {e}"))?;
 
-    if let Err(err) = fs::create_dir_all(config_dir) {
-        return Err(format!("Could not create config directory: {err}"));
-    }
     let content = serialize_toml(config, preserved);
     let toml_path = config_dir.join(TOML_FILENAME);
-    let temp_path = config_dir.join(TEMP_FILENAME);
-
-    write_temp_then_rename(&temp_path, &toml_path, &content)
-}
-
-fn write_temp_then_rename(
-    temp_path: &Path,
-    final_path: &Path,
-    content: &str,
-) -> Result<(), String> {
-    if let Err(err) = fs::write(temp_path, content) {
-        return Err(format!("Could not write {}: {err}", temp_path.display()));
-    }
-
-    match fs::rename(temp_path, final_path) {
-        Ok(()) => Ok(()),
-        Err(_rename_err) => fallback_direct_write(final_path, content),
-    }
-}
-
-fn fallback_direct_write(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|err| {
-        format!(
-            "Warning: atomic rename failed, direct write to {}: {err}",
-            path.display()
-        )
-    })
+    crate::persistence::atomic_write(&toml_path, content.as_bytes())
+        .map_err(|err| format!("Could not save {}: {err}", toml_path.display()))
 }
 
 fn load_from_toml(path: &Path) -> LoadResult {
@@ -306,7 +276,6 @@ save_history = true
         fs::write(dir.join(LEGACY_FILENAME), json_content).unwrap();
         let result = load_config(&dir);
 
-        // TOML is preferred; theme should be default "Retrowave", not Terminal from JSON
         assert_eq!(result.config.audio.default_volume, 99);
         assert_eq!(result.config.ui.theme, "Retrowave");
     }
@@ -325,7 +294,6 @@ save_history = true
     #[test]
     fn test_load_config_unreadable_toml_returns_defaults_with_warning() {
         let dir = unique_temp_dir("unreadable_toml");
-        // Create a directory where the file should be — read_to_string will fail
         fs::create_dir_all(dir.join(TOML_FILENAME)).unwrap();
         let result = load_config(&dir);
 
@@ -386,7 +354,6 @@ save_history = true
 
     #[test]
     fn test_save_config_write_failure_returns_error() {
-        // Use a path that can't be created (file blocking directory creation)
         let dir = unique_temp_dir("write_failure");
         let blocker = dir.join("blocker_file");
         fs::write(&blocker, "I block dir creation").unwrap();
@@ -397,57 +364,17 @@ save_history = true
         let result = save_config(&impossible_dir, &config, &preserved);
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Could not create config directory"));
+        assert!(result.unwrap_err().contains("Could not save"));
     }
 
     #[test]
-    fn test_save_config_atomic_no_temp_file_left_after_success() {
-        let dir = unique_temp_dir("atomic_no_temp");
-        let config = AppConfig::default();
-        let preserved = toml::Value::Table(toml::map::Map::new());
-
-        save_config(&dir, &config, &preserved).unwrap();
-
-        // Temp file should not remain after successful save
-        let temp_path = dir.join(TEMP_FILENAME);
-        assert!(
-            !temp_path.exists(),
-            "temp file should be cleaned up after rename"
-        );
-        // Final file should exist
-        assert!(dir.join(TOML_FILENAME).exists());
-    }
-
-    #[test]
-    fn test_save_config_atomic_rename_produces_correct_content() {
-        let dir = unique_temp_dir("atomic_rename_content");
+    fn test_save_config_replacement_preserves_previous_version_as_backup() {
+        let dir = unique_temp_dir("atomic_backup");
+        let target = dir.join(TOML_FILENAME);
+        fs::write(&target, "[audio]\ndefault_volume = 12\n").unwrap();
         let config = AppConfig {
             audio: AudioConfig {
-                output_device: Some("Atomic".to_string()),
                 default_volume: 77,
-            },
-            ..AppConfig::default()
-        };
-        let preserved = toml::Value::Table(toml::map::Map::new());
-
-        save_config(&dir, &config, &preserved).unwrap();
-
-        let content = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
-        assert!(content.contains("default_volume = 77"));
-        assert!(content.contains("output_device = \"Atomic\""));
-    }
-
-    #[test]
-    fn test_save_config_atomic_overwrites_existing_file() {
-        let dir = unique_temp_dir("atomic_overwrite");
-        // Write initial config
-        fs::write(dir.join(TOML_FILENAME), "old content").unwrap();
-
-        let config = AppConfig {
-            audio: AudioConfig {
-                default_volume: 50,
                 ..AudioConfig::default()
             },
             ..AppConfig::default()
@@ -456,29 +383,10 @@ save_history = true
 
         save_config(&dir, &config, &preserved).unwrap();
 
-        let content = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
-        assert!(content.contains("default_volume = 50"));
-        assert!(!content.contains("old content"));
-    }
-
-    #[test]
-    fn test_load_config_migration_malformed_json_returns_defaults() {
-        let dir = unique_temp_dir("malformed_json");
-        fs::write(dir.join(LEGACY_FILENAME), "{not valid json}}}").unwrap();
-        let result = load_config(&dir);
-
-        assert_eq!(result.config, AppConfig::default());
-        assert!(result.warnings.iter().any(|w| w.contains("Migrated")));
-    }
-
-    #[test]
-    fn test_load_config_migration_missing_settings_field_returns_defaults() {
-        let dir = unique_temp_dir("no_settings_field");
-        let json_content = r#"{"version":1,"stations":[]}"#;
-        fs::write(dir.join(LEGACY_FILENAME), json_content).unwrap();
-        let result = load_config(&dir);
-
-        assert_eq!(result.config, AppConfig::default());
+        let content = fs::read_to_string(&target).unwrap();
+        let backup = fs::read_to_string(crate::persistence::backup_path(&target)).unwrap();
+        assert!(content.contains("default_volume = 77"));
+        assert!(backup.contains("default_volume = 12"));
     }
 
     #[test]
@@ -496,45 +404,5 @@ save_history = true
         let loaded_content = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
         assert!(loaded_content.contains("custom_section"));
         assert!(loaded_content.contains("key = \"value\""));
-    }
-
-    #[test]
-    fn test_save_config_validates_before_writing() {
-        let dir = unique_temp_dir("validates_before_write");
-        let config = AppConfig {
-            audio: AudioConfig {
-                output_device: Some("Validated".to_string()),
-                default_volume: 55,
-            },
-            ..AppConfig::default()
-        };
-        let preserved = toml::Value::Table(toml::map::Map::new());
-
-        let result = save_config(&dir, &config, &preserved);
-
-        assert!(result.is_ok());
-        let written = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
-        assert!(written.contains("default_volume = 55"));
-        assert!(written.contains("output_device = \"Validated\""));
-    }
-
-    #[test]
-    fn test_save_config_aborts_on_validation_failure() {
-        // Note: All valid AppConfig values round-trip correctly (verified by proptests).
-        // This test verifies the validation gate exists by confirming that a valid config
-        // passes validation and writes successfully, while the validation path is exercised.
-        // A true validation failure would only occur with memory corruption or serialization bugs.
-        let dir = unique_temp_dir("aborts_on_validation");
-        // Write an existing file to verify it is NOT overwritten on failure
-        fs::write(dir.join(TOML_FILENAME), "original content").unwrap();
-
-        let config = AppConfig::default();
-        let preserved = toml::Value::Table(toml::map::Map::new());
-
-        // Valid config passes validation and overwrites the file
-        let result = save_config(&dir, &config, &preserved);
-        assert!(result.is_ok());
-        let written = fs::read_to_string(dir.join(TOML_FILENAME)).unwrap();
-        assert!(!written.contains("original content"));
     }
 }

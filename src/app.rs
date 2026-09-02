@@ -1,4 +1,7 @@
+pub(crate) mod animation;
+pub(crate) mod audio_check;
 mod audio_status;
+pub(crate) mod breadcrumb;
 mod command_palette;
 mod discover;
 pub mod doctor_suggestions;
@@ -17,8 +20,10 @@ mod persist;
 mod playback;
 mod playback_error;
 mod playback_runtime;
+pub(crate) mod radio_status;
 mod recent;
 mod reconnect;
+pub(crate) mod recovery_actions;
 mod search;
 mod selectors;
 mod settings;
@@ -29,8 +34,13 @@ mod types;
 mod ui_runtime;
 mod ui_state;
 mod update;
-mod visualizer;
+pub(crate) mod visualizer;
 pub mod visualizer_mode;
+
+#[cfg(test)]
+mod integration_tests;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 
 use crate::config_toml::hot_reload::ConfigWatcher;
 use crate::favorites::Library;
@@ -135,4 +145,11 @@ pub struct App {
 
     /// Epoch timestamp when the stale notice was last dismissed.
     pub stale_dismissed_at: Option<u64>,
+
+    /// Tracks Radio Browser API availability for graceful degradation.
+    pub radio_browser_status: radio_status::RadioBrowserStatus,
+
+    /// Result of the startup audio device self-check.
+    #[allow(dead_code)] // Wiring into startup UI pending
+    pub audio_check_result: Option<audio_check::AudioCheckResult>,
 }

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use crate::app::breadcrumb::compute_breadcrumb;
 use crate::app::{
     ActiveOverlay, App, CommandPaletteState, DisplayMode, InputMode, LayoutMode, Navigation,
     NoticeState, Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackState, PlaybackView,
@@ -51,6 +52,7 @@ pub struct UiModel<'a> {
     pub search_history_empty: bool,
     pub settings_undo_available: [bool; SettingRow::COUNT],
     pub sort_mode: SortMode,
+    pub breadcrumb: String,
     visible_stations: Vec<&'a Station>,
     now_playing: Option<&'a Station>,
 }
@@ -149,6 +151,16 @@ impl<'a> From<&'a App> for UiModel<'a> {
             settings_undo_available: SettingRow::ALL
                 .map(|row| app.settings_undo.has_entry(row.index())),
             sort_mode: app.sort_mode,
+            breadcrumb: compute_breadcrumb(
+                app.ui.overlays.active,
+                &app.ui.input_mode,
+                &app.search.query,
+                app.library
+                    .available_genres
+                    .get(app.ui.nav.selected_genre_idx)
+                    .map(|s| s.as_str()),
+                app.search.results.len(),
+            ),
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }

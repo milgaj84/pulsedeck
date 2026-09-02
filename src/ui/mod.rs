@@ -6,6 +6,7 @@ pub mod discover_widget;
 pub mod header;
 pub mod help;
 pub mod keybindings_widget;
+pub mod layout;
 pub mod mini;
 pub mod model;
 pub mod playback_doctor;

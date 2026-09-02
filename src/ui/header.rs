@@ -5,15 +5,20 @@ use super::theme;
 use crate::app::PlaybackState;
 use crate::ui::model::UiModel;
 
-/// Render the header area: PulseDeck logo + now-playing info.
+/// Render the header area: PulseDeck logo + breadcrumb + now-playing info.
 pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Length(22),
+            Constraint::Min(10),
+            Constraint::Percentage(45),
+        ])
         .split(area);
 
     render_logo(frame, chunks[0]);
-    render_now_playing(frame, chunks[1], app);
+    render_breadcrumb(frame, chunks[1], app);
+    render_now_playing(frame, chunks[2], app);
 }
 
 /// ASCII-styled PulseDeck logo.
@@ -30,6 +35,20 @@ fn render_logo(frame: &mut Frame, area: Rect) {
         .style(Style::default().bg(theme::bg()));
 
     let paragraph = Paragraph::new(logo).block(block).alignment(Alignment::Left);
+    frame.render_widget(paragraph, area);
+}
+
+/// Breadcrumb navigation indicator in the center of the header.
+fn render_breadcrumb(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
+    let crumb = Line::from(Span::styled(&app.breadcrumb, theme::dim()));
+
+    let block = Block::default()
+        .borders(Borders::NONE)
+        .style(Style::default().bg(theme::bg()));
+
+    let paragraph = Paragraph::new(vec![crumb])
+        .block(block)
+        .alignment(Alignment::Left);
     frame.render_widget(paragraph, area);
 }
 

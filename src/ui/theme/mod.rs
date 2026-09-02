@@ -30,6 +30,11 @@ fn active() -> ThemePalette {
         .unwrap_or_else(palette_retrowave)
 }
 
+/// Read the current active palette as a public accessor for direct field use.
+pub fn active_palette() -> ThemePalette {
+    active()
+}
+
 // ── Semantic Color Accessors ─────────────────────────────────────────
 // These replace the old `pub const` color values.
 // UI files call these instead of referencing raw constants.
@@ -130,10 +135,16 @@ pub fn title() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Scanline effect — slightly different background for alternating rows
-pub fn scanline() -> Style {
+/// Non-selected list item on even rows: dimmed text + default bg
+pub fn dim_row_even() -> Style {
     let p = active();
-    Style::default().fg(p.text_primary).bg(p.surface)
+    Style::default().fg(p.text_dim).bg(p.bg)
+}
+
+/// Non-selected list item on odd rows: dimmed text + surface bg (alternating)
+pub fn dim_row_odd() -> Style {
+    let p = active();
+    Style::default().fg(p.text_dim).bg(p.surface)
 }
 
 /// Volume bar filled style

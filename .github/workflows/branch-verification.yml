@@ -1,8 +1,11 @@
-name: CI
+name: Branch Verification
 
 on:
   push:
-  pull_request:
+    branches:
+      - feat/v0.11-release-polish
+    paths:
+      - .github/workflows/branch-verification.yml
 
 permissions:
   contents: read

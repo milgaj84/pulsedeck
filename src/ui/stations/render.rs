@@ -100,6 +100,7 @@ fn render_station_list(
                 .borders(Borders::ALL)
                 .border_style(theme::border())
                 .border_type(ratatui::widgets::BorderType::Rounded)
+                .padding(ratatui::widgets::Padding::horizontal(1))
                 .style(theme::clear()),
         )
         .highlight_style(theme::selected())

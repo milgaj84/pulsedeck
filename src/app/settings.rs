@@ -188,8 +188,9 @@ impl App {
     fn apply_theme_setting(&mut self, forward: bool) -> bool {
         let current = ThemeName::from_key(&self.config.ui.theme);
         let next = step_choice(ThemeName::ALL, current, forward);
-        self.config.ui.theme = next.key().to_string();
-        self.library.settings.theme = next.key().to_string();
+        self.config.ui.theme = next.label().to_string();
+        self.library.settings.theme = next.label().to_string();
+        self.mark_library_dirty();
         crate::ui::theme::set_active(next);
         true
     }
@@ -358,8 +359,8 @@ mod tests {
         app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingForward);
-        assert_eq!(app.config.ui.theme, "CatppuccinMocha");
-        assert_eq!(app.library.settings.theme, "CatppuccinMocha");
+        assert_eq!(app.config.ui.theme, "Catppuccin Mocha");
+        assert_eq!(app.library.settings.theme, "Catppuccin Mocha");
 
         app.update(Action::StepSettingBackward);
         assert_eq!(app.config.ui.theme, "Retrowave");

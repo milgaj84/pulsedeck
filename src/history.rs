@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::path::Path;
 
 const MAX_ENTRIES: usize = 500;
-#[cfg(not(test))]
 const HISTORY_FILE: &str = "history.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub title: String,
     pub station: String,
-    pub at: String, // Unix seconds since epoch as string
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,44 +27,40 @@ fn default_version() -> u32 {
 impl Default for History {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: default_version(),
             entries: VecDeque::new(),
         }
     }
 }
 
 impl History {
-    #[cfg(not(test))]
     #[allow(dead_code)]
     pub fn load() -> Self {
         Self::load_with_warning().0
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn load() -> Self {
-        Self::default()
+    pub fn load_with_warning() -> (Self, Option<String>) {
+        let Some(path) = crate::config::config_path(HISTORY_FILE) else {
+            return (Self::default(), None);
+        };
+        Self::load_from_path(&path)
     }
 
-    #[cfg(not(test))]
-    pub fn load_with_warning() -> (Self, Option<String>) {
-        let (history, warning) = crate::config::load_json_with_warning::<Self>(HISTORY_FILE);
+    pub(crate) fn load_from_path(path: &Path) -> (Self, Option<String>) {
+        let (history, warning) =
+            crate::config::load_json_from_path_with_warning::<Self>(path, HISTORY_FILE);
         (history.sanitized(), warning)
     }
 
-    #[cfg(test)]
-    pub fn load_with_warning() -> (Self, Option<String>) {
-        (Self::default(), None)
+    pub fn save(&self) -> anyhow::Result<()> {
+        let Some(path) = crate::config::config_path(HISTORY_FILE) else {
+            return Ok(());
+        };
+        self.save_to_path(&path)
     }
 
-    #[cfg(not(test))]
-    pub fn save(&self) -> anyhow::Result<()> {
-        crate::config::save_json(HISTORY_FILE, &self.clone().sanitized())
-    }
-
-    #[cfg(test)]
-    pub fn save(&self) -> anyhow::Result<()> {
-        Ok(())
+    fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
+        crate::config::save_json_to_path(path, &self.clone().sanitized())
     }
 
     fn sanitized(mut self) -> Self {
@@ -75,17 +71,11 @@ impl History {
     }
 
     pub fn record(&mut self, title: String, station: String) {
-        let now_secs = std::time::SystemTime::now()
+        let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
+            .map(|duration| duration.as_secs().to_string())
             .unwrap_or_default();
-
-        self.entries.push_back(HistoryEntry {
-            title,
-            station,
-            at: now_secs,
-        });
-
+        self.entries.push_back(HistoryEntry { title, station, at });
         while self.entries.len() > MAX_ENTRIES {
             self.entries.pop_front();
         }
@@ -103,50 +93,74 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[test]
-    fn test_load_with_warning_uses_defaults_in_tests() {
-        let (history, warning) = History::load_with_warning();
-
-        assert!(history.is_empty());
-        assert!(warning.is_none());
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("pulsedeck-history-{}-{nanos}", std::process::id()))
+            .join(name)
     }
 
     #[test]
-    fn test_record_caps_at_500() {
+    fn record_caps_at_500_and_recent_is_newest_first() {
         let mut history = History::default();
-        for i in 0..600 {
-            history.record(format!("Title {}", i), "Station".to_string());
+        for index in 0..600 {
+            history.record(format!("Title {index}"), "Station".to_string());
         }
-        assert_eq!(history.entries.len(), 500);
-        assert_eq!(history.entries[0].title, "Title 100");
-        assert_eq!(history.entries[499].title, "Title 599");
+        assert_eq!(history.entries.len(), MAX_ENTRIES);
+        assert_eq!(history.entries.front().unwrap().title, "Title 100");
+        assert_eq!(history.recent(1).next().unwrap().title, "Title 599");
     }
 
     #[test]
-    fn test_recent_ordering() {
+    fn real_persistence_round_trips_and_sanitizes() {
+        let path = temp_path(HISTORY_FILE);
         let mut history = History::default();
-        history.record("A".to_string(), "S".to_string());
-        history.record("B".to_string(), "S".to_string());
-        let recent: Vec<_> = history.recent(10).collect();
-        assert_eq!(recent.len(), 2);
-        assert_eq!(recent[0].title, "B");
-        assert_eq!(recent[1].title, "A");
-    }
-
-    #[test]
-    fn test_sanitized() {
-        let mut history = History::default();
-        for i in 0..550 {
+        for index in 0..550 {
             history.entries.push_back(HistoryEntry {
-                title: format!("T{}", i),
+                title: format!("T{index}"),
                 station: "S".to_string(),
                 at: "0".to_string(),
             });
         }
-        assert_eq!(history.entries.len(), 550);
-        history = history.sanitized();
-        assert_eq!(history.entries.len(), 500);
-        assert_eq!(history.entries[0].title, "T50");
+        history.save_to_path(&path).unwrap();
+        let (loaded, warning) = History::load_from_path(&path);
+        assert!(warning.is_none());
+        assert_eq!(loaded.entries.len(), MAX_ENTRIES);
+        assert_eq!(loaded.entries.front().unwrap().title, "T50");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn replacement_preserves_previous_history_as_backup() {
+        let path = temp_path(HISTORY_FILE);
+        let mut first = History::default();
+        first.record("First".to_string(), "A".to_string());
+        first.save_to_path(&path).unwrap();
+        let mut second = first.clone();
+        second.record("Second".to_string(), "B".to_string());
+        second.save_to_path(&path).unwrap();
+        let backup = crate::persistence::backup_path(&path);
+        let (previous, warning) = History::load_from_path(&backup);
+        assert!(warning.is_none());
+        assert_eq!(previous.entries.len(), 1);
+        assert_eq!(previous.entries.front().unwrap().title, "First");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn malformed_history_returns_default_and_warning() {
+        let path = temp_path(HISTORY_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{broken").unwrap();
+        let (history, warning) = History::load_from_path(&path);
+        assert!(history.is_empty());
+        assert!(warning.unwrap().contains("Could not parse history.json"));
+        let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 }

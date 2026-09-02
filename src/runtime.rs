@@ -387,9 +387,10 @@ mod tests {
         // Error result → sent directly to app, no fallback
         assert!(driver.pending_fallback_tag.is_none());
         assert!(driver.pending_primary_results.is_none());
+        // First failure shows Radio Browser unavailable notice
         assert!(matches!(
             app.ui.notice.current,
-            Some(crate::app::AppNotice::Error(ref msg)) if msg.contains("timeout")
+            Some(crate::app::AppNotice::Info(ref msg)) if msg.contains("Radio Browser is unavailable")
         ));
     }
 

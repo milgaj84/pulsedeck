@@ -59,9 +59,9 @@ pub(super) fn station_name_style(is_playing: bool, is_selected: bool, idx: usize
     } else if is_selected {
         theme::selected()
     } else if idx.is_multiple_of(2) {
-        theme::text()
+        theme::dim_row_even()
     } else {
-        theme::scanline()
+        theme::dim_row_odd()
     }
 }
 

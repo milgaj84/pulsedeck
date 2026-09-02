@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::animation::AnimationState;
 use std::time::Duration;
 
 pub struct UiRuntimeState {
@@ -15,6 +16,8 @@ pub struct UiRuntimeState {
     pub display_mode: DisplayMode,
     pub last_tick_instant: std::time::Instant,
     pub volume_flash_remaining: Duration,
+    pub overlay_animation: AnimationState,
+    pub scroll_animation: AnimationState,
 }
 
 impl UiRuntimeState {
@@ -33,6 +36,8 @@ impl UiRuntimeState {
             display_mode: ui_state.display_mode(),
             last_tick_instant: std::time::Instant::now(),
             volume_flash_remaining: Duration::ZERO,
+            overlay_animation: AnimationState::idle(),
+            scroll_animation: AnimationState::idle(),
         }
     }
 }

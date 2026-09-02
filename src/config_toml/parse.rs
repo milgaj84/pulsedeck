@@ -171,7 +171,9 @@ fn parse_sort_mode(
 }
 
 fn validate_theme(raw: &str, warnings: &mut Vec<String>) -> String {
-    let is_known = ThemeName::ALL.iter().any(|t| t.label() == raw);
+    let is_known = ThemeName::ALL
+        .iter()
+        .any(|t| t.label() == raw || t.key() == raw);
     if is_known {
         raw.to_string()
     } else {
@@ -181,6 +183,12 @@ fn validate_theme(raw: &str, warnings: &mut Vec<String>) -> String {
         ));
         "Retrowave".to_string()
     }
+}
+
+/// Test-accessible wrapper for `validate_theme`.
+#[cfg(test)]
+pub fn validate_theme_for_test(raw: &str, warnings: &mut Vec<String>) -> String {
+    validate_theme(raw, warnings)
 }
 
 fn parse_playback_section(

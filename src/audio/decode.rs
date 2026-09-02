@@ -1,3 +1,4 @@
+use super::codec::{detect_codec, CodecDetection};
 use super::stream_source::StreamSource;
 use super::types::{
     ConnectRequest, DecodedSource, EndReason, EngineError, EngineEvent, Generation, StreamFormat,
@@ -11,94 +12,64 @@ use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-// ---------------------------------------------------------------------------
-// DecodePipeline
-// ---------------------------------------------------------------------------
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_ICY_METAINT: usize = 16 * 1024 * 1024;
 
-/// Builds a decoded, visualizer-tapped rodio `Source` from a raw `Read` stream.
+/// Builds a decoded, visualizer-tapped rodio source from a live byte stream.
 ///
-/// Two paths are supported:
-/// - **MP3 fast-path** (`is_mp3_hint = true`): calls `Decoder::new_mp3`, which skips
-///   Symphonia's full container probe and targets MP3 specifically.
-/// - **Generic probe path** (`is_mp3_hint = false`): calls `Decoder::new` which uses
-///   rodio's Symphonia-based probing to detect the container/codec automatically.
-///   Falls back to `Decoder::new_mp3` if the generic probe fails.
-///
-/// Both rodio decoder constructors require `Read + Seek + Send + Sync + 'static`.
-/// Since live streams can't seek, callers should wrap their reader in `ReadWrapper`
-/// (or pass a type that already implements `Seek`, such as `Cursor`).
+/// Generic Symphonia probing is the safe default because public radio headers
+/// and URL extensions are often inaccurate. The MP3 fast path is used only when
+/// MP3 frame or ID3 magic bytes were observed in the prebuffer.
 pub(super) struct DecodePipeline;
 
 impl DecodePipeline {
     pub(super) fn build<R: Read + Send + 'static>(
         reader: R,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
-        is_mp3_hint: bool,
+        detection: CodecDetection,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
-        // Wrap reader: rodio Decoder needs Read + Seek + Send + Sync + 'static.
-        // ReadWrapper provides a stub Seek and is Sync because it contains no
-        // interior mutability.
         let wrapped = ReadWrapper::new(reader);
         let buf_reader = BufReader::new(wrapped);
 
-        if is_mp3_hint {
-            // MP3 fast-path: skip full Symphonia probe.
-            match Decoder::new_mp3(buf_reader) {
+        if detection.verified_mp3() {
+            return match Decoder::new_mp3(buf_reader) {
                 Ok(decoder) => {
-                    let sample_rate = decoder.sample_rate();
-                    let channels = decoder.channels();
                     let format = StreamFormat {
-                        codec: "MP3".to_string(),
-                        sample_rate,
-                        channels,
+                        codec: detection.hint.label().to_string(),
+                        sample_rate: decoder.sample_rate(),
+                        channels: decoder.channels(),
                     };
                     let visualizer =
                         VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
-                    let source: DecodedSource = Box::new(visualizer);
-                    return Ok((source, format));
+                    Ok((Box::new(visualizer), format))
                 }
-                Err(mp3_err) => {
-                    return Err(EngineError::Decode(format!("MP3 decode failed: {mp3_err}")));
-                }
-            }
+                Err(error) => Err(EngineError::Decode(format!(
+                    "verified MP3 stream could not be decoded: {error}"
+                ))),
+            };
         }
 
-        // Generic probe path via rodio's Symphonia front-end.
         match Decoder::new(buf_reader) {
             Ok(decoder) => {
-                let sample_rate = decoder.sample_rate();
-                let channels = decoder.channels();
                 let format = StreamFormat {
-                    // rodio's Decoder doesn't expose the codec name; use a placeholder.
-                    codec: "Unknown".to_string(),
-                    sample_rate,
-                    channels,
+                    codec: detection.hint.label().to_string(),
+                    sample_rate: decoder.sample_rate(),
+                    channels: decoder.channels(),
                 };
                 let visualizer =
                     VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
-                let source: DecodedSource = Box::new(visualizer);
-                Ok((source, format))
+                Ok((Box::new(visualizer), format))
             }
-            Err(_probe_err) => Err(EngineError::Decode(
-                "probe failed: codec not recognised".to_string(),
-            )),
+            Err(error) => Err(EngineError::Decode(format!(
+                "{} probe failed: {error}",
+                detection.hint.label()
+            ))),
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// ReadWrapper
-// ---------------------------------------------------------------------------
-
-/// Wraps any `Read` and provides a stub `Seek` + `Sync` implementation.
-///
-/// `rodio::Decoder` requires `Read + Seek + Send + Sync + 'static`.  Live HTTP
-/// streams can't seek, so this wrapper satisfies the bound while returning an
-/// error for all real seek attempts (except `SeekFrom::Current(0)` which is a
-/// position query).
-///
-/// `Sync` is safe here because `ReadWrapper` only contains an `R: Read + Send`
-/// and a `u64`, with no interior mutability.
+/// Adapts a live reader to rodio's `Read + Seek + Send + Sync` requirement.
 struct ReadWrapper<R: Read> {
     inner: R,
     pos: u64,
@@ -131,251 +102,276 @@ impl<R: Read> io::Seek for ReadWrapper<R> {
     }
 }
 
-// SAFETY: ReadWrapper<R> only has a &mut interface (no Mutex/Cell/RefCell).
-// It is safe to share a reference between threads; it simply wraps R + u64.
+// SAFETY: ReadWrapper exposes mutation only through `&mut self`; it contains no
+// interior-mutability primitives and is never read concurrently by PulseDeck.
 unsafe impl<R: Read + Send> Sync for ReadWrapper<R> {}
 
-// ---------------------------------------------------------------------------
-// guard_active
-// ---------------------------------------------------------------------------
-
-/// Returns `true` iff `gen` is still the active generation.
-fn guard_active(gen: Generation, active: &Arc<AtomicU64>) -> bool {
-    active.load(SeqCst) == gen
+fn guard_active(generation: Generation, active: &Arc<AtomicU64>) -> bool {
+    active.load(SeqCst) == generation
 }
 
-// ---------------------------------------------------------------------------
-// run_worker
-// ---------------------------------------------------------------------------
+#[derive(Debug)]
+enum PrebufferFailure {
+    Abandoned,
+    Timeout,
+    Read(io::Error),
+}
 
-/// Worker main function — runs on a dedicated OS thread, one per generation.
-///
-/// Steps:
-/// 1. Check if generation is still active; if not, send `StreamEnded{Abandoned}` and return.
-/// 2. Open an HTTP connection via reqwest blocking client (connect_timeout = 10s).
-/// 3. Re-check generation after connect.
-/// 4. Check HTTP status; on non-2xx, send `Failed { error: Http(status) }` and return.
-/// 5. Parse ICY `icy-metaint` header if `metadata_enabled`.
-/// 6. Build a `StreamSource` wrapping the response body.
-/// 7. Fill a bounded prebuffer Vec, emitting `Buffering` progress; bail on timeout.
-/// 8. Detect codec hint from headers / URL suffix.
-/// 9. Chain prebuffer + remaining stream, call `DecodePipeline::build`.
-/// 10. Send `Connected` on success, or map errors to `Failed` / `StreamEnded`.
+fn fill_prebuffer<R: Read>(
+    reader: &mut R,
+    request: &ConnectRequest,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    active_generation: &Arc<AtomicU64>,
+) -> Result<Vec<u8>, PrebufferFailure> {
+    let generation = request.generation;
+    let mut prebuffer = Vec::with_capacity(request.prebuffer.min_bytes);
+    let started = Instant::now();
+    let mut chunk = vec![0_u8; 4096];
+
+    loop {
+        if prebuffer.len() >= request.prebuffer.min_bytes {
+            break;
+        }
+        if !guard_active(generation, active_generation) {
+            return Err(PrebufferFailure::Abandoned);
+        }
+        if started.elapsed() >= request.prebuffer.fill_timeout {
+            return Err(PrebufferFailure::Timeout);
+        }
+
+        let remaining = request.prebuffer.max_bytes.saturating_sub(prebuffer.len());
+        if remaining == 0 {
+            break;
+        }
+
+        let read_len = chunk.len().min(remaining);
+        match reader.read(&mut chunk[..read_len]) {
+            Ok(0) => break,
+            Ok(read) => {
+                prebuffer.extend_from_slice(&chunk[..read]);
+
+                if !guard_active(generation, active_generation) {
+                    return Err(PrebufferFailure::Abandoned);
+                }
+                if started.elapsed() >= request.prebuffer.fill_timeout
+                    && prebuffer.len() < request.prebuffer.min_bytes
+                {
+                    return Err(PrebufferFailure::Timeout);
+                }
+
+                let percent = if request.prebuffer.min_bytes == 0 {
+                    99
+                } else {
+                    prebuffer
+                        .len()
+                        .checked_mul(100)
+                        .and_then(|scaled| scaled.checked_div(request.prebuffer.min_bytes))
+                        .map(|pct| pct.min(99) as u8)
+                        .unwrap_or(99)
+                };
+                let _ = event_tx.send(EngineEvent::Buffering {
+                    generation,
+                    percent,
+                });
+            }
+            Err(error) if is_abandoned_error(&error) => {
+                return Err(PrebufferFailure::Abandoned);
+            }
+            Err(error) if is_timeout_error(&error) => {
+                return Err(PrebufferFailure::Timeout);
+            }
+            Err(error) => return Err(PrebufferFailure::Read(error)),
+        }
+    }
+
+    if prebuffer.is_empty() {
+        return Err(PrebufferFailure::Read(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "stream ended before sending audio data",
+        )));
+    }
+
+    Ok(prebuffer)
+}
+
+fn is_timeout_error(error: &io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ) {
+        return true;
+    }
+
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("timed out") || message.contains("timeout")
+}
+
+fn is_abandoned_error(error: &io::Error) -> bool {
+    error.to_string().eq_ignore_ascii_case("abandoned")
+}
+
+fn send_abandoned(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation) {
+    let _ = event_tx.send(EngineEvent::StreamEnded {
+        generation,
+        reason: EndReason::Abandoned,
+    });
+}
+
+fn send_failure(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation, error: EngineError) {
+    let _ = event_tx.send(EngineEvent::Failed { generation, error });
+}
+
+/// Connect, prebuffer, classify, and construct one decoded stream source.
 pub(super) fn run_worker(
-    req: ConnectRequest,
+    request: ConnectRequest,
     event_tx: mpsc::Sender<EngineEvent>,
     active_generation: Arc<AtomicU64>,
     sample_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
-    let gen = req.generation;
-
-    // --- Step 1: initial generation guard -----------------------------------
-    if !guard_active(gen, &active_generation) {
-        let _ = event_tx.send(EngineEvent::StreamEnded {
-            generation: gen,
-            reason: EndReason::Abandoned,
-        });
+    let generation = request.generation;
+    if !guard_active(generation, &active_generation) {
+        send_abandoned(&event_tx, generation);
         return;
     }
 
-    // --- Step 2: HTTP connect -----------------------------------------------
+    // Reqwest blocking responses apply this timeout independently to every body
+    // read, so continuous healthy streams are not limited to eight seconds total.
     let client = match reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(STREAM_READ_TIMEOUT)
         .user_agent(format!("PulseDeck/{}", env!("CARGO_PKG_VERSION")))
         .build()
     {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = event_tx.send(EngineEvent::Failed {
-                generation: gen,
-                error: EngineError::Connect(format!("HTTP client error: {e}")),
-            });
+        Ok(client) => client,
+        Err(error) => {
+            send_failure(
+                &event_tx,
+                generation,
+                EngineError::Connect(format!("could not initialize HTTP client: {error}")),
+            );
             return;
         }
     };
 
-    let mut request = client.get(&req.url);
-    if req.options.metadata_enabled {
-        request = request.header("Icy-MetaData", "1");
+    let mut http_request = client.get(&request.url);
+    if request.options.metadata_enabled {
+        http_request = http_request.header("Icy-MetaData", "1");
     }
 
-    let response = match request.send() {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = event_tx.send(EngineEvent::Failed {
-                generation: gen,
-                error: EngineError::Connect(format!("Connection failed: {e}")),
-            });
+    let response = match http_request.send() {
+        Ok(response) => response,
+        Err(error) => {
+            let message = if error.is_timeout() {
+                format!(
+                    "connection or response headers timed out after {} seconds",
+                    STREAM_READ_TIMEOUT.as_secs()
+                )
+            } else {
+                format!("could not connect: {error}")
+            };
+            send_failure(&event_tx, generation, EngineError::Connect(message));
             return;
         }
     };
 
-    // --- Step 3: re-check generation after connect --------------------------
-    if !guard_active(gen, &active_generation) {
-        let _ = event_tx.send(EngineEvent::StreamEnded {
-            generation: gen,
-            reason: EndReason::Abandoned,
-        });
+    if !guard_active(generation, &active_generation) {
+        send_abandoned(&event_tx, generation);
         return;
     }
 
-    // --- Step 4: HTTP status check ------------------------------------------
     let status = response.status();
     if !status.is_success() {
-        let _ = event_tx.send(EngineEvent::Failed {
-            generation: gen,
-            error: EngineError::Http(status.as_u16()),
-        });
+        send_failure(&event_tx, generation, EngineError::Http(status.as_u16()));
         return;
     }
 
-    // --- Step 5: parse ICY metaint header -----------------------------------
-    let metaint: Option<usize> = if req.options.metadata_enabled {
+    let metaint = if request.options.metadata_enabled {
         response
             .headers()
             .get("icy-metaint")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<usize>().ok())
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0 && *value <= MAX_ICY_METAINT)
     } else {
         None
     };
 
-    // Capture headers we need for codec hint detection before consuming response.
-    let has_icy_genre = response.headers().contains_key("icy-genre");
     let content_type = response
         .headers()
         .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_lowercase();
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let final_url = response.url().as_str().to_string();
 
-    // --- Step 6: build StreamSource -----------------------------------------
-    let stream_source = StreamSource::new(
+    let mut stream = StreamSource::new(
         response,
         metaint,
-        gen,
+        generation,
         Arc::clone(&active_generation),
         event_tx.clone(),
     );
 
-    // --- Step 7: fill bounded prebuffer -------------------------------------
-    let mut pre: Vec<u8> = Vec::with_capacity(req.prebuffer.min_bytes);
-    let start = Instant::now();
-    let mut stream_source = stream_source;
-    let mut chunk = vec![0u8; 4096];
-
-    loop {
-        if pre.len() >= req.prebuffer.min_bytes {
-            break;
-        }
-
-        if !guard_active(gen, &active_generation) {
-            let _ = event_tx.send(EngineEvent::StreamEnded {
-                generation: gen,
-                reason: EndReason::Abandoned,
-            });
+    let prebuffer = match fill_prebuffer(&mut stream, &request, &event_tx, &active_generation) {
+        Ok(prebuffer) => prebuffer,
+        Err(PrebufferFailure::Abandoned) => {
+            send_abandoned(&event_tx, generation);
             return;
         }
-
-        if start.elapsed() > req.prebuffer.fill_timeout {
-            let _ = event_tx.send(EngineEvent::Failed {
-                generation: gen,
-                error: EngineError::Connect("prebuffer timeout".into()),
-            });
+        Err(PrebufferFailure::Timeout) => {
+            send_failure(
+                &event_tx,
+                generation,
+                EngineError::Connect(format!(
+                    "stream read timed out while buffering after {} seconds",
+                    request.prebuffer.fill_timeout.as_secs()
+                )),
+            );
             return;
         }
-
-        let remaining_cap = req.prebuffer.max_bytes.saturating_sub(pre.len());
-        if remaining_cap == 0 {
-            // Hit the max_bytes cap — stop filling.
-            break;
+        Err(PrebufferFailure::Read(error)) => {
+            send_failure(
+                &event_tx,
+                generation,
+                EngineError::Connect(format!("stream read failed while buffering: {error}")),
+            );
+            return;
         }
-        let read_len = chunk.len().min(remaining_cap);
+    };
 
-        match stream_source.read(&mut chunk[..read_len]) {
-            Ok(0) => break, // short stream — attempt to probe whatever we have
-            Ok(n) => {
-                pre.extend_from_slice(&chunk[..n]);
-
-                // Emit buffering progress (capped at 99 until done).
-                let percent = if req.prebuffer.min_bytes > 0 {
-                    (pre.len() * 100)
-                        .checked_div(req.prebuffer.min_bytes)
-                        .unwrap_or(99)
-                        .min(99) as u8
-                } else {
-                    99
-                };
-                let _ = event_tx.send(EngineEvent::Buffering {
-                    generation: gen,
-                    percent,
-                });
-            }
-            Err(e) if e.to_string() == "Abandoned" => {
-                let _ = event_tx.send(EngineEvent::StreamEnded {
-                    generation: gen,
-                    reason: EndReason::Abandoned,
-                });
-                return;
-            }
-            Err(_) => {
-                // Network read error during prebuffer — treat as short stream.
-                break;
-            }
-        }
+    if !guard_active(generation, &active_generation) {
+        send_abandoned(&event_tx, generation);
+        return;
     }
 
-    // --- Step 8: codec hint detection ---------------------------------------
-    let url_lower = req.url.to_lowercase();
-    let is_mp3_hint = metaint.is_some()
-        || url_lower.ends_with(".mp3")
-        || has_icy_genre
-        || content_type.contains("audio/mpeg");
+    let detection = detect_codec(&prebuffer, &content_type, &final_url);
+    let buffered_stream = BufReader::with_capacity(64 * 1024, stream);
+    let chained = Cursor::new(prebuffer).chain(buffered_stream);
 
-    // --- Step 9: chain prebuffer + remaining stream, probe ------------------
-    let buffered_stream = BufReader::with_capacity(64 * 1024, stream_source);
-    let chained = Cursor::new(pre).chain(buffered_stream);
-
-    // --- Step 10: build decoder and send result ----------------------------
-    match DecodePipeline::build(chained, sample_buffer, is_mp3_hint) {
+    match DecodePipeline::build(chained, sample_buffer, detection) {
         Ok((source, format)) => {
             let _ = event_tx.send(EngineEvent::Connected {
-                generation: gen,
+                generation,
                 source,
                 format,
             });
         }
-        Err(e) => {
-            let _ = event_tx.send(EngineEvent::Failed {
-                generation: gen,
-                error: e,
-            });
-        }
+        Err(error) => send_failure(&event_tx, generation, error),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU64;
-    use std::time::Duration;
+    use crate::audio::codec::{CodecHint, CodecSource};
+    use crate::audio::types::{PlaybackOptions, PrebufferConfig};
+    use proptest::prelude::*;
+    use std::io::Seek;
 
-    use crate::audio::types::{ConnectRequest, PlaybackOptions, PrebufferConfig};
-
-    // Helper to create a ConnectRequest with a short fill_timeout.
-    fn make_req(
-        generation: u64,
-        fill_timeout: Duration,
-        min_bytes: usize,
-        max_bytes: usize,
-    ) -> ConnectRequest {
+    fn request(fill_timeout: Duration, min_bytes: usize, max_bytes: usize) -> ConnectRequest {
         ConnectRequest::new(
-            generation,
-            "http://test.invalid/stream".into(),
+            1,
+            "http://test.invalid/stream".to_string(),
             PrebufferConfig {
                 min_bytes,
                 max_bytes,
@@ -383,279 +379,199 @@ mod tests {
             },
             PlaybackOptions {
                 metadata_enabled: false,
-                ..Default::default()
+                ..PlaybackOptions::default()
             },
         )
     }
 
-    // ---------------------------------------------------------------------------
-    // prebuffer_timeout_emits_failed_event
-    //
-    // Uses an in-memory reader that delivers 0 bytes with a very short
-    // fill_timeout; asserts `Failed { error: EngineError::Connect("prebuffer timeout") }`
-    // is received.
-    // ---------------------------------------------------------------------------
-    #[test]
-    fn prebuffer_timeout_emits_failed_event() {
-        let (event_tx, event_rx) = mpsc::channel();
-        let active = Arc::new(AtomicU64::new(1));
-        let _sample_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+    fn active_generation() -> Arc<AtomicU64> {
+        Arc::new(AtomicU64::new(1))
+    }
 
-        // fill_timeout = Duration::ZERO so that start.elapsed() > fill_timeout is true
-        // on the first iteration (any elapsed time exceeds zero). min_bytes = 1024 ensures
-        // we can never fill fast enough.
-        let req = make_req(1, Duration::ZERO, 1024, 65536);
+    fn detection(hint: CodecHint, source: CodecSource) -> CodecDetection {
+        CodecDetection { hint, source }
+    }
 
-        // We simulate the prebuffer-filling logic directly (not run_worker, which would
-        // try to do an HTTP connect).  We replicate the loop to test the timeout path.
-        let active_clone = Arc::clone(&active);
-        let event_tx_clone = event_tx.clone();
+    struct TimeoutReader;
 
-        let handle = std::thread::spawn(move || {
-            let gen = req.generation;
-            let pre: Vec<u8> = Vec::new();
-            let start = Instant::now();
-            // A tiny sleep ensures start.elapsed() > Duration::ZERO is reliable.
-            std::thread::sleep(Duration::from_millis(1));
-            let chunk = vec![0u8; 4096];
-
-            loop {
-                if pre.len() >= req.prebuffer.min_bytes {
-                    break;
-                }
-                if !guard_active(gen, &active_clone) {
-                    let _ = event_tx_clone.send(EngineEvent::StreamEnded {
-                        generation: gen,
-                        reason: EndReason::Abandoned,
-                    });
-                    return;
-                }
-                if start.elapsed() > req.prebuffer.fill_timeout {
-                    let _ = event_tx_clone.send(EngineEvent::Failed {
-                        generation: gen,
-                        error: EngineError::Connect("prebuffer timeout".into()),
-                    });
-                    return;
-                }
-                let remaining_cap = req.prebuffer.max_bytes.saturating_sub(pre.len());
-                if remaining_cap == 0 {
-                    break;
-                }
-                // In this test, timeout fires before we reach here.
-                // Simulate a "no data available" iteration by simply continuing.
-                let read_len = chunk.len().min(remaining_cap);
-                let _ = read_len;
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        });
-
-        // Collect events; the first non-Buffering event should be Failed with prebuffer timeout.
-        let mut found_timeout = false;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if Instant::now() > deadline {
-                break;
-            }
-            match event_rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(EngineEvent::Failed {
-                    error: EngineError::Connect(msg),
-                    ..
-                }) => {
-                    if msg.contains("prebuffer timeout") {
-                        found_timeout = true;
-                    }
-                    break;
-                }
-                Ok(EngineEvent::Buffering { .. }) => continue,
-                Ok(_) => break,
-                Err(_) => break,
-            }
+    impl Read for TimeoutReader {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "read timed out"))
         }
+    }
 
-        let _ = handle.join();
-        drop(event_tx); // drop sender so channel closes
-        assert!(
-            found_timeout,
-            "Expected Failed {{ error: Connect(\"prebuffer timeout\") }}"
+    struct PanicReader;
+
+    impl Read for PanicReader {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            panic!("reader must not be called after cancellation")
+        }
+    }
+
+    #[test]
+    fn prebuffer_timeout_error_is_classified_explicitly() {
+        let (tx, _rx) = mpsc::channel();
+        let result = fill_prebuffer(
+            &mut TimeoutReader,
+            &request(Duration::from_secs(5), 1024, 4096),
+            &tx,
+            &active_generation(),
+        );
+
+        assert!(matches!(result, Err(PrebufferFailure::Timeout)));
+    }
+
+    #[test]
+    fn elapsed_prebuffer_deadline_fires_before_read() {
+        let (tx, _rx) = mpsc::channel();
+        let result = fill_prebuffer(
+            &mut PanicReader,
+            &request(Duration::ZERO, 1024, 4096),
+            &tx,
+            &active_generation(),
+        );
+
+        assert!(matches!(result, Err(PrebufferFailure::Timeout)));
+    }
+
+    #[test]
+    fn cancellation_is_checked_before_read() {
+        let (tx, _rx) = mpsc::channel();
+        let inactive = Arc::new(AtomicU64::new(2));
+        let result = fill_prebuffer(
+            &mut PanicReader,
+            &request(Duration::from_secs(5), 1024, 4096),
+            &tx,
+            &inactive,
+        );
+
+        assert!(matches!(result, Err(PrebufferFailure::Abandoned)));
+    }
+
+    #[test]
+    fn prebuffer_emits_progress_and_respects_minimum() {
+        let (tx, rx) = mpsc::channel();
+        let mut reader = Cursor::new(vec![1_u8; 2048]);
+        let prebuffer = fill_prebuffer(
+            &mut reader,
+            &request(Duration::from_secs(5), 1024, 4096),
+            &tx,
+            &active_generation(),
+        )
+        .unwrap();
+
+        assert!(prebuffer.len() >= 1024);
+        assert!(prebuffer.len() <= 4096);
+        assert!(matches!(rx.try_recv(), Ok(EngineEvent::Buffering { .. })));
+    }
+
+    #[test]
+    fn empty_stream_returns_read_failure() {
+        let (tx, _rx) = mpsc::channel();
+        let mut reader = Cursor::new(Vec::<u8>::new());
+        let result = fill_prebuffer(
+            &mut reader,
+            &request(Duration::from_secs(5), 1024, 4096),
+            &tx,
+            &active_generation(),
+        );
+
+        assert!(matches!(result, Err(PrebufferFailure::Read(_))));
+    }
+
+    #[test]
+    fn timeout_detection_handles_kind_and_message() {
+        assert!(is_timeout_error(&io::Error::new(
+            io::ErrorKind::TimedOut,
+            "slow"
+        )));
+        assert!(is_timeout_error(&io::Error::other("operation timeout")));
+        assert!(!is_timeout_error(&io::Error::other("connection reset")));
+    }
+
+    #[test]
+    fn read_wrapper_tracks_position_and_rejects_real_seeks() {
+        let mut reader = ReadWrapper::new(Cursor::new(b"abcdef".to_vec()));
+        let mut buffer = [0_u8; 3];
+
+        assert_eq!(reader.read(&mut buffer).unwrap(), 3);
+        assert_eq!(reader.stream_position().unwrap(), 3);
+        assert_eq!(
+            reader.seek(io::SeekFrom::Start(0)).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
         );
     }
 
-    // ---------------------------------------------------------------------------
-    // short_stream_attempts_probe
-    //
-    // Uses a reader with only a few valid MP3-header bytes; asserts `Failed`
-    // or `Connected` (either is fine — probe was attempted).
-    // ---------------------------------------------------------------------------
     #[test]
-    fn short_stream_attempts_probe() {
-        // A minimal MP3 sync-word header (ID3v2 tag with no real audio).
-        // Enough to convince DecodePipeline to attempt probe, but not enough to decode.
-        let mp3_bytes: Vec<u8> = vec![
-            0xFF, 0xFB, 0x90, 0x00, // MP3 frame sync + header
-            0x00, 0x00, 0x00, 0x00,
-        ];
+    fn short_verified_mp3_attempts_decode_without_panicking() {
+        let bytes = vec![0xFF, 0xFB, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let result = DecodePipeline::build(
+            Cursor::new(bytes),
+            sample_buffer,
+            detection(CodecHint::Mp3, CodecSource::MagicBytes),
+        );
 
-        let sample_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        assert!(matches!(result, Ok(_) | Err(EngineError::Decode(_))));
+    }
 
-        let result = DecodePipeline::build(Cursor::new(mp3_bytes), sample_buffer, true);
+    #[test]
+    fn unverified_mp3_hint_uses_safe_probe_path() {
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let result = DecodePipeline::build(
+            Cursor::new(vec![0_u8; 32]),
+            sample_buffer,
+            detection(CodecHint::Mp3, CodecSource::ContentType),
+        );
 
-        // Either path is fine — we just want to confirm no panic and a result is returned.
         match result {
-            Ok(_) => {}                       // probe succeeded
-            Err(EngineError::Decode(_)) => {} // probe failed with decode error (expected)
-            Err(e) => panic!("Unexpected error type: {:?}", e),
+            Err(EngineError::Decode(message)) => assert!(message.contains("MP3 probe failed")),
+            Ok(_) => {}
+            Err(other) => panic!("unexpected error: {other:?}"),
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // visualizer_try_lock_non_blocking
-    //
-    // Build a decoder pipeline with a locked mutex; assert `DecodePipeline::build`
-    // returns without blocking.
-    // ---------------------------------------------------------------------------
     #[test]
-    fn visualizer_try_lock_non_blocking() {
-        // Lock the sample_buffer before calling build.
-        let sample_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+    fn visualizer_lock_contention_does_not_block_pipeline_construction() {
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let _guard = sample_buffer.lock().unwrap();
-
-        let data = vec![0xFF, 0xFB, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00];
         let sample_buffer_clone = Arc::clone(&sample_buffer);
 
-        // Run build in a separate thread so a deadlock would be detectable.
         let handle = std::thread::spawn(move || {
-            // This must return promptly; it should never block waiting for the mutex.
-            DecodePipeline::build(Cursor::new(data), sample_buffer_clone, true)
+            DecodePipeline::build(
+                Cursor::new(vec![0_u8; 32]),
+                sample_buffer_clone,
+                detection(CodecHint::Unknown, CodecSource::Unknown),
+            )
         });
 
-        // Allow generous timeout — build should complete almost instantly.
-        let result = match handle.join() {
-            Ok(r) => r,
-            Err(_) => panic!("DecodePipeline::build panicked"),
-        };
-
-        // The build may succeed or fail (short data), but it must NOT have blocked.
-        match result {
-            Ok(_) | Err(EngineError::Decode(_)) => {} // acceptable outcomes
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
+        assert!(handle.join().is_ok());
     }
 
-    // ---------------------------------------------------------------------------
-    // Property-based tests
-    // ---------------------------------------------------------------------------
+    #[test]
+    fn configured_timeouts_are_finite_and_nonzero() {
+        assert!(CONNECT_TIMEOUT > Duration::ZERO);
+        assert!(STREAM_READ_TIMEOUT > Duration::ZERO);
+        assert!(STREAM_READ_TIMEOUT <= CONNECT_TIMEOUT);
+    }
 
-    #[cfg(test)]
-    mod prop_tests {
-        use super::*;
-        use proptest::prelude::*;
+    proptest! {
+        #[test]
+        fn prebuffer_never_exceeds_maximum(
+            data in prop::collection::vec(any::<u8>(), 1..=8192),
+            max_bytes in 1usize..=4096,
+        ) {
+            let (tx, _rx) = mpsc::channel();
+            let mut reader = Cursor::new(data);
+            let result = fill_prebuffer(
+                &mut reader,
+                &request(Duration::from_secs(30), max_bytes, max_bytes),
+                &tx,
+                &active_generation(),
+            );
 
-        // ========================================================================
-        // Property 7.1: Prebuffer memory bound
-        //
-        // For any byte sequence and max_bytes, the prebuffer Vec len never exceeds max_bytes.
-        //
-        // Validates: Requirements 6.4
-        // ========================================================================
-
-        proptest! {
-            /// **Validates: Requirements 6.4**
-            #[test]
-            fn prop_prebuffer_memory_bounded(
-                data in prop::collection::vec(any::<u8>(), 0..=8192usize),
-                max_bytes in 1usize..=4096usize,
-            ) {
-                let min_bytes = max_bytes;
-                let fill_timeout = Duration::from_secs(60); // won't trigger
-
-                let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>();
-
-                let mut stream = Cursor::new(data);
-                let mut pre: Vec<u8> = Vec::new();
-                let start = Instant::now();
-                let mut chunk = vec![0u8; 1024];
-
-                loop {
-                    if pre.len() >= min_bytes {
-                        break;
-                    }
-                    if start.elapsed() > fill_timeout {
-                        break;
-                    }
-                    let remaining_cap = max_bytes.saturating_sub(pre.len());
-                    if remaining_cap == 0 {
-                        break;
-                    }
-                    let read_len = chunk.len().min(remaining_cap);
-                    match stream.read(&mut chunk[..read_len]) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            pre.extend_from_slice(&chunk[..n]);
-                            let percent = (pre.len() * 100)
-                                .checked_div(min_bytes)
-                                .unwrap_or(99)
-                                .min(99) as u8;
-                            let _ = event_tx.send(EngineEvent::Buffering {
-                                generation: 1,
-                                percent,
-                            });
-                        }
-                        Err(_) => break,
-                    }
-                }
-
-                // Core invariant: prebuffer never exceeds max_bytes.
-                prop_assert!(
-                    pre.len() <= max_bytes,
-                    "prebuffer len {} exceeds max_bytes {}",
-                    pre.len(),
-                    max_bytes
-                );
-            }
-        }
-
-        // ========================================================================
-        // Property 7.2: Visualizer passivity (non-blocking with contended mutex)
-        //
-        // For any scenario with contended mutex, the decode function completes
-        // without blocking.
-        //
-        // Validates: Requirements 13.2
-        // ========================================================================
-
-        proptest! {
-            /// **Validates: Requirements 13.2**
-            #[test]
-            fn prop_visualizer_passivity_contended_mutex(
-                data in prop::collection::vec(any::<u8>(), 0..=256usize),
-                is_mp3_hint in any::<bool>(),
-            ) {
-                let sample_buffer: Arc<Mutex<VecDeque<f32>>> =
-                    Arc::new(Mutex::new(VecDeque::new()));
-
-                // Hold the mutex lock to simulate contention.
-                let _guard = sample_buffer.lock().unwrap();
-                let sample_buffer_clone = Arc::clone(&sample_buffer);
-                let data_clone = data.clone();
-
-                // Spawn a thread to call DecodePipeline::build with the contended mutex.
-                let handle = std::thread::spawn(move || {
-                    DecodePipeline::build(
-                        Cursor::new(data_clone),
-                        sample_buffer_clone,
-                        is_mp3_hint,
-                    )
-                });
-
-                // build must complete without blocking.
-                let result = handle.join();
-                prop_assert!(result.is_ok(), "DecodePipeline::build panicked or deadlocked");
-
-                // Result is either Ok or a Decode error.
-                match result.unwrap() {
-                    Ok(_) | Err(EngineError::Decode(_)) => {}
-                    Err(e) => prop_assert!(false, "Unexpected error variant: {:?}", e),
-                }
+            if let Ok(prebuffer) = result {
+                prop_assert!(prebuffer.len() <= max_bytes);
             }
         }
     }

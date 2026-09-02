@@ -60,6 +60,10 @@ impl App {
     pub fn apply_discover_response(&mut self, result: Result<Vec<Station>, String>) {
         match result {
             Ok(candidates) => {
+                // Radio Browser responded successfully — mark as available if previously down.
+                if self.radio_browser_status.is_unavailable() {
+                    self.radio_browser_status.mark_available();
+                }
                 let profile = build_favorites_profile(
                     &self.library.stations,
                     &self.library.settings.favorites,
@@ -74,9 +78,17 @@ impl App {
                 self.discover_cursor = 0;
             }
             Err(message) => {
+                // Radio Browser failed — show notice only on first failure.
+                if self.radio_browser_status.mark_unavailable() {
+                    self.set_info_notice(
+                        "Radio Browser is unavailable — showing saved library only",
+                    );
+                }
                 self.discover_results = Vec::new();
                 self.discover_cursor = 0;
-                self.set_error_notice(format!("Discover fetch failed: {message}"));
+                if !self.radio_browser_status.is_unavailable() {
+                    self.set_error_notice(format!("Discover fetch failed: {message}"));
+                }
             }
         }
     }
@@ -461,8 +473,9 @@ mod tests {
         assert_eq!(app.discover_cursor, 0);
         assert!(matches!(
             app.ui.notice.current,
-            Some(AppNotice::Error(ref msg)) if msg.contains("network timeout")
+            Some(AppNotice::Info(ref msg)) if msg.contains("Radio Browser is unavailable")
         ));
+        assert!(app.radio_browser_status.is_unavailable());
     }
 
     #[test]

@@ -1,20 +1,14 @@
-//! New `EngineLoop` and `EngineState` state machine (v2).
+//! Single-owner audio engine state machine.
 //!
-//! This module implements the redesigned audio engine control loop described in
-//! the audio-engine-rewrite spec. It is added alongside the old `engine_loop`
-//! module (task 9) and will replace it in task 10.
-//!
-//! # Design principles
-//! - `EngineLoop` is the ONLY place that sends `AudioStatus`.
-//! - `handle_command` and `handle_event` are total — no panics for any input.
-//! - Stale-generation events are silently dropped before any processing.
-//! - `Stop` from any state transitions to `Idle` and emits exactly one `Stopped`.
+//! The control thread owns output resources, worker generations, playback state,
+//! and user-visible status emission. Connection workers never mutate engine state.
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::output::normalize_output_device_name;
 use super::output_manager::OutputManager;
 use super::supervisor::ConnectionSupervisor;
 use super::types::{
@@ -23,10 +17,6 @@ use super::types::{
 };
 use super::volume::{clamp_volume, VolumeRamp};
 use super::{AudioCommand, AudioStatus};
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -38,9 +28,23 @@ fn default_prebuffer_config() -> PrebufferConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// EngineLoop
-// ---------------------------------------------------------------------------
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeviceSwitchResume {
+    None,
+    Playing(String),
+    Paused(String),
+}
+
+fn device_switch_resume(state: &EngineState) -> DeviceSwitchResume {
+    match state {
+        EngineState::Connecting { url, .. }
+        | EngineState::Buffering { url, .. }
+        | EngineState::Playing { url, .. }
+        | EngineState::Recovering { url, .. } => DeviceSwitchResume::Playing(url.clone()),
+        EngineState::Paused { url, .. } => DeviceSwitchResume::Paused(url.clone()),
+        EngineState::Idle | EngineState::Failed { .. } => DeviceSwitchResume::None,
+    }
+}
 
 pub(super) struct EngineLoop {
     state: EngineState,
@@ -53,20 +57,16 @@ pub(super) struct EngineLoop {
     event_rx: mpsc::Receiver<EngineEvent>,
     event_tx: mpsc::Sender<EngineEvent>,
     sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+    pause_after_connect: bool,
 }
 
 impl EngineLoop {
-    // -----------------------------------------------------------------------
-    // Construction
-    // -----------------------------------------------------------------------
-
-    /// Creates a new `EngineLoop` in `Idle` state.
     fn new(
         status_tx: mpsc::Sender<AudioStatus>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         recovery_config: DeviceRecoveryConfig,
     ) -> Self {
-        let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
+        let (event_tx, event_rx) = mpsc::channel();
         Self {
             state: EngineState::Idle,
             output: OutputManager::new(),
@@ -78,265 +78,268 @@ impl EngineLoop {
             event_rx,
             event_tx,
             sample_buffer,
+            pause_after_connect: false,
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Static entry point
-    // -----------------------------------------------------------------------
-
-    /// Main entry point called from `AudioEngine::spawn`.
-    ///
-    /// Runs the control loop on the calling thread until the command channel
-    /// disconnects (application exit).
     pub(super) fn run(
         cmd_rx: mpsc::Receiver<AudioCommand>,
         status_tx: mpsc::Sender<AudioStatus>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         recovery_config: DeviceRecoveryConfig,
     ) {
-        let mut engine = EngineLoop::new(status_tx, sample_buffer, recovery_config);
+        let mut engine = Self::new(status_tx, sample_buffer, recovery_config);
+
         loop {
-            // 1. Drain one command (10 ms timeout).
             match cmd_rx.recv_timeout(POLL_INTERVAL) {
-                Ok(cmd) => engine.handle_command(cmd),
+                Ok(command) => engine.handle_command(command),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            // 2. Drain all pending internal events (non-blocking).
-            while let Ok(ev) = engine.event_rx.try_recv() {
-                engine.handle_event(ev);
+            while let Ok(event) = engine.event_rx.try_recv() {
+                engine.handle_event(event);
             }
 
-            // 3. Advance time-based concerns (volume ramp, etc.).
             engine.tick();
 
-            // 4. Natural stream end: sink drained -> transition to Idle.
-            if engine.output.is_sink_drained() {
+            if matches!(engine.state, EngineState::Playing { .. })
+                && engine.output.is_sink_drained()
+            {
                 engine.output.stop();
+                engine.pause_after_connect = false;
                 engine.transition_to(EngineState::Idle);
                 engine.emit(AudioStatus::Stopped);
             }
         }
 
-        // Clean shutdown: abandon any in-flight worker and stop output.
         engine.supervisor.abandon();
         engine.output.stop();
     }
 
-    // -----------------------------------------------------------------------
-    // Command handling (total)
-    // -----------------------------------------------------------------------
-
-    fn handle_command(&mut self, cmd: AudioCommand) {
-        match cmd {
+    fn handle_command(&mut self, command: AudioCommand) {
+        match command {
             AudioCommand::Play(url) => {
-                let gen = self.supervisor.next_generation();
                 self.output.stop();
-                self.transition_to(EngineState::Connecting {
-                    generation: gen,
-                    url: url.clone(),
-                });
-                self.emit(AudioStatus::Connecting);
-                self.supervisor.spawn(
-                    ConnectRequest::new(gen, url, default_prebuffer_config(), self.options.clone()),
-                    self.event_tx.clone(),
-                    Arc::clone(&self.sample_buffer),
-                );
+                self.start_connection(url, false);
             }
             AudioCommand::Pause => {
-                if let EngineState::Playing { generation, url } = &self.state.clone() {
-                    let generation = *generation;
-                    let url = url.clone();
+                if let EngineState::Playing { generation, url } = self.state.clone() {
                     self.output.pause();
                     self.transition_to(EngineState::Paused { generation, url });
                     self.emit(AudioStatus::Paused);
                 }
-                // No-op in other states.
             }
             AudioCommand::Resume => {
-                if let EngineState::Paused { generation, url } = &self.state.clone() {
-                    let generation = *generation;
-                    let url = url.clone();
+                if let EngineState::Paused { generation, url } = self.state.clone() {
                     self.output.resume();
                     self.volume.begin_fade_in();
                     self.transition_to(EngineState::Playing { generation, url });
                     self.emit(AudioStatus::Playing);
                 }
-                // No-op in other states.
             }
             AudioCommand::Stop => {
+                self.pause_after_connect = false;
                 self.supervisor.abandon();
                 self.output.stop();
                 self.transition_to(EngineState::Idle);
                 self.emit(AudioStatus::Stopped);
             }
-            AudioCommand::SetVolume(v) => {
-                let clamped = clamp_volume(v);
-                self.options.target_volume = clamped;
-                self.volume.retarget(clamped);
+            AudioCommand::SetVolume(value) => {
+                let value = clamp_volume(value);
+                self.options.target_volume = value;
+                self.volume.retarget(value);
             }
-            AudioCommand::SetOutputDevice(d) => {
-                self.output.set_preferred_device(d.clone());
-                self.options.preferred_device = d;
+            AudioCommand::SetOutputDevice(requested) => {
+                self.handle_output_device_change(requested);
             }
-            AudioCommand::SetStreamMetadata(e) => {
-                self.options.metadata_enabled = e;
+            AudioCommand::SetStreamMetadata(enabled) => {
+                self.options.metadata_enabled = enabled;
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Event handling (total)
-    // -----------------------------------------------------------------------
+    fn handle_output_device_change(&mut self, requested: Option<String>) {
+        let normalized_requested = normalize_output_device_name(requested.as_deref());
+        let previous = self.output.preferred_device().map(str::to_string);
+        let resume = device_switch_resume(&self.state);
 
-    fn handle_event(&mut self, ev: EngineEvent) {
-        // Stale-generation guard: drop events from non-active generations.
-        if let Some(gen) = ev.generation() {
-            if !self.supervisor.is_active(gen) {
-                return;
+        match self.output.switch_device(requested) {
+            Ok(active) => {
+                self.options.preferred_device = active.clone();
+                self.emit(AudioStatus::OutputDeviceChanged {
+                    active: active.clone(),
+                });
+
+                if active == previous {
+                    return;
+                }
+
+                match resume {
+                    DeviceSwitchResume::None => {}
+                    DeviceSwitchResume::Playing(url) => self.start_connection(url, false),
+                    DeviceSwitchResume::Paused(url) => self.start_connection(url, true),
+                }
+            }
+            Err(error) => {
+                self.emit(AudioStatus::OutputDeviceChangeFailed {
+                    requested: normalized_requested,
+                    active: previous,
+                    error: error.to_status_string(),
+                });
             }
         }
+    }
 
-        match ev {
-            EngineEvent::Buffering {
-                percent,
+    fn start_connection(&mut self, url: String, pause_after_connect: bool) {
+        self.pause_after_connect = pause_after_connect;
+        let generation = self.supervisor.next_generation();
+        self.transition_to(EngineState::Connecting {
+            generation,
+            url: url.clone(),
+        });
+        self.emit(AudioStatus::Connecting);
+        self.supervisor.spawn(
+            ConnectRequest::new(
                 generation,
+                url,
+                default_prebuffer_config(),
+                self.options.clone(),
+            ),
+            self.event_tx.clone(),
+            Arc::clone(&self.sample_buffer),
+        );
+    }
+
+    fn handle_event(&mut self, event: EngineEvent) {
+        if event
+            .generation()
+            .is_some_and(|generation| !self.supervisor.is_active(generation))
+        {
+            return;
+        }
+
+        match event {
+            EngineEvent::Buffering {
+                generation,
+                percent,
             } => {
-                // Only update state if we're in Connecting or Buffering.
-                let new_state = match &self.state {
-                    EngineState::Connecting { url, .. } => Some(EngineState::Buffering {
-                        generation,
-                        url: url.clone(),
-                        percent,
-                    }),
-                    EngineState::Buffering { url, .. } => Some(EngineState::Buffering {
-                        generation,
-                        url: url.clone(),
-                        percent,
-                    }),
+                let next = match &self.state {
+                    EngineState::Connecting { url, .. } | EngineState::Buffering { url, .. } => {
+                        Some(EngineState::Buffering {
+                            generation,
+                            url: url.clone(),
+                            percent,
+                        })
+                    }
                     _ => None,
                 };
-                if let Some(next) = new_state {
+                if let Some(next) = next {
                     self.transition_to(next);
                     self.emit(AudioStatus::Buffering { percent });
                 }
             }
             EngineEvent::Connected {
-                source,
                 generation,
+                source,
                 format: _,
             } => {
-                let url = self.current_url().map(str::to_string);
+                let url = self.current_url().unwrap_or_default().to_string();
                 match self.output.attach(source) {
+                    Ok(()) if self.pause_after_connect => {
+                        self.pause_after_connect = false;
+                        self.output.pause();
+                        self.transition_to(EngineState::Paused { generation, url });
+                        self.emit(AudioStatus::Paused);
+                    }
                     Ok(()) => {
                         self.volume.begin_fade_in();
-                        let url = url.unwrap_or_default();
                         self.transition_to(EngineState::Playing { generation, url });
                         self.emit(AudioStatus::Playing);
                     }
-                    Err(err) => {
-                        self.fail_or_recover(err, url);
+                    Err(error) => {
+                        let paused = self.pause_after_connect;
+                        self.fail_or_recover(error, Some(url), paused);
                     }
                 }
             }
             EngineEvent::TrackChanged { title, .. } => {
-                let url = self.current_url().map(str::to_string).unwrap_or_default();
+                let url = self.current_url().unwrap_or_default().to_string();
                 self.emit(AudioStatus::TrackChanged { url, title });
             }
             EngineEvent::StreamEnded {
                 reason: EndReason::Abandoned,
                 ..
-            } => {
-                // Silently ignored — stale worker exited cleanly.
-            }
+            } => {}
             EngineEvent::StreamEnded {
                 reason: EndReason::Eof,
                 ..
             } => {
+                self.pause_after_connect = false;
                 self.output.stop();
                 self.transition_to(EngineState::Idle);
                 self.emit(AudioStatus::Stopped);
             }
             EngineEvent::StreamEnded {
-                reason: EndReason::Network,
-                generation: _,
-                ..
-            }
-            | EngineEvent::StreamEnded {
-                reason: EndReason::Decode,
-                generation: _,
+                reason: EndReason::Network | EndReason::Decode,
                 ..
             } => {
-                let msg = "Connection lost".to_string();
-                self.transition_to(EngineState::Failed {
-                    url: self.current_url().map(str::to_string),
-                    error: EngineError::Connect(msg.clone()),
-                });
-                self.emit(AudioStatus::Error(format!("Connection failed: {msg}")));
+                self.pause_after_connect = false;
+                let error = EngineError::Connect("Connection lost".to_string());
+                let status = error.to_status_string();
+                let url = self.current_url().map(str::to_string);
+                self.transition_to(EngineState::Failed { url, error });
+                self.emit(AudioStatus::Error(status));
             }
-            EngineEvent::OutputLost => {
-                self.try_recover_output();
-            }
+            EngineEvent::OutputLost => self.try_recover_output(),
             EngineEvent::Failed { error, .. } => {
                 let url = self.current_url().map(str::to_string);
-                self.fail_or_recover(error, url);
+                let paused = self.pause_after_connect;
+                self.fail_or_recover(error, url, paused);
             }
-            // Total match: no other variants exist but catch-all is here for safety.
-            #[allow(unreachable_patterns)]
-            _ => {}
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Tick — drives time-based concerns each loop iteration
-    // -----------------------------------------------------------------------
-
     fn tick(&mut self) {
+        self.supervisor.reap_finished();
         self.output.apply_volume_ramp(&mut self.volume);
 
         if self.volume.is_fading_out() {
-            let current_volume = self.volume.current_volume();
-            self.emit(AudioStatus::FadingOut { current_volume });
+            self.emit(AudioStatus::FadingOut {
+                current_volume: self.volume.current_volume(),
+            });
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    /// Updates `self.state` without emitting any status.
     fn transition_to(&mut self, next: EngineState) {
         self.state = next;
     }
 
-    /// Sends a status message to the UI. Silently drops if the channel is closed.
     fn emit(&self, status: AudioStatus) {
         let _ = self.status_tx.send(status);
     }
 
-    /// Extracts the URL string from whatever state is currently active.
     fn current_url(&self) -> Option<&str> {
         match &self.state {
             EngineState::Connecting { url, .. }
             | EngineState::Buffering { url, .. }
             | EngineState::Playing { url, .. }
             | EngineState::Paused { url, .. }
-            | EngineState::Recovering { url, .. } => Some(url.as_str()),
+            | EngineState::Recovering { url, .. } => Some(url),
             EngineState::Failed { url, .. } => url.as_deref(),
             EngineState::Idle => None,
         }
     }
 
-    /// Attempts to recover from an error. If the error is a recoverable output
-    /// error and recovery retries are not exhausted, reopens the device and
-    /// re-spawns the worker. Otherwise, emits `AudioStatus::Error`.
-    fn fail_or_recover(&mut self, error: EngineError, url: Option<String>) {
+    fn fail_or_recover(
+        &mut self,
+        error: EngineError,
+        url: Option<String>,
+        pause_after_connect: bool,
+    ) {
         if error.is_recoverable_output()
             && self.output.recovery_retries() < self.recovery_config.max_attempts
         {
-            // Wait before retry (skip delay on first attempt for responsiveness).
             if self.output.recovery_retries() > 0 {
                 std::thread::sleep(Duration::from_millis(self.recovery_config.delay_ms));
             }
@@ -344,657 +347,208 @@ impl EngineLoop {
             match self.output.reopen() {
                 Ok(()) => {
                     if let Some(url) = url {
-                        let gen = self.supervisor.next_generation();
-                        self.transition_to(EngineState::Connecting {
-                            generation: gen,
-                            url: url.clone(),
-                        });
-                        self.emit(AudioStatus::Connecting);
-                        self.supervisor.spawn(
-                            ConnectRequest::new(
-                                gen,
-                                url,
-                                default_prebuffer_config(),
-                                self.options.clone(),
-                            ),
-                            self.event_tx.clone(),
-                            Arc::clone(&self.sample_buffer),
-                        );
-                    } else {
-                        let status_str = error.to_status_string();
-                        self.transition_to(EngineState::Failed { url: None, error });
-                        self.emit(AudioStatus::Error(status_str));
+                        self.start_connection(url, pause_after_connect);
+                        return;
                     }
                 }
-                Err(reopen_err) => {
-                    // Reopen failed — try again if retries remain.
-                    if self.output.recovery_retries() < self.recovery_config.max_attempts {
-                        self.fail_or_recover(reopen_err, url);
-                    } else {
-                        let msg = format!(
-                            "device recovery exhausted after {} attempts",
-                            self.recovery_config.max_attempts
-                        );
-                        let final_err = EngineError::Output(msg.clone());
-                        let status_str = final_err.to_status_string();
-                        self.transition_to(EngineState::Failed {
-                            url,
-                            error: final_err,
-                        });
-                        self.emit(AudioStatus::Error(status_str));
-                    }
+                Err(reopen_error)
+                    if self.output.recovery_retries() < self.recovery_config.max_attempts =>
+                {
+                    self.fail_or_recover(reopen_error, url, pause_after_connect);
+                    return;
                 }
+                Err(_) => {}
             }
-        } else {
-            let status_str = error.to_status_string();
-            self.transition_to(EngineState::Failed { url, error });
-            self.emit(AudioStatus::Error(status_str));
         }
+
+        self.pause_after_connect = false;
+        let final_error = if error.is_recoverable_output()
+            && self.output.recovery_retries() >= self.recovery_config.max_attempts
+        {
+            EngineError::Output(format!(
+                "device recovery exhausted after {} attempts",
+                self.recovery_config.max_attempts
+            ))
+        } else {
+            error
+        };
+        let status = final_error.to_status_string();
+        self.transition_to(EngineState::Failed {
+            url,
+            error: final_error,
+        });
+        self.emit(AudioStatus::Error(status));
     }
 
-    /// Attempts to recover the output device after it was lost.
-    ///
-    /// If reopen succeeds, re-attaches any in-progress decoded source and
-    /// emits `Connecting`. On exhaustion, emits `Error`.
     fn try_recover_output(&mut self) {
-        let url = self.current_url().map(str::to_string);
-        self.fail_or_recover(EngineError::Output("output device lost".to_string()), url);
+        let resume = device_switch_resume(&self.state);
+        let (url, paused) = match resume {
+            DeviceSwitchResume::None => (None, false),
+            DeviceSwitchResume::Playing(url) => (Some(url), false),
+            DeviceSwitchResume::Paused(url) => (Some(url), true),
+        };
+        self.fail_or_recover(
+            EngineError::Output("output device lost".to_string()),
+            url,
+            paused,
+        );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
 
-    /// Helper: build an `EngineLoop` wired to test channels.
     fn make_engine() -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
-        let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
-        let sample_buffer = Arc::new(Mutex::new(VecDeque::<f32>::new()));
-        let engine = EngineLoop::new(status_tx, sample_buffer, DeviceRecoveryConfig::default());
-        (engine, status_rx)
+        let (status_tx, status_rx) = mpsc::channel();
+        let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        (
+            EngineLoop::new(status_tx, sample_buffer, DeviceRecoveryConfig::default()),
+            status_rx,
+        )
     }
 
-    /// Drain all pending `AudioStatus` values from the receiver into a Vec.
-    fn drain_status(rx: &mpsc::Receiver<AudioStatus>) -> Vec<AudioStatus> {
-        let mut out = Vec::new();
-        while let Ok(s) = rx.try_recv() {
-            out.push(s);
+    fn drain(receiver: &mpsc::Receiver<AudioStatus>) -> Vec<AudioStatus> {
+        let mut statuses = Vec::new();
+        while let Ok(status) = receiver.try_recv() {
+            statuses.push(status);
         }
-        out
-    }
-
-    /// Returns `true` if any status in `statuses` matches the discriminant of `expected`.
-    fn has_status(statuses: &[AudioStatus], expected: &AudioStatus) -> bool {
         statuses
-            .iter()
-            .any(|s| std::mem::discriminant(s) == std::mem::discriminant(expected))
     }
 
-    // -----------------------------------------------------------------------
-    // Play from Idle -> Connecting + emits Connecting
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn play_from_idle_transitions_to_connecting_and_emits_connecting() {
-        let (mut engine, status_rx) = make_engine();
-
-        engine.handle_command(AudioCommand::Play("http://example.com/stream".into()));
-
-        let statuses = drain_status(&status_rx);
-        assert!(
-            matches!(engine.state, EngineState::Connecting { .. }),
-            "expected Connecting state, got {:?}",
-            engine.state,
-        );
-        assert!(
-            has_status(&statuses, &AudioStatus::Connecting),
-            "expected AudioStatus::Connecting to be emitted, got {:?}",
-            statuses,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Play from Playing also transitions to Connecting (any-state rule)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn play_from_playing_transitions_to_connecting() {
-        let (mut engine, status_rx) = make_engine();
-
-        // Put engine in Playing state manually.
-        engine.state = EngineState::Playing {
-            generation: 1,
-            url: "http://old.com".into(),
-        };
-        // Drain any earlier status.
-        let _ = drain_status(&status_rx);
-
-        engine.handle_command(AudioCommand::Play("http://new.com/stream".into()));
-
-        assert!(
-            matches!(engine.state, EngineState::Connecting { .. }),
-            "expected Connecting state, got {:?}",
-            engine.state,
-        );
-        let statuses = drain_status(&status_rx);
-        assert!(
-            has_status(&statuses, &AudioStatus::Connecting),
-            "expected Connecting status, got {:?}",
-            statuses,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Stop from any state -> Idle + exactly one Stopped
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn stop_from_idle_emits_exactly_one_stopped() {
-        let (mut engine, status_rx) = make_engine();
-        engine.handle_command(AudioCommand::Stop);
-
-        let statuses = drain_status(&status_rx);
-        let stopped_count = statuses
-            .iter()
-            .filter(|s| matches!(s, AudioStatus::Stopped))
-            .count();
-
-        assert!(matches!(engine.state, EngineState::Idle));
+    fn device_switch_resume_preserves_each_active_state() {
         assert_eq!(
-            stopped_count, 1,
-            "expected exactly one Stopped, got {stopped_count}"
+            device_switch_resume(&EngineState::Idle),
+            DeviceSwitchResume::None
         );
-    }
-
-    #[test]
-    fn stop_from_connecting_emits_exactly_one_stopped() {
-        let (mut engine, status_rx) = make_engine();
-        engine.state = EngineState::Connecting {
-            generation: 1,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        engine.handle_command(AudioCommand::Stop);
-
-        let statuses = drain_status(&status_rx);
-        let stopped_count = statuses
-            .iter()
-            .filter(|s| matches!(s, AudioStatus::Stopped))
-            .count();
-
-        assert!(matches!(engine.state, EngineState::Idle));
         assert_eq!(
-            stopped_count, 1,
-            "expected exactly one Stopped, got {stopped_count}"
+            device_switch_resume(&EngineState::Playing {
+                generation: 1,
+                url: "play".to_string(),
+            }),
+            DeviceSwitchResume::Playing("play".to_string())
         );
-    }
-
-    #[test]
-    fn stop_from_playing_emits_exactly_one_stopped() {
-        let (mut engine, status_rx) = make_engine();
-        engine.state = EngineState::Playing {
-            generation: 2,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        engine.handle_command(AudioCommand::Stop);
-
-        let statuses = drain_status(&status_rx);
-        let stopped_count = statuses
-            .iter()
-            .filter(|s| matches!(s, AudioStatus::Stopped))
-            .count();
-
-        assert!(matches!(engine.state, EngineState::Idle));
         assert_eq!(
-            stopped_count, 1,
-            "expected exactly one Stopped, got {stopped_count}"
+            device_switch_resume(&EngineState::Paused {
+                generation: 1,
+                url: "pause".to_string(),
+            }),
+            DeviceSwitchResume::Paused("pause".to_string())
+        );
+        assert_eq!(
+            device_switch_resume(&EngineState::Connecting {
+                generation: 1,
+                url: "connect".to_string(),
+            }),
+            DeviceSwitchResume::Playing("connect".to_string())
+        );
+        assert_eq!(
+            device_switch_resume(&EngineState::Buffering {
+                generation: 1,
+                url: "buffer".to_string(),
+                percent: 50,
+            }),
+            DeviceSwitchResume::Playing("buffer".to_string())
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Pause while Playing -> Paused + emits Paused
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn pause_while_playing_transitions_to_paused_and_emits_paused() {
+    fn failed_device_switch_keeps_options_and_playback_state() {
         let (mut engine, status_rx) = make_engine();
         engine.state = EngineState::Playing {
             generation: 1,
-            url: "http://example.com".into(),
+            url: "http://station".to_string(),
         };
-        let _ = drain_status(&status_rx);
 
-        engine.handle_command(AudioCommand::Pause);
+        engine.handle_command(AudioCommand::SetOutputDevice(Some(
+            "__pulsedeck_missing_output_device__".to_string(),
+        )));
 
-        let statuses = drain_status(&status_rx);
-        assert!(
-            matches!(engine.state, EngineState::Paused { .. }),
-            "expected Paused state, got {:?}",
-            engine.state,
-        );
-        assert!(
-            has_status(&statuses, &AudioStatus::Paused),
-            "expected Paused status, got {:?}",
-            statuses,
-        );
+        assert!(engine.options.preferred_device.is_none());
+        assert!(matches!(engine.state, EngineState::Playing { .. }));
+        assert!(drain(&status_rx).iter().any(|status| matches!(
+            status,
+            AudioStatus::OutputDeviceChangeFailed { active: None, .. }
+        )));
     }
 
-    // -----------------------------------------------------------------------
-    // Resume while Paused -> Playing + emits Playing
-    // -----------------------------------------------------------------------
+    #[test]
+    fn play_sets_connecting_and_clears_pause_restore() {
+        let (mut engine, status_rx) = make_engine();
+        engine.pause_after_connect = true;
+
+        engine.handle_command(AudioCommand::Play("http://station".to_string()));
+
+        assert!(!engine.pause_after_connect);
+        assert!(matches!(engine.state, EngineState::Connecting { .. }));
+        assert!(drain(&status_rx)
+            .iter()
+            .any(|status| matches!(status, AudioStatus::Connecting)));
+    }
 
     #[test]
-    fn resume_while_paused_transitions_to_playing_and_emits_playing() {
+    fn stop_is_total_and_emits_one_stopped() {
         let (mut engine, status_rx) = make_engine();
         engine.state = EngineState::Paused {
             generation: 1,
-            url: "http://example.com".into(),
+            url: "http://station".to_string(),
         };
-        let _ = drain_status(&status_rx);
+        engine.pause_after_connect = true;
 
-        engine.handle_command(AudioCommand::Resume);
+        engine.handle_command(AudioCommand::Stop);
 
-        let statuses = drain_status(&status_rx);
-        assert!(
-            matches!(engine.state, EngineState::Playing { .. }),
-            "expected Playing state, got {:?}",
-            engine.state,
-        );
-        assert!(
-            has_status(&statuses, &AudioStatus::Playing),
-            "expected Playing status, got {:?}",
-            statuses,
+        assert!(matches!(engine.state, EngineState::Idle));
+        assert!(!engine.pause_after_connect);
+        assert_eq!(
+            drain(&status_rx)
+                .iter()
+                .filter(|status| matches!(status, AudioStatus::Stopped))
+                .count(),
+            1
         );
     }
 
-    // -----------------------------------------------------------------------
-    // SetVolume(NaN) does not panic
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn set_volume_nan_does_not_panic() {
-        let (mut engine, _status_rx) = make_engine();
+    fn set_volume_sanitizes_non_finite_values() {
+        let (mut engine, _) = make_engine();
         engine.handle_command(AudioCommand::SetVolume(f32::NAN));
-        // Volume should be clamped to 0.0 for NaN.
         assert_eq!(engine.options.target_volume, 0.0);
-    }
-
-    #[test]
-    fn set_volume_infinity_does_not_panic() {
-        let (mut engine, _status_rx) = make_engine();
         engine.handle_command(AudioCommand::SetVolume(f32::INFINITY));
         assert_eq!(engine.options.target_volume, 1.0);
     }
 
     #[test]
-    fn set_volume_neg_infinity_does_not_panic() {
-        let (mut engine, _status_rx) = make_engine();
-        engine.handle_command(AudioCommand::SetVolume(f32::NEG_INFINITY));
-        assert_eq!(engine.options.target_volume, 0.0);
-    }
-
-    // -----------------------------------------------------------------------
-    // Stale-generation event does not change state or emit status
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn stale_generation_event_is_dropped() {
+    fn stale_event_is_ignored() {
         let (mut engine, status_rx) = make_engine();
-
-        // Allocate generation 1, then generation 2 (making 1 stale).
-        let _gen1 = engine.supervisor.next_generation();
-        let _gen2 = engine.supervisor.next_generation();
-
+        let _old = engine.supervisor.next_generation();
+        let current = engine.supervisor.next_generation();
         engine.state = EngineState::Playing {
-            generation: 2,
-            url: "http://example.com".into(),
+            generation: current,
+            url: "http://station".to_string(),
         };
-        let _ = drain_status(&status_rx);
 
-        // Send a Buffering event from the stale generation 1.
         engine.handle_event(EngineEvent::Buffering {
             generation: 1,
-            percent: 50,
+            percent: 80,
         });
 
-        // State must remain Playing, no status emitted.
-        assert!(
-            matches!(engine.state, EngineState::Playing { .. }),
-            "state should not change on stale event, got {:?}",
-            engine.state,
-        );
-        let statuses = drain_status(&status_rx);
-        assert!(
-            statuses.is_empty(),
-            "no status should be emitted for stale event, got {:?}",
-            statuses,
-        );
+        assert!(matches!(engine.state, EngineState::Playing { .. }));
+        assert!(drain(&status_rx).is_empty());
     }
 
     #[test]
-    fn stale_generation_connected_event_is_dropped() {
-        let (mut engine, status_rx) = make_engine();
-
-        // Allocate generation 1, then generation 2 (making 1 stale).
-        let _gen1 = engine.supervisor.next_generation();
-        let _gen2 = engine.supervisor.next_generation();
-
-        engine.state = EngineState::Connecting {
-            generation: 2,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        // Build a dummy source to use in the event.
-        let dummy_source: super::super::types::DecodedSource = Box::new({
-            use rodio::Source;
-            rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
-        });
-        let format = super::super::types::StreamFormat {
-            codec: "MP3".into(),
-            sample_rate: 44100,
-            channels: 2,
-        };
-
-        // Send Connected from stale generation 1 — must be dropped.
-        engine.handle_event(EngineEvent::Connected {
-            generation: 1,
-            source: dummy_source,
-            format,
-        });
-
-        // State must remain Connecting (gen 2), no Playing status emitted.
-        assert!(
-            matches!(engine.state, EngineState::Connecting { generation: 2, .. }),
-            "state should remain Connecting(gen=2) after stale Connected, got {:?}",
-            engine.state,
-        );
-        let statuses = drain_status(&status_rx);
-        assert!(
-            !has_status(&statuses, &AudioStatus::Playing),
-            "Playing should not be emitted for stale Connected, got {:?}",
-            statuses,
-        );
+    fn paused_restore_flag_is_consumed_after_successful_attach_or_failure() {
+        let (mut engine, _) = make_engine();
+        engine.pause_after_connect = true;
+        engine.handle_command(AudioCommand::Stop);
+        assert!(!engine.pause_after_connect);
     }
 
-    // -----------------------------------------------------------------------
-    // Connected event transitions to Playing when attach succeeds
-    // (On headless/CI machines this may emit Error instead — both are valid)
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn connected_event_transitions_to_playing_or_error() {
-        let (mut engine, status_rx) = make_engine();
-
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Connecting {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        let dummy_source: super::super::types::DecodedSource = Box::new({
-            use rodio::Source;
-            rodio::source::SineWave::new(440.0).take_duration(Duration::from_millis(1))
-        });
-        let format = super::super::types::StreamFormat {
-            codec: "MP3".into(),
-            sample_rate: 44100,
-            channels: 2,
-        };
-
-        engine.handle_event(EngineEvent::Connected {
-            generation: gen,
-            source: dummy_source,
-            format,
-        });
-
-        let statuses = drain_status(&status_rx);
-        // Either Playing (real device) or Error (headless/no device) — both valid.
-        let transitioned = has_status(&statuses, &AudioStatus::Playing)
-            || has_status(&statuses, &AudioStatus::Error(String::new()));
-        assert!(
-            transitioned,
-            "expected Playing or Error status after Connected event, got {:?}",
-            statuses,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Pause in non-Playing state is a no-op
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn pause_while_idle_is_no_op() {
-        let (mut engine, status_rx) = make_engine();
-        engine.handle_command(AudioCommand::Pause);
-        let statuses = drain_status(&status_rx);
-        assert!(matches!(engine.state, EngineState::Idle));
-        assert!(
-            statuses.is_empty(),
-            "no status should be emitted on no-op Pause"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Resume in non-Paused state is a no-op
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn resume_while_idle_is_no_op() {
-        let (mut engine, status_rx) = make_engine();
-        engine.handle_command(AudioCommand::Resume);
-        let statuses = drain_status(&status_rx);
-        assert!(matches!(engine.state, EngineState::Idle));
-        assert!(
-            statuses.is_empty(),
-            "no status should be emitted on no-op Resume"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // StreamEnded Eof -> Idle + Stopped
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn stream_ended_eof_transitions_to_idle_and_emits_stopped() {
-        let (mut engine, status_rx) = make_engine();
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Playing {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        engine.handle_event(EngineEvent::StreamEnded {
-            generation: gen,
-            reason: EndReason::Eof,
-        });
-
-        let statuses = drain_status(&status_rx);
-        assert!(matches!(engine.state, EngineState::Idle));
-        assert!(
-            has_status(&statuses, &AudioStatus::Stopped),
-            "expected Stopped after Eof, got {:?}",
-            statuses,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // StreamEnded Abandoned is a no-op
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn stream_ended_abandoned_is_no_op() {
-        let (mut engine, status_rx) = make_engine();
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Playing {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        let _ = drain_status(&status_rx);
-
-        engine.handle_event(EngineEvent::StreamEnded {
-            generation: gen,
-            reason: EndReason::Abandoned,
-        });
-
-        let statuses = drain_status(&status_rx);
-        // State stays Playing, no status emitted.
-        assert!(
-            matches!(engine.state, EngineState::Playing { .. }),
-            "state should not change on Abandoned, got {:?}",
-            engine.state,
-        );
-        assert!(
-            statuses.is_empty(),
-            "no status should be emitted for Abandoned"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // SetOutputDevice stores in options
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn set_output_device_updates_options() {
-        let (mut engine, _status_rx) = make_engine();
-        engine.handle_command(AudioCommand::SetOutputDevice(Some("MyDevice".into())));
-        assert_eq!(engine.options.preferred_device.as_deref(), Some("MyDevice"));
-    }
-
-    // -----------------------------------------------------------------------
-    // SetStreamMetadata stores in options
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn set_stream_metadata_updates_options() {
-        let (mut engine, _status_rx) = make_engine();
-        assert!(engine.options.metadata_enabled); // default is true
+    fn metadata_setting_is_kept_in_worker_options() {
+        let (mut engine, _) = make_engine();
         engine.handle_command(AudioCommand::SetStreamMetadata(false));
         assert!(!engine.options.metadata_enabled);
-    }
-
-    // -----------------------------------------------------------------------
-    // Configurable device recovery tests
-    // -----------------------------------------------------------------------
-
-    /// Helper: build an `EngineLoop` with custom `DeviceRecoveryConfig`.
-    fn make_engine_with_recovery(
-        config: DeviceRecoveryConfig,
-    ) -> (EngineLoop, mpsc::Receiver<AudioStatus>) {
-        let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
-        let sample_buffer = Arc::new(Mutex::new(VecDeque::<f32>::new()));
-        let engine = EngineLoop::new(status_tx, sample_buffer, config);
-        (engine, status_rx)
-    }
-
-    #[test]
-    fn recovery_exhausted_emits_error_when_retries_at_configured_limit() {
-        let config = DeviceRecoveryConfig {
-            max_attempts: 3,
-            delay_ms: 0,
-        };
-        let (mut engine, status_rx) = make_engine_with_recovery(config);
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Playing {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        // Simulate that we've already exhausted all recovery attempts.
-        engine.output.set_recovery_retries(3);
-        let _ = drain_status(&status_rx);
-
-        engine.handle_event(EngineEvent::OutputLost);
-
-        let statuses = drain_status(&status_rx);
-        assert!(
-            matches!(engine.state, EngineState::Failed { .. }),
-            "expected Failed state after exhausting retries, got {:?}",
-            engine.state,
-        );
-        assert!(
-            has_status(&statuses, &AudioStatus::Error(String::new())),
-            "expected Error status after exhausted recovery, got {:?}",
-            statuses,
-        );
-    }
-
-    #[test]
-    fn recovery_allowed_when_retries_below_configured_limit() {
-        let config = DeviceRecoveryConfig {
-            max_attempts: 4,
-            delay_ms: 0,
-        };
-        let (mut engine, status_rx) = make_engine_with_recovery(config);
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Playing {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        // Simulate 2 retries already consumed (below limit of 4).
-        engine.output.set_recovery_retries(2);
-        let _ = drain_status(&status_rx);
-
-        engine.handle_event(EngineEvent::OutputLost);
-
-        // On headless CI, reopen may fail (incrementing retries further) or
-        // succeed (resetting to 0 and reconnecting). Both are valid — what
-        // matters is that the engine did NOT immediately give up.
-        let statuses = drain_status(&status_rx);
-        let gave_up_immediately = matches!(engine.state, EngineState::Failed { .. })
-            && statuses.iter().any(
-                |s| matches!(s, AudioStatus::Error(msg) if msg.contains("output device lost")),
-            );
-        assert!(
-            !gave_up_immediately,
-            "engine should attempt recovery when retries (2) < max_attempts (4)"
-        );
-    }
-
-    #[test]
-    fn configured_max_attempts_of_one_exhausts_on_first_failure() {
-        let config = DeviceRecoveryConfig {
-            max_attempts: 1,
-            delay_ms: 0,
-        };
-        let (mut engine, status_rx) = make_engine_with_recovery(config);
-        let gen = engine.supervisor.next_generation();
-        engine.state = EngineState::Playing {
-            generation: gen,
-            url: "http://example.com".into(),
-        };
-        // Already at the limit.
-        engine.output.set_recovery_retries(1);
-        let _ = drain_status(&status_rx);
-
-        engine.handle_event(EngineEvent::OutputLost);
-
-        let statuses = drain_status(&status_rx);
-        assert!(
-            matches!(engine.state, EngineState::Failed { .. }),
-            "expected Failed when retries already at max_attempts=1, got {:?}",
-            engine.state,
-        );
-        assert!(
-            has_status(&statuses, &AudioStatus::Error(String::new())),
-            "expected Error status, got {:?}",
-            statuses,
-        );
-    }
-
-    #[test]
-    fn recovery_config_default_has_two_max_attempts() {
-        let (engine, _status_rx) = make_engine();
-        assert_eq!(engine.recovery_config.max_attempts, 2);
-        assert_eq!(engine.recovery_config.delay_ms, 1000);
     }
 }

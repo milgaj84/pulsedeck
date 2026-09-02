@@ -142,6 +142,12 @@ impl App {
         self.ui.tick_count += 1;
         self.playback.elapsed_timer.tick(delta);
         self.ui.volume_flash_remaining = self.ui.volume_flash_remaining.saturating_sub(delta);
+        self.ui
+            .overlay_animation
+            .advance(crate::app::animation::ANIMATION_STEP);
+        self.ui
+            .scroll_animation
+            .advance(crate::app::animation::ANIMATION_STEP);
         self.tick_notice();
         self.poll_audio_status();
         self.update_visualizer();
@@ -170,6 +176,10 @@ impl App {
         let count = self.visible_count();
         if count > 0 {
             self.ui.nav.selected = (self.ui.nav.selected + 1) % count;
+            debug_assert!(
+                self.ui.nav.selected < count,
+                "selected index out of bounds after next"
+            );
         }
     }
 
@@ -185,6 +195,10 @@ impl App {
             } else {
                 self.ui.nav.selected - 1
             };
+            debug_assert!(
+                self.ui.nav.selected < count,
+                "selected index out of bounds after prev"
+            );
         }
     }
 }

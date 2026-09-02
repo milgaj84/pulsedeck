@@ -271,26 +271,23 @@ impl Library {
             .any(|station| station_url_matches(&station.url, url))
     }
 
-    /// Save library to disk (best-effort).
+    /// Save the library without ever truncating the existing destination.
     pub fn save(&self) -> anyhow::Result<()> {
         let Some(ref path) = self.path else {
             return Ok(());
         };
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        ensure_library_target_is_safe_to_replace(path)?;
 
         let file = LibraryFile {
-            version: 1,
+            version: default_library_version(),
             stations: self.stations.clone(),
             settings: self.settings.clone(),
         };
 
-        let json = serde_json::to_string_pretty(&file)?;
-        fs::write(path, json)?;
+        let json = serde_json::to_vec_pretty(&file)?;
+        crate::persistence::atomic_write(path, &json)?;
 
         Ok(())
     }
 }
-

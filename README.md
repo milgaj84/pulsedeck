@@ -238,7 +238,7 @@ PulseDeck treats internet radio as a live stream, not a seekable file. The audio
 
 Codec support: MP3 (fast-path), AAC, OGG/Vorbis, Opus, FLAC, WAV via Symphonia probing. ICY metadata is stripped by a dedicated reader that provably never leaks metadata bytes into the decoder. The visualizer is a passive tap that never blocks audio.
 
-If something goes wrong, press `d` for the Playback Doctor — it shows diagnostics and context-aware recovery hints.
+If something goes wrong, press `d` for the Playback Doctor — it shows diagnostics, context-aware recovery hints, and numbered one-click fixes you can execute directly.
 
 </details>
 
@@ -246,7 +246,7 @@ If something goes wrong, press `d` for the Playback Doctor — it shows diagnost
 <summary>Code quality</summary>
 
 - Zero clippy warnings (`cargo clippy -- -D warnings`)
-- 1350 tests: unit, state-transition, and property-based (proptest)
+- 1415 tests: unit, state-transition, and property-based (proptest)
 - Strict architecture: business logic has zero UI dependencies
 - Trait-abstracted I/O (audio, network, notifications) for testability
 - CI: fmt, clippy, test, release build, dependency audit

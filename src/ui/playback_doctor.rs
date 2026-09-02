@@ -1,4 +1,5 @@
 use crate::app::doctor_suggestions::suggest_actions;
+use crate::app::recovery_actions::{build_recovery_actions, ActionStatus};
 use crate::app::{DecoderState, PlaybackState};
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
@@ -90,6 +91,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
     lines.extend(exclusion_diagnostics_lines(app));
     lines.extend(suggestion_lines(app));
+    lines.extend(recovery_action_lines(app));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
@@ -181,6 +183,53 @@ fn suggestion_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
             format!("  💡 {hint}"),
             theme::text(),
         )));
+    }
+
+    lines
+}
+
+fn recovery_action_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
+    let suggestions = suggest_actions(app.diagnostics);
+    if suggestions.is_empty() {
+        return vec![];
+    }
+
+    // Determine if alternative output devices exist (simplified: assume true if output != N/A)
+    let has_alternatives =
+        app.diagnostics.output_device != "N/A" && !app.diagnostics.output_device.is_empty();
+
+    let suggestion_strs: Vec<&str> = suggestions.iter().map(|s| s.as_ref()).collect();
+    let actions = build_recovery_actions(&suggestion_strs, has_alternatives);
+
+    if actions.is_empty() {
+        return vec![];
+    }
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "── Recovery Actions (press number) ──",
+            theme::cyan(),
+        )),
+    ];
+
+    for action in &actions {
+        let status_str = match &action.status {
+            ActionStatus::Ready => "".to_string(),
+            ActionStatus::InProgress => " ⏳".to_string(),
+            ActionStatus::Success => " ✓".to_string(),
+            ActionStatus::Failed(msg) => format!(" ✗ {msg}"),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  [{}] ", action.number),
+                Style::default()
+                    .fg(theme::highlight())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(action.label.clone(), theme::text()),
+            Span::styled(status_str, theme::dim()),
+        ]));
     }
 
     lines

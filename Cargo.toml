@@ -1,6 +1,6 @@
 [package]
 name = "pulsedeck"
-version = "0.10.4"
+version = "0.11.3"
 edition = "2021"
 description = "A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback"
 license = "MIT"
@@ -37,7 +37,7 @@ serde_json = "1"
 toml = "0.8"
 
 # Error handling
-anyhow = "1"
+anyhow = "1.0.103"
 
 # Config directories
 dirs = "6"

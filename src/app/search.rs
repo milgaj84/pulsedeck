@@ -288,6 +288,10 @@ impl App {
 
         match result {
             Ok(results) => {
+                // Radio Browser responded successfully — mark as available if previously down.
+                if self.radio_browser_status.is_unavailable() {
+                    self.radio_browser_status.mark_available();
+                }
                 self.search.results = results;
                 if self.search.results.is_empty() {
                     self.search.status = SearchStatus::Empty { query };
@@ -296,6 +300,12 @@ impl App {
                 }
             }
             Err(message) => {
+                // Radio Browser failed — show notice only on first failure.
+                if self.radio_browser_status.mark_unavailable() {
+                    self.set_info_notice(
+                        "Radio Browser is unavailable — showing saved library only",
+                    );
+                }
                 self.search.results.clear();
                 self.search.status = SearchStatus::Error { query, message };
             }
