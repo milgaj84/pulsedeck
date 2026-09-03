@@ -207,10 +207,7 @@ fn recovery_action_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
 
     let mut lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            "── Recovery Actions (press number) ──",
-            theme::cyan(),
-        )),
+        Line::from(Span::styled("── Suggested Fixes ──", theme::cyan())),
     ];
 
     for action in &actions {

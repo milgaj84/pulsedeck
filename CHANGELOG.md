@@ -4,7 +4,29 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.11.3] - Unreleased
+## [Unreleased]
+
+### Changed
+- **Settings consolidated to `pulsedeck.toml` as single source of truth**:
+  - User preferences (theme, notifications, autoplay, output device, save_history, stream_metadata) no longer live in the `Settings` struct inside `library.json`.
+  - `Settings` now only stores library-persistent data: `last_played_url`, `station_slots`, and `favorites`.
+  - Removed the dual-write path where every setting change wrote to BOTH `pulsedeck.toml` AND `library.json`.
+  - This eliminates the class of dual-write bugs that caused the theme persistence issue fixed in 0.11.2.
+  - The `migrate_from_library_json` function still migrates old settings into `pulsedeck.toml` for backward compatibility.
+
+### Fixed
+- **Stale `library.settings` references removed**: All app, UI, and test code now reads preferences from `self.config.*` / `app.config.*`.
+- **Hardened discover fallback**: Replaced `pending_fallback_tag.take().unwrap()` with a safe `if let` pattern to prevent a potential panic.
+
+### Internal
+- `Settings` struct in `src/favorites/mod.rs` trimmed to `last_played_url`, `station_slots`, `favorites`.
+- `main.rs` now sets `ThemeName::Retrowave` as default before `App::new`; the active theme is applied from config during app construction.
+- `apply_config_to_settings` no longer writes config values back into `library.settings`.
+- Removed unused `default_true()` and `default_theme()` helper functions from `src/favorites/mod.rs`.
+
+---
+
+## [1.0.0] - 2026-09-03
 
 ### Added
 - **Crash-resistant atomic file persistence (`src/persistence.rs`)**:
@@ -18,8 +40,8 @@ All notable changes to the PulseDeck project will be documented in this file.
 - **Reliable codec classification and bounded stream probing (`src/audio/codec.rs`)**:
   - Multi-tier stream format classifier based on Content-Type headers, URL file extensions, and byte signature heuristics for MP3, AAC, OGG/Vorbis, Opus, FLAC, and WAV.
   - Conservative, read-bounded probing prevents decoder deadlocks on non-audio or malformed streams.
-- **Doctor overlay numbered quick-fixes**:
-  - Playback Doctor (`d`) displays numbered, one-click recovery actions directly executable via number keys (e.g., reconnecting, resetting buffers, clearing failed state).
+- **Playback Doctor suggested fixes**:
+  - Playback Doctor (`d`) displays numbered, one-click recovery action suggestions (e.g., switch output device, retry connection). The actions are advisory for now; direct execution via number keys is a planned enhancement.
 
 ### Improved
 - **persist_config_change error reporting**: Now logs `[persist] config_dir is None` to stderr instead of silently returning when config directory is unavailable.
@@ -36,7 +58,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 - All `#[allow(unused)]` annotations on module declarations in `app.rs` — replaced with proper `pub(crate)` visibility.
 
 ### Internal
-- 1446 tests across unit, state-transition, property-based, and scenario integration tests (1442 passed, 4 hardware-ignored, zero clippy warnings).
+- 1441 tests across unit, state-transition, property-based, and scenario integration tests (1436 passed, 5 hardware-ignored, zero clippy warnings).
 - New property tests: ThemeName key round-trip (validates validate_theme accepts key format), UiState JSON round-trip (volume/mute/layout/visualizer/display survive serialize→deserialize).
 - New integration tests: volume/mute persistence, station slot assign+play, stream_metadata toggle persistence, live output switching fallback.
 - Module-level doc comments added to: animation, breadcrumb, audio_check, radio_status, recovery_actions, visualizer/gradient, layout.
@@ -46,7 +68,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.11.2] - Unreleased
+### 0.11.2 (pre-release work, folded into 1.0.0)
 
 ### Fixed
 - **Theme persistence bug**: The TOML parser now accepts both key format ("CatppuccinMocha") and label format ("Catppuccin Mocha") for theme validation. Previously, `save_config` would abort because the round-trip validation rejected the key format that `apply_theme_setting` was writing — silently failing to persist theme changes.
@@ -72,7 +94,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.11.1] - Unreleased
+### 0.11.1 (pre-release work, folded into 1.0.0)
 
 ### Fixed
 - **Theme persistence fallback**: Theme changes now also mark the library dirty, so the theme persists to `library.json` as a fallback when `pulsedeck.toml` cannot be written (e.g., missing config directory).
@@ -90,7 +112,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [0.11.0] - Unreleased
+### 0.11.0 (pre-release work, folded into 1.0.0)
 
 ### Added
 - **Gradient multi-color visualizer**: Spectrum bars now display a per-bar color gradient based on amplitude — green (bottom) → cyan (middle) → magenta (top). Colors are sourced from the active theme palette. Oscilloscope modes remain single-color.
@@ -104,7 +126,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 - **Rounded borders everywhere**: All panels and overlays already use `BorderType::Rounded` consistently — verified across all 14 bordered UI elements.
 - **Better spacing and padding**: Station list and Signal Deck panels now have 1-character horizontal inner margins. Content no longer hugs borders.
 - **Subtle dim/highlight selection states**: Selected list items use bold + highlight foreground + bg_highlight background. Non-selected items are dimmed with `text_dim` color and alternating even/odd row backgrounds for visual rhythm.
-- **Smoother overlay animations**: Overlays fade in over 2 render frames (200ms) via an `AnimationState` interpolator. Scroll transitions use the same system. No fade-out on close (instant dismiss). True-color detection skips interpolation on terminals without support.
+- **Overlay animation state**: Overlay open/close animation is tracked via an `AnimationState` interpolator. The visual fade-in application is a pending enhancement — overlays currently open instantly.
 
 ### Internal
 - Version bumped to 0.11.0.

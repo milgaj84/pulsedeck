@@ -52,12 +52,12 @@ fn test_resolve_parent_genre_case_insensitive() {
 }
 
 #[test]
-fn settings_default_uses_default_audio_output() {
-    assert_eq!(Settings::default().output_device_name, None);
+fn settings_default_has_no_last_played_url() {
+    assert_eq!(Settings::default().last_played_url, None);
 }
 
 #[test]
-fn settings_deserializes_missing_audio_output_as_default() {
+fn settings_deserializes_missing_preference_fields_as_defaults() {
     let json = r#"{
             "notifications_enabled": true,
             "autoplay_last": false,
@@ -66,7 +66,9 @@ fn settings_deserializes_missing_audio_output_as_default() {
 
     let settings: Settings = serde_json::from_str(json).unwrap();
 
-    assert_eq!(settings.output_device_name, None);
+    assert_eq!(settings.last_played_url, None);
+    assert_eq!(settings.station_slots.get(1), None);
+    assert!(settings.favorites.is_empty());
 }
 
 #[test]
@@ -103,7 +105,7 @@ fn newer_library_version_loads_with_warning() {
 
     assert_eq!(stations.len(), 1);
     assert_eq!(stations[0].name, "Future FM");
-    assert_eq!(settings.theme, "Terminal");
+    assert_eq!(settings.last_played_url, None);
     assert!(warning
         .as_deref()
         .is_some_and(|message| message.contains("version 2")));

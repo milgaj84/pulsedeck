@@ -7,6 +7,7 @@ use crate::app::{
     NoticeState, Overlays, PaletteCommand, PlaybackDiagnostics, PlaybackState, PlaybackView,
     SearchState, SettingRow, SleepTimer, VisualizerMode,
 };
+use crate::config_toml::AppConfig;
 use crate::elapsed_format::format_elapsed;
 use crate::favorites::Library;
 use crate::favorites_set::FavoritesSet;
@@ -16,6 +17,7 @@ use crate::radio::Station;
 use crate::recommend::ScoredStation;
 
 pub struct UiModel<'a> {
+    pub config: &'a AppConfig,
     pub library: &'a Library,
     pub nav: &'a Navigation,
     pub search: &'a SearchState,
@@ -114,6 +116,7 @@ impl<'a> From<&'a App> for UiModel<'a> {
         );
 
         Self {
+            config: &app.config,
             library: &app.library,
             nav: &app.ui.nav,
             search: &app.search,

@@ -164,35 +164,48 @@ fn load_search_history(config_dir: &Option<PathBuf>) -> SearchHistoryRing {
 
 impl App {
     pub fn new(library: Library) -> Self {
-        Self::from_parts(AppParts::load(library))
+        #[cfg_attr(test, allow(unused_mut))]
+        let mut app = Self::from_parts(AppParts::load(library));
+
+        // Startup audio self-check (production only — test paths use mocks and
+        // must not enumerate real hardware devices).
+        #[cfg(not(test))]
+        {
+            let devices = crate::audio::list_output_device_names();
+            let result = super::audio_check::check_audio_devices(&devices);
+            if result == super::audio_check::AudioCheckResult::NoDeviceFound
+                && app.ui.notice.current.is_none()
+            {
+                app.set_info_notice("No audio output device found — playback may not work");
+            }
+            app.audio_check_result = Some(result);
+        }
+
+        app
     }
 
     /// Construct the App from pre-loaded parts.
     ///
-    /// # Startup Sequence & Override Precedence
+    /// # Startup Sequence & Precedence
     ///
-    /// 1. **Library** loaded from `library.json` (stations, favorites, settings.theme)
+    /// 1. **Library** loaded from `library.json` (stations, favorites, last_played_url)
     /// 2. **UiState** loaded from `ui-state.json` (volume, mute, layout, visualizer, display mode)
-    /// 3. **Config (TOML)** loaded from `pulsedeck.toml` (overrides library settings when file exists)
+    /// 3. **Config (TOML)** loaded from `pulsedeck.toml` (single source of truth for preferences)
     /// 4. **Keybindings** loaded from `keybindings.json` (custom overrides defaults)
     /// 5. **Search history** loaded from `search_history.json`
     /// 6. **Watchers** created for config and keybinding hot-reload
     ///
-    /// ## Override rules:
-    /// - If `pulsedeck.toml` exists: TOML values override library.json settings (theme, volume, etc.)
-    /// - If `pulsedeck.toml` does NOT exist: library.json settings are used as-is
-    /// - `main.rs` sets theme from library FIRST, then `apply_config_to_settings` re-sets from TOML
-    /// - UiState (volume, layout) is independent of TOML config
+    /// ## Precedence:
+    /// - `pulsedeck.toml` is the canonical store for all user preferences.
+    /// - `library.json` stores only library data (stations, favorites, slots, last_played_url).
+    /// - `main.rs` sets a default theme before `App::new`; `apply_config_to_settings` applies the TOML theme.
+    /// - UiState (volume, layout) is independent of TOML config.
     pub(super) fn from_parts(parts: AppParts) -> Self {
         let config = parts.config;
         let config_preserved = parts.config_preserved;
         let config_loaded_from_file = parts.config_loaded_from_file;
 
-        let output_device = config.audio.output_device.as_deref().or(parts
-            .library
-            .settings
-            .output_device_name
-            .as_deref());
+        let output_device = config.audio.output_device.as_deref();
         let diagnostics_output_device = crate::audio::output_device_display_name(output_device);
         let diagnostics_metadata_enabled = config.ui.stream_metadata_enabled;
         let ui = UiRuntimeState::from_ui_state(&parts.ui_state);
@@ -312,7 +325,7 @@ impl App {
     }
 
     fn apply_startup_autoplay(&mut self) {
-        if !self.library.settings.autoplay_last {
+        if !self.config.playback.autoplay_last {
             return;
         }
 
@@ -343,16 +356,8 @@ impl App {
         }
     }
 
-    /// Apply loaded TOML config values to library settings for backward compat.
+    /// Apply loaded TOML config values to the active UI theme.
     fn apply_config_to_settings(&mut self) {
-        self.library.settings.theme = self.config.ui.theme.clone();
-        self.library.settings.notifications_enabled = self.config.ui.notifications_enabled;
-        self.library.settings.stream_metadata_enabled = self.config.ui.stream_metadata_enabled;
-        self.library.settings.autoplay_last = self.config.playback.autoplay_last;
-        self.library.settings.save_history = self.config.playback.save_history;
-        if self.config.audio.output_device.is_some() {
-            self.library.settings.output_device_name = self.config.audio.output_device.clone();
-        }
         let theme = crate::theme_name::ThemeName::from_key(&self.config.ui.theme);
         crate::ui::theme::set_active(theme);
     }
@@ -460,10 +465,11 @@ pub(crate) mod tests {
             "US",
             128,
         )]);
-        library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://stream".to_string());
 
-        let app = App::from_parts(test_parts(library));
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
 
         assert_eq!(app.ui.nav.selected, 0);
         assert_eq!(
@@ -482,10 +488,11 @@ pub(crate) mod tests {
         station.codec = "AAC".to_string();
 
         let mut library = Library::in_memory(vec![station]);
-        library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://aac".to_string());
 
-        let app = App::from_parts(test_parts(library));
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
 
         assert_eq!(app.playback.view.playing_url.as_deref(), Some("http://aac"));
     }
@@ -496,10 +503,11 @@ pub(crate) mod tests {
         station.codec = "HLS".to_string();
 
         let mut library = Library::in_memory(vec![station]);
-        library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://hls".to_string());
 
-        let app = App::from_parts(test_parts(library));
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
 
         assert_eq!(app.playback.view.playing_url, None);
         assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
@@ -511,10 +519,11 @@ pub(crate) mod tests {
         station.codec = String::new();
 
         let mut library = Library::in_memory(vec![station]);
-        library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://mystery".to_string());
 
-        let app = App::from_parts(test_parts(library));
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
 
         assert_eq!(
             app.playback.view.playing_url.as_deref(),
@@ -525,10 +534,11 @@ pub(crate) mod tests {
     #[test]
     fn startup_autoplay_allows_url_not_in_library() {
         let mut library = Library::in_memory(vec![]);
-        library.settings.autoplay_last = true;
         library.settings.last_played_url = Some("http://unknown-station".to_string());
 
-        let app = App::from_parts(test_parts(library));
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
 
         assert_eq!(
             app.playback.view.playing_url.as_deref(),
@@ -550,31 +560,23 @@ pub(crate) mod tests {
 
         let app = App::from_parts(parts);
 
-        assert_eq!(app.library.settings.theme, "Terminal");
-        assert!(!app.library.settings.notifications_enabled);
-        assert!(!app.library.settings.stream_metadata_enabled);
-        assert!(app.library.settings.autoplay_last);
-        assert!(app.library.settings.save_history);
-        assert_eq!(
-            app.library.settings.output_device_name.as_deref(),
-            Some("USB DAC")
-        );
+        assert_eq!(app.config.ui.theme, "Terminal");
+        assert!(!app.config.ui.notifications_enabled);
+        assert!(!app.config.ui.stream_metadata_enabled);
+        assert!(app.config.playback.autoplay_last);
+        assert!(app.config.playback.save_history);
+        assert_eq!(app.config.audio.output_device.as_deref(), Some("USB DAC"));
     }
 
     #[test]
-    fn from_parts_does_not_override_settings_without_config_file() {
-        let mut library = Library::in_memory(vec![]);
-        library.settings.theme = "Terminal".to_string();
-        library.settings.notifications_enabled = false;
-        library.settings.autoplay_last = true;
-
+    fn from_parts_uses_config_defaults_without_config_file() {
+        let library = Library::in_memory(vec![]);
         let parts = test_parts(library);
-        // config_loaded_from_file is false in test_parts
         let app = App::from_parts(parts);
 
-        assert_eq!(app.library.settings.theme, "Terminal");
-        assert!(!app.library.settings.notifications_enabled);
-        assert!(app.library.settings.autoplay_last);
+        assert_eq!(app.config.ui.theme, "Retrowave");
+        assert!(app.config.ui.notifications_enabled);
+        assert!(!app.config.playback.autoplay_last);
     }
 
     #[test]

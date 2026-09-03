@@ -248,7 +248,7 @@ If something goes wrong, press `d` for the Playback Doctor — it shows diagnost
 <summary>Code quality</summary>
 
 - Zero clippy warnings (`cargo clippy -- -D warnings`)
-- 1446 tests: unit, integration, state-transition, and property-based (proptest)
+- 1441 tests: unit, integration, state-transition, and property-based (proptest)
 - Strict architecture: business logic has zero UI dependencies
 - Trait-abstracted I/O (audio, network, notifications) for testability
 - CI: fmt, clippy, test, release build, dependency audit

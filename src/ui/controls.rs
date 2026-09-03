@@ -192,7 +192,7 @@ fn footer_line(app: &UiModel<'_>) -> Line<'static> {
         );
     }
     if app.show_recent_tracks() {
-        let suffix = if app.library.settings.save_history {
+        let suffix = if app.config.playback.save_history {
             "persistent track history"
         } else {
             "session track list"

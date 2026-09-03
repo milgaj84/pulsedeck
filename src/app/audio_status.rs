@@ -87,7 +87,6 @@ impl App {
 
     fn apply_confirmed_output_device(&mut self, active: Option<String>) {
         self.config.audio.output_device = active.clone();
-        self.library.settings.output_device_name = active.clone();
         let display = crate::audio::output_device_display_name(active.as_deref());
         self.playback.diagnostics.output_device = display.clone();
         self.playback.diagnostics.last_event = Some(format!("Audio output changed to {display}"));
@@ -103,7 +102,6 @@ impl App {
         error: String,
     ) {
         self.config.audio.output_device = active.clone();
-        self.library.settings.output_device_name = active.clone();
         let active_display = crate::audio::output_device_display_name(active.as_deref());
         let requested_display = crate::audio::output_device_display_name(requested.as_deref());
         self.playback.diagnostics.output_device = active_display.clone();
@@ -134,7 +132,7 @@ impl App {
             while self.song_history.len() > SONG_HISTORY_CAP {
                 self.song_history.pop_front();
             }
-            if self.library.settings.save_history {
+            if self.config.playback.save_history {
                 let station_name = self
                     .now_playing()
                     .map(|station| station.name.clone())
@@ -144,7 +142,7 @@ impl App {
             }
         }
 
-        if is_new && self.library.settings.notifications_enabled {
+        if is_new && self.config.ui.notifications_enabled {
             let user_is_active = super::idle::get_user_idle_ms()
                 .map(|idle_ms| idle_ms <= NOTIFY_IDLE_MS)
                 .unwrap_or(true);
@@ -256,17 +254,12 @@ mod tests {
             });
         let mut app = App::from_parts(test_parts_with_audio(audio));
         app.config.audio.output_device = Some("Missing DAC".to_string());
-        app.library.settings.output_device_name = Some("Missing DAC".to_string());
         app.playback.view.state = PlaybackState::Playing;
 
         app.poll_audio_status();
 
         assert!(matches!(app.playback.view.state, PlaybackState::Playing));
         assert_eq!(app.config.audio.output_device.as_deref(), Some("Speakers"));
-        assert_eq!(
-            app.library.settings.output_device_name.as_deref(),
-            Some("Speakers")
-        );
         assert_eq!(app.playback.diagnostics.output_device, "Speakers");
         assert_eq!(
             app.playback.diagnostics.last_error.as_deref(),
@@ -287,7 +280,6 @@ mod tests {
         app.poll_audio_status();
 
         assert!(app.config.audio.output_device.is_none());
-        assert!(app.library.settings.output_device_name.is_none());
         assert_eq!(app.playback.diagnostics.output_device, "Default");
     }
 
@@ -325,7 +317,7 @@ mod tests {
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
         ])));
-        app.library.settings.notifications_enabled = true;
+        app.config.ui.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
         app.handle_track_changed(station_url.to_string(), "Song Alpha".to_string());
@@ -342,7 +334,7 @@ mod tests {
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
         ])));
-        app.library.settings.notifications_enabled = false;
+        app.config.ui.notifications_enabled = false;
         app.playback.view.playing_url = Some(station_url.to_string());
 
         app.handle_track_changed(station_url.to_string(), "Latest Title".to_string());
@@ -360,7 +352,7 @@ mod tests {
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
         ])));
-        app.library.settings.notifications_enabled = true;
+        app.config.ui.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
         app.notification_cooldown
             .record_notification(Instant::now() - Duration::from_secs(10));
@@ -376,7 +368,7 @@ mod tests {
         let mut app = App::from_parts(test_parts_with_library(Library::in_memory(vec![
             Station::basic("Test Station", station_url, "Radio", "US", 128),
         ])));
-        app.library.settings.notifications_enabled = true;
+        app.config.ui.notifications_enabled = true;
         app.playback.view.playing_url = Some(station_url.to_string());
 
         app.handle_track_changed(station_url.to_string(), String::new());

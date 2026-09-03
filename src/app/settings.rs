@@ -104,34 +104,28 @@ impl App {
         match (row, snapshot) {
             (SettingRow::Notifications, SettingSnapshot::Bool(value)) => {
                 self.config.ui.notifications_enabled = value;
-                self.library.settings.notifications_enabled = value;
             }
             (SettingRow::AutoplayLast, SettingSnapshot::Bool(value)) => {
                 self.config.playback.autoplay_last = value;
-                self.library.settings.autoplay_last = value;
             }
             (SettingRow::OutputDevice, SettingSnapshot::OptionalString(value)) => {
                 self.config.audio.output_device = value.clone();
-                self.library.settings.output_device_name = value.clone();
                 self.playback.diagnostics.output_device =
                     crate::audio::output_device_display_name(value.as_deref());
                 self.sync_output_device();
             }
             (SettingRow::Theme, SettingSnapshot::String(value)) => {
                 self.config.ui.theme = value.clone();
-                self.library.settings.theme = value.clone();
                 let theme = ThemeName::from_key(&value);
                 crate::ui::theme::set_active(theme);
             }
             (SettingRow::StreamMetadata, SettingSnapshot::Bool(value)) => {
                 self.config.ui.stream_metadata_enabled = value;
-                self.library.settings.stream_metadata_enabled = value;
                 self.playback.diagnostics.metadata_enabled = value;
                 self.sync_stream_metadata();
             }
             (SettingRow::SaveHistory, SettingSnapshot::Bool(value)) => {
                 self.config.playback.save_history = value;
-                self.library.settings.save_history = value;
             }
             _ => {}
         }
@@ -146,13 +140,11 @@ impl App {
             Some(SettingRow::Notifications) => {
                 let value = !self.config.ui.notifications_enabled;
                 self.config.ui.notifications_enabled = value;
-                self.library.settings.notifications_enabled = value;
                 true
             }
             Some(SettingRow::AutoplayLast) => {
                 let value = !self.config.playback.autoplay_last;
                 self.config.playback.autoplay_last = value;
-                self.library.settings.autoplay_last = value;
                 true
             }
             Some(SettingRow::OutputDevice) => self.apply_output_device_setting(forward),
@@ -161,7 +153,6 @@ impl App {
             Some(SettingRow::SaveHistory) => {
                 let value = !self.config.playback.save_history;
                 self.config.playback.save_history = value;
-                self.library.settings.save_history = value;
                 true
             }
             None => false,
@@ -175,7 +166,6 @@ impl App {
             forward,
         );
         self.config.audio.output_device = new_device.clone();
-        self.library.settings.output_device_name = new_device.clone();
         self.playback.diagnostics.output_device = output_device_display_name(new_device.as_deref());
         self.sync_output_device();
         self.set_info_notice(format!(
@@ -189,8 +179,6 @@ impl App {
         let current = ThemeName::from_key(&self.config.ui.theme);
         let next = step_choice(ThemeName::ALL, current, forward);
         self.config.ui.theme = next.label().to_string();
-        self.library.settings.theme = next.label().to_string();
-        self.mark_library_dirty();
         crate::ui::theme::set_active(next);
         true
     }
@@ -198,7 +186,6 @@ impl App {
     fn apply_stream_metadata_setting(&mut self) -> bool {
         let value = !self.config.ui.stream_metadata_enabled;
         self.config.ui.stream_metadata_enabled = value;
-        self.library.settings.stream_metadata_enabled = value;
         self.playback.diagnostics.metadata_enabled = value;
         self.sync_stream_metadata();
         self.set_info_notice(format!(
@@ -212,7 +199,7 @@ impl App {
         self.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         if self.apply_selected_setting(true) {
             self.persist_config_change();
-            self.set_info_notice(format!("Theme: {}", self.library.settings.theme));
+            self.set_info_notice(format!("Theme: {}", self.config.ui.theme));
         }
     }
 
@@ -321,12 +308,12 @@ mod tests {
         let mut app = test_app();
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
-        let before = app.library.settings.notifications_enabled;
+        let before = app.config.ui.notifications_enabled;
 
         app.update(Action::PlaySelected);
 
         assert_eq!(app.playback.view.playing_url, None);
-        assert_eq!(app.library.settings.notifications_enabled, !before);
+        assert_eq!(app.config.ui.notifications_enabled, !before);
     }
 
     #[test]
@@ -356,15 +343,12 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.config.ui.theme = "Retrowave".to_string();
-        app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingForward);
         assert_eq!(app.config.ui.theme, "Catppuccin Mocha");
-        assert_eq!(app.library.settings.theme, "Catppuccin Mocha");
 
         app.update(Action::StepSettingBackward);
         assert_eq!(app.config.ui.theme, "Retrowave");
-        assert_eq!(app.library.settings.theme, "Retrowave");
     }
 
     #[test]
@@ -373,12 +357,10 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.config.ui.theme = "Retrowave".to_string();
-        app.library.settings.theme = "Retrowave".to_string();
 
         app.update(Action::StepSettingBackward);
 
         assert_eq!(app.config.ui.theme, "Terminal");
-        assert_eq!(app.library.settings.theme, "Terminal");
     }
 
     #[test]
@@ -430,11 +412,9 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::StreamMetadata.index();
         app.config.ui.stream_metadata_enabled = true;
-        app.library.settings.stream_metadata_enabled = true;
 
         app.update(Action::TogglePause);
 
-        assert!(!app.library.settings.stream_metadata_enabled);
         assert!(!app.config.ui.stream_metadata_enabled);
     }
 
@@ -456,13 +436,11 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         app.config.ui.theme = "CatppuccinMocha".to_string();
-        app.library.settings.theme = "CatppuccinMocha".to_string();
 
         app.update(Action::ToggleHelp);
 
         assert!(app.show_settings());
         assert_eq!(app.config.ui.theme, "Retrowave");
-        assert_eq!(app.library.settings.theme, "Retrowave");
     }
 
     #[test]
@@ -502,18 +480,15 @@ mod tests {
     #[test]
     fn settings_toggle_save_history() {
         let mut app = test_app();
-        app.library.settings.save_history = false;
         app.config.playback.save_history = false;
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::SaveHistory.index();
-        assert!(!app.library.settings.save_history);
+        assert!(!app.config.playback.save_history);
 
         app.update(Action::PlaySelected);
-        assert!(app.library.settings.save_history);
         assert!(app.config.playback.save_history);
 
         app.update(Action::PlaySelected);
-        assert!(!app.library.settings.save_history);
         assert!(!app.config.playback.save_history);
     }
 
@@ -533,7 +508,6 @@ mod tests {
         let mut app = test_app();
         app.config_dir = Some(dir.clone());
         app.config.ui.notifications_enabled = true;
-        app.library.settings.notifications_enabled = true;
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
 
@@ -584,7 +558,6 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
         app.config.ui.notifications_enabled = true;
-        app.library.settings.notifications_enabled = true;
 
         // Toggle the setting (true → false)
         app.update(Action::PlaySelected);
@@ -593,7 +566,6 @@ mod tests {
         // Undo → should restore to true
         app.update(Action::UndoSetting);
         assert!(app.config.ui.notifications_enabled);
-        assert!(app.library.settings.notifications_enabled);
     }
 
     #[test]
@@ -617,7 +589,6 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
         app.config.ui.notifications_enabled = true;
-        app.library.settings.notifications_enabled = true;
 
         // Make a change
         app.update(Action::PlaySelected);
@@ -651,7 +622,6 @@ mod tests {
         app.ui.overlays.active = ActiveOverlay::Settings;
         app.ui.overlays.selected_setting_idx = SettingRow::Notifications.index();
         app.config.ui.notifications_enabled = true;
-        app.library.settings.notifications_enabled = true;
 
         // Toggle setting (true → false)
         app.update(Action::PlaySelected);

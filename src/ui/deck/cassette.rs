@@ -136,7 +136,7 @@ fn reel_cells_for_state(tick_count: u64, playback: &PlaybackState) -> (String, S
             )
         }
         PlaybackState::Connecting => {
-            let hub = if (tick_count / 4).is_multiple_of(2) {
+            let hub = if (tick_count / 4) % 2 == 0 {
                 "◌"
             } else {
                 "○"

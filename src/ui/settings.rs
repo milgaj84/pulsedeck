@@ -145,12 +145,12 @@ fn setting_description(row: SettingRow) -> &'static str {
 fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> Vec<Span<'static>> {
     match row {
         SettingRow::Notifications => checkbox_row(
-            app.library.settings.notifications_enabled,
+            app.config.ui.notifications_enabled,
             "Desktop Song Notifications",
             label_style,
         ),
         SettingRow::AutoplayLast => checkbox_row(
-            app.library.settings.autoplay_last,
+            app.config.playback.autoplay_last,
             "Autoplay Last Played Station on Boot",
             label_style,
         ),
@@ -158,7 +158,7 @@ fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> 
             icon_span("[ audio ] "),
             Span::styled("Audio Output: ", label_style),
             Span::styled(
-                audio_output_label(app.library.settings.output_device_name.as_deref()),
+                audio_output_label(app.config.audio.output_device.as_deref()),
                 Style::default()
                     .fg(theme::highlight())
                     .add_modifier(Modifier::BOLD),
@@ -166,7 +166,7 @@ fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> 
             Span::styled(" (Space/Right forward, Left back)", theme::dim()),
         ],
         SettingRow::Theme => {
-            let current_theme = ThemeName::from_key(&app.library.settings.theme);
+            let current_theme = ThemeName::from_key(&app.config.ui.theme);
             vec![
                 icon_span("[ theme ] "),
                 Span::styled("Theme: ", label_style),
@@ -180,12 +180,12 @@ fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> 
             ]
         }
         SettingRow::StreamMetadata => checkbox_row(
-            app.library.settings.stream_metadata_enabled,
+            app.config.ui.stream_metadata_enabled,
             "Stream Song Info Metadata",
             label_style,
         ),
         SettingRow::SaveHistory => checkbox_row(
-            app.library.settings.save_history,
+            app.config.playback.save_history,
             "Save Track History (g Overlay)",
             label_style,
         ),

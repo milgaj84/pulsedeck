@@ -63,16 +63,6 @@ impl PlaybackRuntime {
 mod tests {
     use super::*;
     use crate::audio::MockAudioSink;
-    use crate::favorites::Library;
-    use crate::radio::Station;
-
-    fn library_with_settings() -> Library {
-        let mut library =
-            Library::in_memory(vec![Station::basic("A", "http://a", "Radio", "US", 128)]);
-        library.settings.output_device_name = Some("Headphones".to_string());
-        library.settings.stream_metadata_enabled = false;
-        library
-    }
 
     #[test]
     fn playback_runtime_uses_loaded_volume_mute_and_diagnostics() {
@@ -84,15 +74,12 @@ mod tests {
             DisplayMode::Normal,
             None,
         );
-        let library = library_with_settings();
         let sample_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let audio = MockAudioSink::disconnected();
 
         let options = PlaybackOptions {
-            output_device: crate::audio::output_device_display_name(
-                library.settings.output_device_name.as_deref(),
-            ),
-            metadata_enabled: library.settings.stream_metadata_enabled,
+            output_device: "Headphones".to_string(),
+            metadata_enabled: false,
             reconnect_max_attempts: 3,
             reconnect_backoff_seconds: vec![3, 6, 12],
         };

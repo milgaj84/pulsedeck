@@ -93,7 +93,6 @@ impl App {
             Action::PlaySlot(n) => self.play_slot(n),
             Action::AssignSlot(n) => self.assign_slot(n),
 
-            // Favorites (handler added in task 13)
             Action::ToggleFavorite => self.toggle_favorite(),
 
             // Number jump
@@ -112,7 +111,9 @@ impl App {
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),
             Action::CycleSortMode => self.cycle_sort_mode(),
-            Action::UndoSetting => {} // Handler added in task 10.3
+            // UndoSetting is handled by the settings overlay when visible;
+            // it's a no-op here in normal mode.
+            Action::UndoSetting => {}
             Action::ToggleSleepTimer => self.toggle_sleep_timer(),
             Action::ShowKeybindings => self.show_keybindings(),
             Action::SleepTimerIncrease
@@ -164,6 +165,17 @@ impl App {
             return;
         }
 
+        // Flush any pending persistence before exiting so the last change
+        // (e.g. a just-toggled setting) is never lost on quit.
+        self.force_flush_persistence();
+        self.stop_audio_before_quit();
+        self.ui.should_quit = true;
+    }
+
+    /// Force an immediate, clean shutdown regardless of overlay state.
+    /// Used by the SIGINT/SIGTERM path: flush persistence, stop audio, and quit.
+    pub(crate) fn shutdown(&mut self) {
+        self.force_flush_persistence();
         self.stop_audio_before_quit();
         self.ui.should_quit = true;
     }
@@ -324,6 +336,17 @@ mod tests {
 
         assert!(!app.ui.should_quit);
         assert_eq!(app.ui.overlays.active, ActiveOverlay::None);
+    }
+
+    #[test]
+    fn shutdown_forces_quit_even_with_overlay_open() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Help;
+
+        // Unlike quit(), shutdown() bypasses overlay-close and always quits.
+        app.shutdown();
+
+        assert!(app.ui.should_quit);
     }
 
     // ---- Command palette mode routing ------------------------------------

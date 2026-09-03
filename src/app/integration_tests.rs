@@ -16,6 +16,45 @@ mod tests {
     // ── Persistence Round-Trip Tests ─────────────────────────────────
 
     #[test]
+    fn test_setting_change_writes_only_toml_not_library_json() {
+        let dir = unique_temp_dir("dual-write-elimination");
+        let mut app = app_with_config_dir(&dir);
+
+        // Change theme via cycle
+        app.update(Action::CycleThemeSetting);
+        let new_theme = app.config.ui.theme.clone();
+        assert_ne!(new_theme, "Retrowave");
+
+        // Flush EVERYTHING (config + library)
+        app.force_flush_persistence();
+
+        // 1) pulsedeck.toml MUST contain the theme
+        let toml_path = dir.join("pulsedeck.toml");
+        assert!(toml_path.exists(), "pulsedeck.toml should be written");
+        let toml_contents = fs::read_to_string(&toml_path).unwrap();
+        assert!(
+            toml_contents.contains(&new_theme),
+            "pulsedeck.toml should contain theme '{}', got:\n{}",
+            new_theme,
+            toml_contents
+        );
+
+        // 2) library.json MUST NOT contain the theme preference field
+        let library_path = dir.join("library.json");
+        if library_path.exists() {
+            let lib_contents = fs::read_to_string(&library_path).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&lib_contents).unwrap();
+            assert!(
+                json.get("settings").and_then(|s| s.get("theme")).is_none(),
+                "library.json must NOT contain the theme field (dual-write elimination):\n{}",
+                lib_contents
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_theme_change_persists_to_toml_and_survives_reload() {
         let dir = unique_temp_dir("theme-persist");
         let mut app = app_with_config_dir(&dir);
@@ -53,41 +92,6 @@ mod tests {
             reloaded_config.ui.theme, new_theme,
             "Theme should survive reload. TOML contents:\n{}",
             toml_contents
-        );
-
-        // Also verify library.json has the theme (fallback persistence)
-        app.force_flush_persistence();
-        let library_path = dir.join("library.json");
-        if library_path.exists() {
-            let lib_contents = fs::read_to_string(&library_path).unwrap();
-            assert!(
-                lib_contents.contains(&new_theme),
-                "library.json should also contain theme '{}'",
-                new_theme
-            );
-        }
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn test_theme_change_persists_to_library_json() {
-        let dir = unique_temp_dir("theme-library-persist");
-        let mut app = app_with_config_dir(&dir);
-
-        app.update(Action::CycleThemeSetting);
-        let new_theme = app.config.ui.theme.clone();
-
-        // Force flush library (dirty flag was set by mark_library_dirty)
-        app.force_flush_persistence();
-
-        // Verify library.json was written with new theme
-        let library_path = dir.join("library.json");
-        assert!(library_path.exists(), "library.json should exist");
-        let contents = fs::read_to_string(&library_path).unwrap();
-        assert!(
-            contents.contains(&new_theme),
-            "library.json should contain new theme"
         );
 
         let _ = fs::remove_dir_all(&dir);
@@ -678,7 +682,7 @@ mod tests {
         let chosen_theme = app.config.ui.theme.clone();
         assert_ne!(chosen_theme, "Retrowave", "theme should have changed");
 
-        // Flush library (mark_library_dirty was called)
+        // Flush library to disk
         app.force_flush_persistence();
 
         // === SESSION 2: Simulate restart ===
@@ -689,15 +693,7 @@ mod tests {
             "TOML should have the new theme after save"
         );
 
-        // Production startup also loads library.json for theme
-        let lib_path = dir.join("library.json");
-        let lib_contents = fs::read_to_string(&lib_path).unwrap();
-        assert!(
-            lib_contents.contains(&chosen_theme),
-            "library.json should contain new theme for fallback"
-        );
-
-        // Simulate ThemeName::from_key (what main.rs does with library.settings.theme)
+        // Simulate ThemeName::from_key (what main.rs does with the config theme)
         let theme_from_lib = crate::theme_name::ThemeName::from_key(&chosen_theme);
         assert_ne!(
             theme_from_lib,

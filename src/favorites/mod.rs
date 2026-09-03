@@ -18,50 +18,14 @@ const LIBRARY_FILE: &str = "library.json";
 /// First launch seeds with curated starter stations.
 /// After that, you manage your own list via search + add/remove.
 /// Application settings, serialized inside the main config.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Settings {
-    #[serde(default = "default_true")]
-    pub notifications_enabled: bool,
-    #[serde(default)]
-    pub autoplay_last: bool,
     #[serde(default)]
     pub last_played_url: Option<String>,
-    #[serde(default = "default_theme")]
-    pub theme: String,
-    #[serde(default)]
-    pub output_device_name: Option<String>,
-    #[serde(default)]
-    pub save_history: bool,
-    #[serde(default = "default_true")]
-    pub stream_metadata_enabled: bool,
     #[serde(default)]
     pub station_slots: StationSlots,
     #[serde(default)]
     pub favorites: FavoritesSet,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_theme() -> String {
-    "Retrowave".to_string()
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            notifications_enabled: true,
-            autoplay_last: false,
-            last_played_url: None,
-            theme: "Retrowave".to_string(),
-            output_device_name: None,
-            save_history: false,
-            stream_metadata_enabled: true,
-            station_slots: StationSlots::default(),
-            favorites: FavoritesSet::default(),
-        }
-    }
 }
 
 pub struct Library {

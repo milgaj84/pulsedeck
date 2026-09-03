@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
 
     let block = Block::default()
         .title(Span::styled(
-            recent_panel_title(app.library.settings.save_history),
+            recent_panel_title(app.config.playback.save_history),
             theme::title(),
         ))
         .borders(Borders::ALL)
@@ -91,7 +91,7 @@ fn format_relative_time(entry_at_str: &str) -> String {
 }
 
 fn recent_track_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
-    if app.library.settings.save_history {
+    if app.config.playback.save_history {
         if app.history.is_empty() {
             return vec![
                 Line::from(Span::styled("No track titles archived yet", theme::title())),

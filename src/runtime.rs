@@ -176,10 +176,16 @@ impl<A: RadioApi + 'static> AppDriver<A> {
             app.apply_discover_response(Ok(deduped));
         } else if self.needs_fallback_fetch(&result) {
             // Primary returned < 5 results and fallback exists — spawn second fetch
-            let stations = result.unwrap_or_default();
-            let fallback = self.pending_fallback_tag.take().unwrap();
-            self.pending_primary_results = Some(stations);
-            self.spawn_discover_fetch(&fallback);
+            if let Some(fallback) = self.pending_fallback_tag.take() {
+                let stations = result.unwrap_or_default();
+                self.pending_primary_results = Some(stations);
+                self.spawn_discover_fetch(&fallback);
+            } else {
+                // Defensive: no fallback despite needs_fallback_fetch; send primary
+                self.pending_fallback_tag = None;
+                self.pending_primary_results = None;
+                app.apply_discover_response(result);
+            }
         } else {
             // Single query sufficient (>= 5 results or no fallback)
             self.pending_fallback_tag = None;

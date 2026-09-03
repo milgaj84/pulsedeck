@@ -29,6 +29,7 @@ desktop.ini
 
 # Local planning / generated refactor artifacts
 /plan.pdf
+/implementation_plan.md
 /repomix-output.xml
 /step*_*.sh
 .kiro/

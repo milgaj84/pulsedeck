@@ -50,12 +50,6 @@ impl App {
             self.config.playback.reconnect_backoff_seconds.clone(),
         );
 
-        self.library.settings.theme = new_config.ui.theme.clone();
-        self.library.settings.notifications_enabled = new_config.ui.notifications_enabled;
-        self.library.settings.stream_metadata_enabled = new_config.ui.stream_metadata_enabled;
-        self.library.settings.autoplay_last = new_config.playback.autoplay_last;
-        self.library.settings.save_history = new_config.playback.save_history;
-
         let theme = crate::theme_name::ThemeName::from_key(&new_config.ui.theme);
         crate::ui::theme::set_active(theme);
         self.sync_stream_metadata();
@@ -98,11 +92,11 @@ mod tests {
         app.check_config_reload(t0); // detect change, start debounce
         app.check_config_reload(t0 + Duration::from_millis(500)); // debounce fires
 
-        assert_eq!(app.library.settings.theme, "Terminal");
-        assert!(!app.library.settings.notifications_enabled);
-        assert!(!app.library.settings.stream_metadata_enabled);
-        assert!(app.library.settings.autoplay_last);
-        assert!(app.library.settings.save_history);
+        assert_eq!(app.config.ui.theme, "Terminal");
+        assert!(!app.config.ui.notifications_enabled);
+        assert!(!app.config.ui.stream_metadata_enabled);
+        assert!(app.config.playback.autoplay_last);
+        assert!(app.config.playback.save_history);
         assert!(matches!(
             app.ui.notice.current,
             Some(AppNotice::Info(ref msg)) if msg == "Config reloaded"
@@ -161,14 +155,14 @@ mod tests {
         std::fs::write(&path, "this is [[[not valid toml").unwrap();
 
         let mut app = App::from_parts(test_parts(Library::in_memory(vec![])));
-        let original_theme = app.library.settings.theme.clone();
+        let original_theme = app.config.ui.theme.clone();
         app.config_watcher = crate::config_toml::hot_reload::ConfigWatcher::new(path);
 
         let t0 = Instant::now();
         app.check_config_reload(t0);
         app.check_config_reload(t0 + Duration::from_millis(500));
 
-        assert_eq!(app.library.settings.theme, original_theme);
+        assert_eq!(app.config.ui.theme, original_theme);
         assert!(matches!(
             app.ui.notice.current,
             Some(AppNotice::Error(ref msg)) if msg.contains("Config reload failed")

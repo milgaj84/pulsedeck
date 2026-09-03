@@ -1,0 +1,33 @@
+# cargo-deny configuration.
+# Run with: cargo deny check
+# Advisory exceptions are documented in SECURITY.md.
+# NOTE: cargo-deny reads advisory ignores from the `[advisories]` table,
+# NOT `[graph]`. See https://embarkstudios.github.io/cargo-deny/ for schema.
+
+[advisories]
+# Accepted advisory exceptions — each is justified in SECURITY.md.
+ignore = [
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
+# Warn on unmaintained or unsupported crates (non-blocking).
+yanked = "deny"
+unmaintained = "warn"
+unsound = "deny"
+
+[licenses]
+# Allow the licenses used across the dependency tree.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Mozilla",
+    "Unicode-DFS-2016",
+]
+unlicensed = "deny"
+
+[bans]
+multiple-versions = "warn"

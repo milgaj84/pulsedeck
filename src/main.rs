@@ -30,6 +30,8 @@ mod theme_name;
 mod ui;
 
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use app::App;
@@ -46,16 +48,27 @@ impl Drop for TerminalRestoreGuard {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     if let cli::CliOutcome::Handled = cli::run(std::env::args())? {
         return Ok(());
     }
 
+    // Custom panic hook: restore a clean terminal experience and point users
+    // to where to report the issue. The TerminalRestoreGuard (below) restores
+    // the raw/alternate-screen terminal on unwind, so this hook only needs to
+    // add the friendly message; the original hook still prints the panic details.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("\nPulseDeck hit an unexpected error and will close safely.");
+        eprintln!("Please report this at https://github.com/milgaj84/pulsedeck/issues");
+        eprintln!("---");
+        default_hook(info);
+    }));
+
     let library = Library::load(fallback_stations());
 
-    let saved_theme = theme_name::ThemeName::from_key(&library.settings.theme);
-    ui::theme::set_active(saved_theme);
+    ui::theme::set_active(theme_name::ThemeName::Retrowave);
 
     let mut app = App::new(library);
 
@@ -63,7 +76,39 @@ async fn main() -> Result<()> {
     let _terminal_restore = TerminalRestoreGuard;
     let mut driver = runtime::AppDriver::new(radio::RadioBrowserApi);
 
+    // Signal handling: on SIGINT (Ctrl+C) or SIGTERM (`kill <pid>`), trigger a
+    // clean shutdown so the terminal is restored, pending state is flushed, and
+    // audio is torn down — rather than the process dying mid-raw-mode.
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
+    let shutdown_flag = Arc::clone(&shutdown_requested);
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            let mut terminate =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                    Ok(sig) => sig,
+                    Err(_) => return,
+                };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        shutdown_flag.store(true, Ordering::SeqCst);
+    });
+
     loop {
+        // Check for a requested shutdown before drawing so the terminal is
+        // restored promptly and unsaved state is not lost on SIGINT/SIGTERM.
+        if shutdown_requested.load(Ordering::SeqCst) {
+            app.shutdown();
+            break;
+        }
+
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if let Some(action) = event::poll_action_with_registry(

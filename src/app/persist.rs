@@ -90,7 +90,7 @@ impl PersistFlags {
             && self
                 .retry
                 .next_retry_at
-                .is_none_or(|deadline| now >= deadline)
+                .map_or(true, |deadline| now >= deadline)
     }
 
     fn schedule_retry(&mut self, now: Instant) {
@@ -103,10 +103,9 @@ impl PersistFlags {
 
     fn should_show_error_notice(&self, key: &PersistenceErrorKey, now: Instant) -> bool {
         self.retry.last_error_key.as_ref() != Some(key)
-            || self
-                .retry
-                .last_error_notice_at
-                .is_none_or(|last| now.duration_since(last) >= PERSIST_NOTICE_COOLDOWN)
+            || self.retry.last_error_notice_at.map_or(true, |last| {
+                now.duration_since(last) >= PERSIST_NOTICE_COOLDOWN
+            })
     }
 
     fn record_error_notice_state(
