@@ -99,7 +99,7 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 
 ## Installation
 
-**You need:** [Rust & Cargo](https://rustup.rs/) (1.75+)
+**You need:** [Rust & Cargo](https://rustup.rs/) (1.89+)
 
 ```bash
 cargo install pulsedeck

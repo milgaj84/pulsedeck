@@ -5,7 +5,7 @@ PulseDeck publishes to **crates.io** and ships prebuilt binaries via GitHub Rele
 ## Prerequisites
 
 - [ ] You have write access to `milgaj84/pulsedeck` and `CARGO_REGISTRY_TOKEN` is configured in the repo secrets.
-- [ ] Local `cargo` toolchain is at least the **MSRV (1.75.0)**.
+- [ ] Local `cargo` toolchain is at least the **MSRV (1.89.0)**.
 - [ ] `cargo-audit` and `cargo-deny` are installed locally (`cargo install cargo-audit cargo-deny --locked`).
 
 ## Pre-release verification

@@ -2,7 +2,7 @@
 name = "pulsedeck"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.89"
 description = "A focused terminal internet radio player with fast search, saved stations, themes, visualizers, and resilient playback"
 license = "MIT"
 repository = "https://github.com/milgaj84/pulsedeck"
