@@ -6,20 +6,39 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [0.11.3] - Unreleased
 
+### Added
+- **Crash-resistant atomic file persistence (`src/persistence.rs`)**:
+  - Replaces direct truncated file writes with an atomic tempfile write, buffer flush, and destination swap strategy.
+  - Automatic `.bak` sibling backups maintained across config, station library, UI state, and search history saves.
+  - Corrupt copy preservation: invalid or unparseable files are preserved alongside the original as `.corrupt-<timestamp>-<seq>` rather than being silently overwritten.
+  - Forward compatibility: prevents destructive downgrading of station libraries serialized with newer format versions.
+- **Transactional live audio output switching**:
+  - Live output device switching from settings without needing to restart the player.
+  - Transactional rollback: opens candidate streams before tearing down active playback sinks; rolls back safely to the previous working output device if initialization fails.
+- **Reliable codec classification and bounded stream probing (`src/audio/codec.rs`)**:
+  - Multi-tier stream format classifier based on Content-Type headers, URL file extensions, and byte signature heuristics for MP3, AAC, OGG/Vorbis, Opus, FLAC, and WAV.
+  - Conservative, read-bounded probing prevents decoder deadlocks on non-audio or malformed streams.
+- **Doctor overlay numbered quick-fixes**:
+  - Playback Doctor (`d`) displays numbered, one-click recovery actions directly executable via number keys (e.g., reconnecting, resetting buffers, clearing failed state).
+
 ### Improved
 - **persist_config_change error reporting**: Now logs `[persist] config_dir is None` to stderr instead of silently returning when config directory is unavailable.
-- **Shared test helpers module**: Integration test utilities (unique_temp_dir, app_with_config_dir, reload_config_from_dir) extracted to `src/app/test_helpers.rs` for reuse across all test modules.
+- **Shared test helpers module**: Integration test utilities (`unique_temp_dir`, `app_with_config_dir`, `reload_config_from_dir`) extracted to `src/app/test_helpers.rs` for reuse across all test modules.
 - **Exhaustive action smoke test**: Dispatches every `Action` variant once — catches panics from any action and will fail to compile if a new variant is added without being tested.
+
+### Fixed
+- **Headless CI audio hardware isolation**: Ignored hardware-bound output device tests in headless environments to prevent WASAPI/COM access violations on Windows CI.
+- **Audio worker lifecycle management**: Track and bound retired worker threads during rapid reconnects and device transitions to prevent thread leakage.
+- **Security audit**: Patched `anyhow` (>= 1.0.103) lockfile vulnerability and established locked dependency checking in CI.
 
 ### Removed
 - Dead `scanline()` theme function (replaced by `dim_row_even`/`dim_row_odd` in 0.11.0).
 - All `#[allow(unused)]` annotations on module declarations in `app.rs` — replaced with proper `pub(crate)` visibility.
 
 ### Internal
-- Version bumped to 0.11.3.
-- 1455 tests pass, zero clippy warnings.
+- 1446 tests across unit, state-transition, property-based, and scenario integration tests (1442 passed, 4 hardware-ignored, zero clippy warnings).
 - New property tests: ThemeName key round-trip (validates validate_theme accepts key format), UiState JSON round-trip (volume/mute/layout/visualizer/display survive serialize→deserialize).
-- New integration tests: volume/mute persistence, station slot assign+play, stream_metadata toggle persistence.
+- New integration tests: volume/mute persistence, station slot assign+play, stream_metadata toggle persistence, live output switching fallback.
 - Module-level doc comments added to: animation, breadcrumb, audio_check, radio_status, recovery_actions, visualizer/gradient, layout.
 - Startup sequence documented on `App::from_parts` (initialization order + override precedence).
 - `#[allow(dead_code)]` annotations localized to specific modules awaiting full integration (animation, audio_check, recovery_actions, layout) with explanatory comments.

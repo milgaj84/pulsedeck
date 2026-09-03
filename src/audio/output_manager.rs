@@ -166,6 +166,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires audio hardware; crashes on headless CI (macOS/Windows)
     fn failed_strict_switch_preserves_previous_preference() {
         let mut manager = OutputManager::new();
         manager.set_preferred_device_for_test(Some("Existing Device".to_string()));
