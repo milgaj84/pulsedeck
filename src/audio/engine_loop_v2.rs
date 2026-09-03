@@ -454,6 +454,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires audio hardware; crashes on headless CI (macOS/Windows)
     fn failed_device_switch_keeps_options_and_playback_state() {
         let (mut engine, status_rx) = make_engine();
         engine.state = EngineState::Playing {

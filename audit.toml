@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+    # quick-xml vulnerabilities in tauri-winrt-notification (transitive dependency of notify-rust on Windows).
+    # PulseDeck only sends simple plain-text toasts and does not parse untrusted XML;
+    # unpatched upstream in tauri-winrt-notification / notify-rust.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
