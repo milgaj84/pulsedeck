@@ -63,6 +63,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Linux audio build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
       - name: Install Rust stable
         run: |
           rustup toolchain install stable --profile minimal

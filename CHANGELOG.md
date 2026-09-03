@@ -4,28 +4,6 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
-
-### Changed
-- **Settings consolidated to `pulsedeck.toml` as single source of truth**:
-  - User preferences (theme, notifications, autoplay, output device, save_history, stream_metadata) no longer live in the `Settings` struct inside `library.json`.
-  - `Settings` now only stores library-persistent data: `last_played_url`, `station_slots`, and `favorites`.
-  - Removed the dual-write path where every setting change wrote to BOTH `pulsedeck.toml` AND `library.json`.
-  - This eliminates the class of dual-write bugs that caused the theme persistence issue fixed in 0.11.2.
-  - The `migrate_from_library_json` function still migrates old settings into `pulsedeck.toml` for backward compatibility.
-
-### Fixed
-- **Stale `library.settings` references removed**: All app, UI, and test code now reads preferences from `self.config.*` / `app.config.*`.
-- **Hardened discover fallback**: Replaced `pending_fallback_tag.take().unwrap()` with a safe `if let` pattern to prevent a potential panic.
-
-### Internal
-- `Settings` struct in `src/favorites/mod.rs` trimmed to `last_played_url`, `station_slots`, `favorites`.
-- `main.rs` now sets `ThemeName::Retrowave` as default before `App::new`; the active theme is applied from config during app construction.
-- `apply_config_to_settings` no longer writes config values back into `library.settings`.
-- Removed unused `default_true()` and `default_theme()` helper functions from `src/favorites/mod.rs`.
-
----
-
 ## [1.0.0] - 2026-09-03
 
 ### Added
@@ -43,12 +21,22 @@ All notable changes to the PulseDeck project will be documented in this file.
 - **Playback Doctor suggested fixes**:
   - Playback Doctor (`d`) displays numbered, one-click recovery action suggestions (e.g., switch output device, retry connection). The actions are advisory for now; direct execution via number keys is a planned enhancement.
 
+### Changed
+- **Settings consolidated to `pulsedeck.toml` as single source of truth**:
+  - User preferences (theme, notifications, autoplay, output device, save_history, stream_metadata) no longer live in the `Settings` struct inside `library.json`.
+  - `Settings` now only stores library-persistent data: `last_played_url`, `station_slots`, and `favorites`.
+  - Removed the dual-write path where every setting change wrote to BOTH `pulsedeck.toml` AND `library.json`.
+  - This eliminates the class of dual-write bugs that caused the theme persistence issue fixed in 0.11.2.
+  - The `migrate_from_library_json` function still migrates old settings into `pulsedeck.toml` for backward compatibility.
+
 ### Improved
 - **persist_config_change error reporting**: Now logs `[persist] config_dir is None` to stderr instead of silently returning when config directory is unavailable.
 - **Shared test helpers module**: Integration test utilities (`unique_temp_dir`, `app_with_config_dir`, `reload_config_from_dir`) extracted to `src/app/test_helpers.rs` for reuse across all test modules.
 - **Exhaustive action smoke test**: Dispatches every `Action` variant once — catches panics from any action and will fail to compile if a new variant is added without being tested.
 
 ### Fixed
+- **Stale `library.settings` references removed**: All app, UI, and test code now reads preferences from `self.config.*` / `app.config.*`.
+- **Hardened discover fallback**: Replaced `pending_fallback_tag.take().unwrap()` with a safe `if let` pattern to prevent a potential panic.
 - **Headless CI audio hardware isolation**: Ignored hardware-bound output device tests in headless environments to prevent WASAPI/COM access violations on Windows CI.
 - **Audio worker lifecycle management**: Track and bound retired worker threads during rapid reconnects and device transitions to prevent thread leakage.
 - **Security audit**: Patched `anyhow` (>= 1.0.103) lockfile vulnerability and established locked dependency checking in CI.
@@ -58,6 +46,10 @@ All notable changes to the PulseDeck project will be documented in this file.
 - All `#[allow(unused)]` annotations on module declarations in `app.rs` — replaced with proper `pub(crate)` visibility.
 
 ### Internal
+- `Settings` struct in `src/favorites/mod.rs` trimmed to `last_played_url`, `station_slots`, `favorites`.
+- `main.rs` now sets `ThemeName::Retrowave` as default before `App::new`; the active theme is applied from config during app construction.
+- `apply_config_to_settings` no longer writes config values back into `library.settings`.
+- Removed unused `default_true()` and `default_theme()` helper functions from `src/favorites/mod.rs`.
 - 1441 tests across unit, state-transition, property-based, and scenario integration tests (1436 passed, 5 hardware-ignored, zero clippy warnings).
 - New property tests: ThemeName key round-trip (validates validate_theme accepts key format), UiState JSON round-trip (volume/mute/layout/visualizer/display survive serialize→deserialize).
 - New integration tests: volume/mute persistence, station slot assign+play, stream_metadata toggle persistence, live output switching fallback.
