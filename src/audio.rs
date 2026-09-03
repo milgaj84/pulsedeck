@@ -48,6 +48,7 @@ pub enum AudioStatus {
     Buffering {
         percent: u8,
     },
+    #[cfg_attr(test, allow(dead_code))]
     FadingOut {
         current_volume: f32,
     },
@@ -72,11 +73,13 @@ pub trait AudioSink: Send {
 }
 
 /// Handle to communicate with the audio engine running on a background thread.
+#[cfg_attr(test, allow(dead_code))]
 pub struct AudioEngine {
     cmd_tx: mpsc::Sender<AudioCommand>,
     pub status_rx: mpsc::Receiver<AudioStatus>,
 }
 
+#[cfg_attr(test, allow(dead_code))]
 impl AudioEngine {
     pub fn spawn(
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,

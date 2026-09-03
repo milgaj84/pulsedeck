@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(dead_code))]
+
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
 use super::output::{normalize_output_device_name, open_output_stream, open_output_stream_strict};

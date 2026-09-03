@@ -2,6 +2,7 @@
 //!
 //! The control thread owns output resources, worker generations, playback state,
 //! and user-visible status emission. Connection workers never mutate engine state.
+#![cfg_attr(test, allow(dead_code))]
 
 use std::collections::VecDeque;
 use std::sync::mpsc;

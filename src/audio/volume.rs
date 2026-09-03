@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(dead_code))]
+
 /// Exponential volume fade step factor (matches existing engine behaviour).
 const FADE_STEP: f32 = 0.15;
 

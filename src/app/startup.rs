@@ -1,5 +1,7 @@
 use super::*;
-use crate::audio::{AudioCommand, AudioEngine, AudioSink};
+#[cfg(not(test))]
+use crate::audio::AudioEngine;
+use crate::audio::{AudioCommand, AudioSink};
 use crate::config_toml::AppConfig;
 use crate::keybindings::{detect_shadows, KeybindingRegistry};
 use crate::radio::find_station_by_url;
@@ -43,11 +45,16 @@ impl AppParts {
             false,
         );
 
+        #[cfg(not(test))]
         let recovery_config = crate::audio::DeviceRecoveryConfig {
             max_attempts: config.playback.device_recovery_attempts,
             delay_ms: config.playback.device_recovery_delay_ms,
         };
-        let audio = AudioEngine::spawn(sample_buffer.clone(), recovery_config);
+        #[cfg(not(test))]
+        let audio: Box<dyn AudioSink> =
+            Box::new(AudioEngine::spawn(sample_buffer.clone(), recovery_config));
+        #[cfg(test)]
+        let audio: Box<dyn AudioSink> = Box::new(crate::audio::MockAudioSink::new());
 
         Self {
             library,
@@ -55,7 +62,7 @@ impl AppParts {
             ui_state_warning,
             history,
             history_warning,
-            audio: Box::new(audio),
+            audio,
             sample_buffer,
             config,
             config_preserved,
