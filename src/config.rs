@@ -56,9 +56,20 @@ pub fn config_dir() -> Option<PathBuf> {
     resolve_config_dir(&candidate_base_dirs())
 }
 
+/// Path of `file`: the first base that already holds it, else the preferred
+/// config directory (so a stray empty `~/.config/pulsedeck` cannot shadow a
+/// real config elsewhere).
+fn resolve_config_path(bases: &[PathBuf], file: &str) -> Option<PathBuf> {
+    bases
+        .iter()
+        .map(|base| path_for(base, NEW_CONFIG_DIR, file))
+        .find(|path| path.exists())
+        .or_else(|| resolve_config_dir(bases).map(|dir| dir.join(file)))
+}
+
 pub fn config_path(file: &str) -> Option<PathBuf> {
     migrate_legacy(file);
-    config_dir().map(|dir| dir.join(file))
+    resolve_config_path(&candidate_base_dirs(), file)
 }
 
 pub fn migrate_legacy(file: &str) {
@@ -325,5 +336,30 @@ mod tests {
         migrate_legacy_in(&[first, second.clone()], "state.json");
 
         assert!(!path_for(&second, NEW_CONFIG_DIR, "state.json").exists());
+    }
+
+    #[test]
+    fn resolve_config_path_prefers_the_base_that_holds_the_file() {
+        let root = unique_temp_path("path-file")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let _ = fs::remove_dir_all(&root);
+        let (first, second) = (root.join("a"), root.join("b"));
+        fs::create_dir_all(first.join(NEW_CONFIG_DIR)).unwrap();
+        let real = path_for(&second, NEW_CONFIG_DIR, "state.json");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(&real, "{}").unwrap();
+
+        // `first` has an empty pulsedeck dir but `second` holds the file.
+        assert_eq!(
+            resolve_config_path(&[first.clone(), second], "state.json"),
+            Some(real)
+        );
+        // Nobody holds the file: fall back to the first existing config dir.
+        assert_eq!(
+            resolve_config_path(std::slice::from_ref(&first), "other.json"),
+            Some(first.join(NEW_CONFIG_DIR).join("other.json"))
+        );
     }
 }
