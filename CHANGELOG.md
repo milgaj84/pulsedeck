@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.0.1] - 2026-10-08
 
 ### Added
 - **Playback Doctor fixes are runnable**: press the number next to a suggested fix to run it (retry the stream or switch to the next output device). Progress shows as ⏳, ✓ or ✗ next to the fix.
