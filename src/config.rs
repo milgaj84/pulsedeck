@@ -226,10 +226,8 @@ mod tests {
         assert_eq!(absolute_dir(None), None);
         assert_eq!(absolute_dir(Some(OsString::new())), None);
         assert_eq!(absolute_dir(Some("relative/dir".into())), None);
-        assert_eq!(
-            absolute_dir(Some("/abs/dir".into())),
-            Some(PathBuf::from("/abs/dir"))
-        );
+        let abs = std::env::temp_dir();
+        assert_eq!(absolute_dir(Some(abs.clone().into())), Some(abs));
     }
 
     #[test]
