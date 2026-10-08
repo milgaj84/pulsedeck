@@ -6,42 +6,66 @@ use std::{env, fs};
 const NEW_CONFIG_DIR: &str = "pulsedeck";
 const OLD_CONFIG_DIR: &str = "driftfm";
 
-fn candidate_base_dirs() -> Vec<PathBuf> {
-    let xdg = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
-    let home = env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"));
-    let native = dirs::config_dir();
+/// An XDG base directory must be absolute; the spec says to ignore empty or
+/// relative values.
+fn absolute_dir(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.map(PathBuf::from).filter(|path| path.is_absolute())
+}
+
+/// Config base directories in lookup order. On macOS the XDG style locations
+/// (`$XDG_CONFIG_HOME`, `~/.config`) are tried before the native one.
+fn base_dirs(
+    xdg: Option<PathBuf>,
+    home: Option<PathBuf>,
+    native: Option<PathBuf>,
+    xdg_style: bool,
+) -> Vec<PathBuf> {
+    let xdg_dirs = if xdg_style {
+        [xdg, home.map(|h| h.join(".config"))]
+    } else {
+        [None, None]
+    };
 
     let mut dirs = Vec::new();
-
-    for path in [xdg, home, native].into_iter().flatten() {
+    for path in xdg_dirs.into_iter().chain([native]).flatten() {
         if !dirs.contains(&path) {
             dirs.push(path);
         }
     }
-
     dirs
 }
 
-fn config_base_dir() -> Option<PathBuf> {
-    candidate_base_dirs()
-        .into_iter()
+fn candidate_base_dirs() -> Vec<PathBuf> {
+    base_dirs(
+        absolute_dir(env::var_os("XDG_CONFIG_HOME")),
+        absolute_dir(env::var_os("HOME")),
+        dirs::config_dir(),
+        cfg!(target_os = "macos"),
+    )
+}
+
+fn resolve_config_dir(bases: &[PathBuf]) -> Option<PathBuf> {
+    bases
+        .iter()
         .map(|base| base.join(NEW_CONFIG_DIR))
         .find(|dir| dir.exists())
         .or_else(|| dirs::config_dir().map(|dir| dir.join(NEW_CONFIG_DIR)))
 }
 
 pub fn config_dir() -> Option<PathBuf> {
-    config_base_dir()
+    resolve_config_dir(&candidate_base_dirs())
 }
 
 pub fn config_path(file: &str) -> Option<PathBuf> {
     migrate_legacy(file);
-    config_base_dir().map(|dir| dir.join(file))
+    config_dir().map(|dir| dir.join(file))
 }
 
 pub fn migrate_legacy(file: &str) {
-    let bases = candidate_base_dirs();
+    migrate_legacy_in(&candidate_base_dirs(), file);
+}
 
+fn migrate_legacy_in(bases: &[PathBuf], file: &str) {
     if bases
         .iter()
         .any(|base| path_for(base, NEW_CONFIG_DIR, file).exists())
@@ -49,7 +73,7 @@ pub fn migrate_legacy(file: &str) {
         return;
     }
 
-    for base in &bases {
+    for base in bases {
         let old_path = path_for(base, OLD_CONFIG_DIR, file);
 
         if !old_path.exists() {
@@ -193,5 +217,115 @@ mod tests {
 
         assert_eq!(loaded, TestConfig::default());
         assert!(warning.unwrap().contains("Could not parse state.json"));
+    }
+
+    #[test]
+    fn absolute_dir_ignores_empty_and_relative_values() {
+        use std::ffi::OsString;
+
+        assert_eq!(absolute_dir(None), None);
+        assert_eq!(absolute_dir(Some(OsString::new())), None);
+        assert_eq!(absolute_dir(Some("relative/dir".into())), None);
+        assert_eq!(
+            absolute_dir(Some("/abs/dir".into())),
+            Some(PathBuf::from("/abs/dir"))
+        );
+    }
+
+    #[test]
+    fn base_dirs_prefers_xdg_style_dirs_when_enabled_and_dedupes() {
+        let xdg = Some(PathBuf::from("/x"));
+        let home = Some(PathBuf::from("/h"));
+        let native = Some(PathBuf::from("/h/Library/Application Support"));
+
+        assert_eq!(
+            base_dirs(xdg.clone(), home.clone(), native.clone(), true),
+            vec![
+                PathBuf::from("/x"),
+                PathBuf::from("/h/.config"),
+                PathBuf::from("/h/Library/Application Support"),
+            ]
+        );
+        assert_eq!(
+            base_dirs(
+                Some(PathBuf::from("/h/.config")),
+                home,
+                Some(PathBuf::from("/h/.config")),
+                true
+            ),
+            vec![PathBuf::from("/h/.config")]
+        );
+        assert_eq!(base_dirs(xdg, None, native.clone(), true).len(), 2);
+    }
+
+    #[test]
+    fn base_dirs_uses_only_native_dir_when_xdg_style_disabled() {
+        let native = PathBuf::from("/home/u/.config");
+
+        assert_eq!(
+            base_dirs(
+                Some(PathBuf::from("/x")),
+                Some(PathBuf::from("/h")),
+                Some(native.clone()),
+                false
+            ),
+            vec![native]
+        );
+    }
+
+    #[test]
+    fn resolve_config_dir_picks_first_existing_candidate() {
+        let root = unique_temp_path("resolve").parent().unwrap().to_path_buf();
+        let _ = fs::remove_dir_all(&root);
+        let (first, second) = (root.join("a"), root.join("b"));
+        fs::create_dir_all(second.join(NEW_CONFIG_DIR)).unwrap();
+
+        assert_eq!(
+            resolve_config_dir(&[first.clone(), second.clone()]),
+            Some(second.join(NEW_CONFIG_DIR))
+        );
+
+        fs::create_dir_all(first.join(NEW_CONFIG_DIR)).unwrap();
+        assert_eq!(
+            resolve_config_dir(&[first.clone(), second]),
+            Some(first.join(NEW_CONFIG_DIR))
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_copies_within_the_base_that_holds_the_old_file() {
+        let root = unique_temp_path("migrate").parent().unwrap().to_path_buf();
+        let _ = fs::remove_dir_all(&root);
+        let (first, second) = (root.join("a"), root.join("b"));
+        let old = path_for(&second, OLD_CONFIG_DIR, "state.json");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::write(&old, "{\"value\":3}").unwrap();
+
+        migrate_legacy_in(&[first.clone(), second.clone()], "state.json");
+
+        assert!(!path_for(&first, NEW_CONFIG_DIR, "state.json").exists());
+        assert_eq!(
+            fs::read_to_string(path_for(&second, NEW_CONFIG_DIR, "state.json")).unwrap(),
+            "{\"value\":3}"
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_skips_when_new_file_exists_in_any_base() {
+        let root = unique_temp_path("migrate-skip")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let _ = fs::remove_dir_all(&root);
+        let (first, second) = (root.join("a"), root.join("b"));
+        for (base, dir) in [(&first, NEW_CONFIG_DIR), (&second, OLD_CONFIG_DIR)] {
+            let path = path_for(base, dir, "state.json");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, dir).unwrap();
+        }
+
+        migrate_legacy_in(&[first, second.clone()], "state.json");
+
+        assert!(!path_for(&second, NEW_CONFIG_DIR, "state.json").exists());
     }
 }
