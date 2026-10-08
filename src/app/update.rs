@@ -22,6 +22,12 @@ impl App {
                 self.handle_settings_action(action);
                 return;
             }
+            ActiveOverlay::PlaybackDoctor if matches!(action, Action::NumberJumpDigit(_)) => {
+                if let Action::NumberJumpDigit(digit) = action {
+                    self.handle_doctor_digit(digit);
+                }
+                return;
+            }
             ActiveOverlay::SleepTimer => {
                 self.handle_sleep_timer_action(action);
                 return;

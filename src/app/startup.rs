@@ -178,7 +178,7 @@ impl App {
             {
                 app.set_info_notice("No audio output device found — playback may not work");
             }
-            app.audio_check_result = Some(result);
+            app.playback.diagnostics.startup_audio_check = Some(result);
         }
 
         app
@@ -269,7 +269,6 @@ impl App {
             settings_undo: SettingsUndoStack::new(),
             stale_dismissed_at: parts.ui_state.stale_dismissed_at(),
             radio_browser_status: super::radio_status::RadioBrowserStatus::new(),
-            audio_check_result: None,
         };
 
         if config_loaded_from_file {

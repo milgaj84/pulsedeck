@@ -1,17 +1,23 @@
 //! Startup audio device self-check.
 //! Verifies audio output availability on launch; shows a notice if unavailable.
-//! Integration into the startup sequence is pending.
-#![allow(dead_code)] // Module exercised by tests; startup wiring pending
 
 /// Result of the startup audio device check.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AudioCheckResult {
     /// At least one output device is available.
     DeviceAvailable,
     /// No audio output device was found.
     NoDeviceFound,
-    /// A device was found but initialization failed.
-    InitFailed(String),
+}
+
+impl AudioCheckResult {
+    /// Short label for the Playback Doctor.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::DeviceAvailable => "Output device found",
+            Self::NoDeviceFound => "No output device found",
+        }
+    }
 }
 
 /// Check whether audio output devices are available.

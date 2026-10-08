@@ -1,6 +1,8 @@
 //! Numbered actionable recovery fixes for the Playback Doctor.
 //! Builds selectable actions from diagnostic suggestions and tracks execution status.
-#![allow(dead_code)] // Types exercised by tests; action execution wiring pending
+
+use super::doctor_suggestions::suggest_actions;
+use super::types::PlaybackDiagnostics;
 
 /// Maximum number of recovery actions displayed (keyed to number keys 1-9).
 pub const MAX_RECOVERY_ACTIONS: usize = 9;
@@ -16,7 +18,7 @@ pub enum RecoveryActionKind {
 }
 
 /// Status of a recovery action.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionStatus {
     Ready,
     InProgress,
@@ -59,7 +61,10 @@ pub fn build_recovery_actions(
                 });
                 number += 1;
             }
-        } else if suggestion.contains("Retry") || suggestion.contains("retry") {
+        } else if suggestion.contains("Retry")
+            || suggestion.contains("retry")
+            || suggestion.contains("try again")
+        {
             actions.push(RecoveryAction {
                 number,
                 label: "Retry connection".to_string(),
@@ -67,6 +72,24 @@ pub fn build_recovery_actions(
                 status: ActionStatus::Ready,
             });
             number += 1;
+        }
+    }
+
+    actions
+}
+
+/// Recovery actions for the current diagnostics, carrying the status of the
+/// action the user last ran (if it is still offered).
+pub fn recovery_actions_for(diagnostics: &PlaybackDiagnostics) -> Vec<RecoveryAction> {
+    let suggestions = suggest_actions(diagnostics);
+    // Simplified: assume alternatives exist whenever an output device is known.
+    let has_alternatives =
+        diagnostics.output_device != "N/A" && !diagnostics.output_device.is_empty();
+    let mut actions = build_recovery_actions(&suggestions, has_alternatives);
+
+    if let Some((kind, status)) = &diagnostics.recovery {
+        for action in actions.iter_mut().filter(|action| action.kind == *kind) {
+            action.status = status.clone();
         }
     }
 
@@ -193,5 +216,28 @@ mod property_tests {
             prop_assert!(result.chars().count() <= max_len,
                 "result {} chars exceeds max {}", result.chars().count(), max_len);
         }
+    }
+
+    #[test]
+    fn test_unreachable_stream_suggestion_offers_retry() {
+        let actions =
+            build_recovery_actions(&["Stream may be unreachable — try again later"], true);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, RecoveryActionKind::RetryConnection);
+    }
+
+    #[test]
+    fn test_recovery_actions_for_carries_running_status() {
+        let mut diagnostics = PlaybackDiagnostics::new("Speakers".to_string(), true, 5);
+        diagnostics.reconnect_attempts = 2;
+        diagnostics.recovery = Some((
+            RecoveryActionKind::RetryConnection,
+            ActionStatus::InProgress,
+        ));
+
+        let actions = recovery_actions_for(&diagnostics);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].status, ActionStatus::InProgress);
     }
 }

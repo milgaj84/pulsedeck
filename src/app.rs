@@ -24,6 +24,7 @@ pub(crate) mod radio_status;
 mod recent;
 mod reconnect;
 pub(crate) mod recovery_actions;
+mod recovery_run;
 mod search;
 mod selectors;
 mod settings;
@@ -148,8 +149,4 @@ pub struct App {
 
     /// Tracks Radio Browser API availability for graceful degradation.
     pub radio_browser_status: radio_status::RadioBrowserStatus,
-
-    /// Result of the startup audio device self-check.
-    #[allow(dead_code)] // Wiring into startup UI pending
-    pub audio_check_result: Option<audio_check::AudioCheckResult>,
 }

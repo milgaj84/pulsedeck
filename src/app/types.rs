@@ -51,6 +51,13 @@ pub struct PlaybackDiagnostics {
     pub last_error: Option<String>,
     pub last_recovery: Option<String>,
     pub decoder_state: DecoderState,
+    /// Result of the startup audio device self-check.
+    pub startup_audio_check: Option<super::audio_check::AudioCheckResult>,
+    /// Most recent Playback Doctor fix the user ran, with its progress.
+    pub recovery: Option<(
+        super::recovery_actions::RecoveryActionKind,
+        super::recovery_actions::ActionStatus,
+    )>,
 }
 
 impl PlaybackDiagnostics {

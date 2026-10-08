@@ -1,3 +1,4 @@
+use super::recovery_actions::{truncate_recovery_error, ActionStatus, RecoveryActionKind};
 use super::*;
 use crate::audio::AudioStatus;
 use crate::radio::{find_station_index_by_url, station_url_matches};
@@ -44,6 +45,10 @@ impl App {
                     self.playback.diagnostics.decoder_state = DecoderState::Playing;
                     self.playback.diagnostics.last_event = Some("Playback started".to_string());
                     self.playback.diagnostics.last_error = None;
+                    self.finish_recovery(
+                        RecoveryActionKind::RetryConnection,
+                        ActionStatus::Success,
+                    );
                 }
                 AudioStatus::Paused => {
                     self.playback.view.state = PlaybackState::Paused;
@@ -53,6 +58,10 @@ impl App {
                 AudioStatus::Error(error) => {
                     self.playback.diagnostics.decoder_state = DecoderState::Failed;
                     self.playback.diagnostics.last_error = Some(error.clone());
+                    self.finish_recovery(
+                        RecoveryActionKind::RetryConnection,
+                        ActionStatus::Failed(truncate_recovery_error(&error)),
+                    );
                     self.handle_audio_error(error);
                 }
                 AudioStatus::FadingOut { current_volume } => {
@@ -91,6 +100,10 @@ impl App {
         self.playback.diagnostics.output_device = display.clone();
         self.playback.diagnostics.last_event = Some(format!("Audio output changed to {display}"));
         self.playback.diagnostics.last_error = None;
+        self.finish_recovery(
+            RecoveryActionKind::SwitchOutputDevice,
+            ActionStatus::Success,
+        );
         self.persist_config_change();
         self.set_info_notice(format!("Audio output: {display}"));
     }
@@ -107,6 +120,10 @@ impl App {
         self.playback.diagnostics.output_device = active_display.clone();
         self.playback.diagnostics.last_event = Some("Audio output unchanged".to_string());
         self.playback.diagnostics.last_error = Some(error.clone());
+        self.finish_recovery(
+            RecoveryActionKind::SwitchOutputDevice,
+            ActionStatus::Failed(truncate_recovery_error(&error)),
+        );
         self.persist_config_change();
         self.set_info_notice(format!(
             "Could not use {requested_display}; still using {active_display}: {error}"

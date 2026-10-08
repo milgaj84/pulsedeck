@@ -1,5 +1,5 @@
 use crate::app::doctor_suggestions::suggest_actions;
-use crate::app::recovery_actions::{build_recovery_actions, ActionStatus};
+use crate::app::recovery_actions::{recovery_actions_for, ActionStatus};
 use crate::app::{DecoderState, PlaybackState};
 use crate::ui::model::UiModel;
 use ratatui::prelude::*;
@@ -52,6 +52,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         row("Track", track),
         row("URL", url),
         row("Output", &app.diagnostics.output_device),
+        row(
+            "Audio check",
+            app.diagnostics
+                .startup_audio_check
+                .as_ref()
+                .map_or("N/A", |result| result.label()),
+        ),
         row(
             "Song info",
             if app.diagnostics.metadata_enabled {
@@ -189,17 +196,7 @@ fn suggestion_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
 }
 
 fn recovery_action_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
-    let suggestions = suggest_actions(app.diagnostics);
-    if suggestions.is_empty() {
-        return vec![];
-    }
-
-    // Determine if alternative output devices exist (simplified: assume true if output != N/A)
-    let has_alternatives =
-        app.diagnostics.output_device != "N/A" && !app.diagnostics.output_device.is_empty();
-
-    let suggestion_strs: Vec<&str> = suggestions.iter().map(|s| s.as_ref()).collect();
-    let actions = build_recovery_actions(&suggestion_strs, has_alternatives);
+    let actions = recovery_actions_for(app.diagnostics);
 
     if actions.is_empty() {
         return vec![];
@@ -207,7 +204,10 @@ fn recovery_action_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
 
     let mut lines = vec![
         Line::from(""),
-        Line::from(Span::styled("── Suggested Fixes ──", theme::cyan())),
+        Line::from(Span::styled(
+            "── Suggested Fixes (press the number to run) ──",
+            theme::cyan(),
+        )),
     ];
 
     for action in &actions {

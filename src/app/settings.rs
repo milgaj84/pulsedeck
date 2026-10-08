@@ -227,17 +227,17 @@ impl App {
     }
 }
 
-fn available_output_device_choices() -> Vec<String> {
+pub(super) fn available_output_device_choices() -> Vec<String> {
     let mut choices = vec![crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL.to_string()];
     choices.extend(crate::audio::list_output_device_names());
     choices
 }
 
-fn output_device_display_name(value: Option<&str>) -> String {
+pub(super) fn output_device_display_name(value: Option<&str>) -> String {
     crate::audio::output_device_display_name(value)
 }
 
-fn step_output_device_preference(
+pub(super) fn step_output_device_preference(
     current: Option<&str>,
     choices: &[String],
     forward: bool,

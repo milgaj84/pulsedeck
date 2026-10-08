@@ -4,6 +4,25 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Playback Doctor fixes are runnable**: press the number next to a suggested fix to run it (retry the stream or switch to the next output device). Progress shows as ⏳, ✓ or ✗ next to the fix.
+- **Startup audio check in the Playback Doctor**: a new "Audio check" row shows whether an output device was found at launch.
+- **XDG config on macOS**: `$XDG_CONFIG_HOME` and `~/.config` are checked before `~/Library/Application Support`. Contributed by @ivansaul (#64).
+
+### Improved
+- "Stream may be unreachable" in the Playback Doctor now offers a retry fix.
+- Config lookup picks the location that actually holds the file, so an empty `~/.config/pulsedeck` cannot hide an existing config.
+
+### Security
+- Update `ratatui` to 0.30.2 (`lru` 0.18.5, RUSTSEC-2026-0253), `rustls` to 0.23.45 (RUSTSEC-2026-0285) and `event-listener` to 5.4.2 (RUSTSEC-2026-0221).
+
+### Internal
+- Removed unused `History::load` and stale `#[allow(dead_code)]` markers; test-only helpers are now `#[cfg(test)]`.
+
+---
+
 ## [1.0.0] - 2026-09-03
 
 ### Added
