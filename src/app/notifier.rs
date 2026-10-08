@@ -7,7 +7,7 @@ pub trait Notifier: Send {
     fn notify_now_playing(&self, title: &str, station_name: &str);
 
     /// Returns the number of notifications dispatched. Used for test assertions.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn notification_count(&self) -> u32 {
         0
     }

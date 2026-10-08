@@ -21,7 +21,7 @@ impl App {
     }
 
     /// Query whether a station URL is in the favorites set.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_favorite(&self, url: &str) -> bool {
         self.library.settings.favorites.contains(url)
     }

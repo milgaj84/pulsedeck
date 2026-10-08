@@ -34,11 +34,6 @@ impl Default for History {
 }
 
 impl History {
-    #[allow(dead_code)]
-    pub fn load() -> Self {
-        Self::load_with_warning().0
-    }
-
     pub fn load_with_warning() -> (Self, Option<String>) {
         let Some(path) = crate::config::config_path(HISTORY_FILE) else {
             return (Self::default(), None);

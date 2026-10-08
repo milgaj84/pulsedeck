@@ -42,7 +42,7 @@ impl ElapsedTimer {
         self.accumulated
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.running
     }

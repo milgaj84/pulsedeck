@@ -36,13 +36,13 @@ impl FavoritesSet {
     }
 
     /// Return the number of favorites.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.urls.len()
     }
 
     /// Check if the favorites set is empty.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.urls.is_empty()
     }
