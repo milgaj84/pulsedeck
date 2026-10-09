@@ -665,7 +665,17 @@ mod tests {
                 .collect()
         }
 
+        /// Run the worker and collect its events. The stream is abandoned when
+        /// this returns; use `run_worker_alive` to keep it playing.
         fn run_worker_against(url: String) -> Vec<EngineEvent> {
+            let (events, active) = run_worker_alive(url);
+            active.store(0, SeqCst);
+            events
+        }
+
+        /// Like `run_worker_against`, but leaves the stream active so the
+        /// caller can keep reading it. The caller must set the flag to 0.
+        fn run_worker_alive(url: String) -> (Vec<EngineEvent>, Arc<AtomicU64>) {
             let (event_tx, event_rx) = mpsc::channel();
             let active = active_generation();
             let mut req = request(Duration::from_secs(8), 4096, 512 * 1024);
@@ -677,8 +687,7 @@ mod tests {
                 Arc::clone(&active),
                 Arc::new(Mutex::new(VecDeque::new())),
             );
-            active.store(0, SeqCst);
-            event_rx.try_iter().collect()
+            (event_rx.try_iter().collect(), active)
         }
 
         fn terminal(events: &[EngineEvent]) -> &EngineEvent {
@@ -756,6 +765,40 @@ mod tests {
                 EngineEvent::Connected { format, .. } => assert_eq!(format.codec, "AAC"),
                 _ => panic!("expected a plain AAC stream to connect"),
             }
+        }
+
+        /// Manual check against a real station; needs network access:
+        /// `PULSEDECK_HLS_URL=<playlist url> cargo test manual_real_hls -- --ignored --nocapture`
+        #[test]
+        #[ignore = "needs network and PULSEDECK_HLS_URL"]
+        fn manual_real_hls_stream_connects() {
+            let Ok(url) = std::env::var("PULSEDECK_HLS_URL") else {
+                return;
+            };
+            let (events, active) = run_worker_alive(url);
+            let Some(EngineEvent::Connected { source, format, .. }) = events
+                .into_iter()
+                .rfind(|event| !matches!(event, EngineEvent::Buffering { .. }))
+            else {
+                panic!("did not connect");
+            };
+            println!(
+                "CONNECTED codec={} rate={} channels={}",
+                format.codec, format.sample_rate, format.channels
+            );
+
+            // 15 seconds of audio crosses several segment boundaries.
+            let wanted = format.sample_rate as usize * usize::from(format.channels) * 15;
+            let samples: Vec<f32> = source.take(wanted).collect();
+            active.store(0, SeqCst);
+            let peak = samples.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
+            println!(
+                "DECODED {} of {} samples, peak {peak:.3}",
+                samples.len(),
+                wanted
+            );
+            assert_eq!(samples.len(), wanted, "the stream ended early");
+            assert!(peak > 0.001, "decoded audio is silent");
         }
 
         #[test]

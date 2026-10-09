@@ -247,12 +247,20 @@ fn library_section(inputs: &DoctorInputs) -> Option<Section> {
 
 fn network_section(inputs: &DoctorInputs) -> Option<Section> {
     let results = inputs.network.as_ref()?;
+    // The app tries the mirrors in order, so one dead mirror is only a warning
+    // as long as another answers.
+    let any_reachable = results.iter().any(|(_, result)| result.is_ok());
+    let down = if any_reachable {
+        Status::Warn
+    } else {
+        Status::Fail
+    };
     let checks = results
         .iter()
         .map(|(server, result)| match result {
             Ok(()) => check(Status::Ok, "radio-browser", format!("{server} reachable")),
             Err(err) => check(
-                Status::Fail,
+                down,
                 "radio-browser",
                 format!("{server} unreachable: {err}"),
             ),
@@ -603,8 +611,24 @@ mod tests {
 
         let checks = find(&report, "radio-browser");
         assert_eq!(checks[0].status, Status::Ok);
-        assert_eq!(checks[1].status, Status::Fail);
+        assert_eq!(checks[1].status, Status::Warn);
         assert!(checks[1].detail.contains("timeout"));
+        assert!(!report.has_failures());
+    }
+
+    #[test]
+    fn network_with_no_reachable_mirror_fails() {
+        let mut inputs = base_inputs();
+        inputs.network = Some(vec![
+            ("https://a".to_string(), Err("timeout".to_string())),
+            ("https://b".to_string(), Err("refused".to_string())),
+        ]);
+
+        let report = build_report(&inputs);
+
+        assert!(find(&report, "radio-browser")
+            .iter()
+            .all(|c| c.status == Status::Fail));
         assert!(report.has_failures());
     }
 
