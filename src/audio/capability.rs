@@ -1,10 +1,12 @@
-/// Codec capability policy for PulseDeck 0.5.0.
+/// Codec capability policy.
 ///
 /// This module answers one question: given a station codec string, what
 /// should playback do? The active decode path uses Symphonia probe-based
 /// decoding (via rodio's `Decoder::new`), which supports MP3, AAC, OGG/Vorbis,
-/// Opus, FLAC, and WAV. HLS/M3U8 remains `Unsupported` because it requires a
-/// playlist/segment fetcher that is out of scope for v0.5.0. Missing or
+/// Opus, FLAC, and WAV. HLS playlists are played by the HLS fetcher
+/// (`audio::hls`) for audio-only AAC/MP3 streams; encrypted, fMP4 and
+/// video-only variants are rejected at runtime with a clear error. Windows
+/// Media (WMA/ASF) has no Symphonia decoder and is `Unsupported`. Missing or
 /// unrecognized codec metadata is `Unknown`, which allows a playback attempt
 /// because Radio Browser entries are often incomplete.
 
@@ -25,9 +27,9 @@ pub struct CodecCapability {
 /// Return the capability policy for a given raw codec string.
 ///
 /// MP3 and all Symphonia-supported formats (AAC, OGG/Vorbis, Opus, FLAC, WAV)
-/// are `Supported`. HLS/M3U8 is `Unsupported` because it requires a
-/// playlist/segment fetcher. Everything else (including empty) is `Unknown`
-/// and allowed to attempt playback.
+/// are `Supported`, and so is HLS/M3U8 (audio-only streams; see the reason
+/// text for the limits). WMA/ASF is `Unsupported`. Everything else (including
+/// empty) is `Unknown` and allowed to attempt playback.
 pub fn codec_capability(codec: &str) -> CodecCapability {
     match normalize_playback_codec(codec).as_str() {
         "" => CodecCapability {
@@ -60,10 +62,17 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
             capability: PlaybackCapability::Supported,
             reason: "FLAC streams are supported via Symphonia decoding",
         },
-        "HLS" | "M3U8" | "APPLICATION/X-MPEGURL" => CodecCapability {
-            normalized_codec: "HLS",
+        "HLS" | "M3U8" | "APPLICATION/X-MPEGURL" | "APPLICATION/VND.APPLE.MPEGURL" => {
+            CodecCapability {
+                normalized_codec: "HLS",
+                capability: PlaybackCapability::Supported,
+                reason: "HLS audio (AAC/MP3) is played from live segments; encrypted, fMP4 and video-only streams are not supported",
+            }
+        }
+        "WMA" | "ASF" | "AUDIO/X-MS-WMA" | "AUDIO/X-MS-ASF" => CodecCapability {
+            normalized_codec: "WMA",
             capability: PlaybackCapability::Unsupported,
-            reason: "HLS playlists require a segment fetcher, not yet supported",
+            reason: "Windows Media (WMA/ASF) streams cannot be decoded",
         },
         "WAV" | "AUDIO/WAV" | "AUDIO/X-WAV" => CodecCapability {
             normalized_codec: "WAV",
@@ -136,13 +145,30 @@ mod tests {
     }
 
     #[test]
-    fn hls_remains_unsupported() {
+    fn hls_is_supported_with_a_caveat() {
         for codec in ["m3u8", "HLS", "APPLICATION/X-MPEGURL"] {
+            let capability = codec_capability(codec);
             assert_eq!(
-                codec_capability(codec).capability,
-                PlaybackCapability::Unsupported,
-                "{codec} should remain Unsupported (requires segment fetcher)"
+                capability.capability,
+                PlaybackCapability::Supported,
+                "{codec}"
             );
+            assert_eq!(capability.normalized_codec, "HLS");
+            assert!(capability.reason.contains("not supported"));
+            assert!(is_codec_playback_supported(codec));
+        }
+    }
+
+    #[test]
+    fn wma_is_unsupported() {
+        for codec in ["wma", "WMA", "asf", "audio/x-ms-wma"] {
+            let capability = codec_capability(codec);
+            assert_eq!(
+                capability.capability,
+                PlaybackCapability::Unsupported,
+                "{codec}"
+            );
+            assert_eq!(capability.normalized_codec, "WMA");
             assert!(!is_codec_playback_supported(codec));
         }
     }
@@ -167,12 +193,18 @@ mod tests {
     }
 
     #[test]
-    fn hls_variants_are_unsupported() {
-        for codec in ["HLS", "M3U8", "APPLICATION/X-MPEGURL"] {
+    fn hls_variants_are_supported() {
+        for codec in [
+            "HLS",
+            "M3U8",
+            "APPLICATION/X-MPEGURL",
+            "application/vnd.apple.mpegurl",
+            " hls ",
+        ] {
             assert_eq!(
                 codec_capability(codec).capability,
-                PlaybackCapability::Unsupported,
-                "{codec} should be Unsupported"
+                PlaybackCapability::Supported,
+                "{codec} should be Supported"
             );
         }
     }
@@ -193,7 +225,9 @@ mod tests {
 
     #[test]
     fn codec_capability_reason_is_not_empty() {
-        for codec in ["MP3", "AAC", "OGG", "OPUS", "FLAC", "HLS", "", "unknown"] {
+        for codec in [
+            "MP3", "AAC", "OGG", "OPUS", "FLAC", "HLS", "WMA", "", "unknown",
+        ] {
             assert!(!codec_capability(codec).reason.is_empty());
         }
     }

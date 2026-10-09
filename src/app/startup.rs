@@ -498,12 +498,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn startup_autoplay_blocks_hls_codec() {
-        let mut station = Station::basic("HLS Radio", "http://hls", "Pop", "US", 128);
-        station.codec = "HLS".to_string();
+    fn startup_autoplay_blocks_unsupported_codec() {
+        let mut station = Station::basic("WMA Radio", "http://wma", "Pop", "US", 128);
+        station.codec = "WMA".to_string();
 
         let mut library = Library::in_memory(vec![station]);
-        library.settings.last_played_url = Some("http://hls".to_string());
+        library.settings.last_played_url = Some("http://wma".to_string());
 
         let mut parts = test_parts(library);
         parts.config.playback.autoplay_last = true;
@@ -511,6 +511,24 @@ pub(crate) mod tests {
 
         assert_eq!(app.playback.view.playing_url, None);
         assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn startup_autoplay_allows_hls_codec() {
+        let mut station = Station::basic("HLS Radio", "http://hls/live.m3u8", "Pop", "US", 128);
+        station.codec = "HLS".to_string();
+
+        let mut library = Library::in_memory(vec![station]);
+        library.settings.last_played_url = Some("http://hls/live.m3u8".to_string());
+
+        let mut parts = test_parts(library);
+        parts.config.playback.autoplay_last = true;
+        let app = App::from_parts(parts);
+
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://hls/live.m3u8")
+        );
     }
 
     #[test]

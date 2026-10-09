@@ -59,6 +59,7 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 - 30,000+ stations via radio-browser.info
 - Smooth fade transitions between stations
 - Auto-reconnect on stream dropout
+- HLS (`.m3u8`) radio streams, AAC and MP3 (encrypted, fMP4 and video streams are not supported)
 - Live audio output device switching
 - Sleep timer (fade out and stop)
 - Desktop notifications for track changes
@@ -247,7 +248,7 @@ PulseDeck remembers everything: your library, volume, theme, layout, visualizer 
 
 PulseDeck treats internet radio as a live stream, not a seekable file. The audio engine runs on a dedicated OS thread with a single-owner state machine. Generation-guarded worker threads ensure rapid station switching discards stale connections instantly. A bounded prebuffer with timeout guarantees the engine never hangs in `Connecting`.
 
-Codec support: MP3 (fast-path), AAC, OGG/Vorbis, Opus, FLAC, WAV via Symphonia probing with reliable stream classification. ICY metadata is stripped by a dedicated reader that provably never leaks metadata bytes into the decoder. The visualizer is a passive tap that never blocks audio. Live output device switching is transactional and preserves active playback on failure.
+Codec support: MP3 (fast-path), AAC, OGG/Vorbis, Opus, FLAC, WAV via Symphonia probing with reliable stream classification. HLS playlists are followed by a small fetcher thread and an in-house MPEG-TS demuxer that turns the segments into one continuous AAC or MP3 stream, so the decoder treats them like any other station. Windows Media (WMA/ASF) streams cannot be decoded. ICY metadata is stripped by a dedicated reader that provably never leaks metadata bytes into the decoder. The visualizer is a passive tap that never blocks audio. Live output device switching is transactional and preserves active playback on failure.
 
 If something goes wrong, press `d` for the Playback Doctor — it shows diagnostics, context-aware recovery hints, and numbered one-click fixes you can execute directly.
 

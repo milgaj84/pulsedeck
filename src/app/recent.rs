@@ -208,10 +208,10 @@ mod tests {
 
     #[test]
     fn play_slot_codec_failure_shows_error() {
-        let mut st = station("HLS Radio", "http://hls");
-        st.codec = "HLS".to_string();
+        let mut st = station("WMA Radio", "http://wma");
+        st.codec = "WMA".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
-        app.library.settings.station_slots.assign(1, "http://hls");
+        app.library.settings.station_slots.assign(1, "http://wma");
 
         app.play_slot(1);
 

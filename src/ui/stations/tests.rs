@@ -28,9 +28,16 @@ fn truncation_adds_ellipsis_for_long_names() {
 
 #[test]
 fn codec_chip_marks_unsupported_codec() {
+    let mut station = crate::radio::Station::basic("WMA", "http://wma", "Pop", "US", 128);
+    station.codec = "WMA".to_string();
+    assert_eq!(codec_chip(&station), "WMA !");
+}
+
+#[test]
+fn codec_chip_shows_hls_as_playable() {
     let mut station = crate::radio::Station::basic("HLS", "http://hls", "Pop", "US", 128);
     station.codec = "HLS".to_string();
-    assert_eq!(codec_chip(&station), "HLS !");
+    assert_eq!(codec_chip(&station), "HLS");
 }
 
 #[test]

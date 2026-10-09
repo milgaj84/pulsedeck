@@ -13,6 +13,12 @@ pub(super) fn last_played_station_position(
     find_station_index_by_url(stations, last_played_url)
 }
 
+/// An HLS stream that can never play (encrypted, fMP4, video-only, ...).
+/// Retrying it would only repeat the same failure.
+fn is_permanent_failure(error: &str) -> bool {
+    error.contains("HLS:") && error.contains("not supported")
+}
+
 pub(super) fn unix_now_string() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -197,10 +203,15 @@ impl App {
     }
 
     fn handle_audio_error(&mut self, error: String) {
+        let retryable = !is_permanent_failure(&error);
         if let Some(url) = self.playback.view.playing_url.clone() {
-            self.playback
-                .reconnect
-                .arm(url.clone(), std::time::Instant::now());
+            if retryable {
+                self.playback
+                    .reconnect
+                    .arm(url.clone(), std::time::Instant::now());
+            } else {
+                self.playback.reconnect.disarm();
+            }
             if self
                 .library
                 .mark_station_failure(&url, unix_now_string(), &error)
@@ -211,8 +222,15 @@ impl App {
         self.playback.view.reset_transient_status();
         self.playback.diagnostics.buffer_percent = 0;
         self.playback.diagnostics.buffer_seconds = 0;
-        self.playback.diagnostics.reconnect_attempts = 1;
-        self.playback.diagnostics.last_recovery = Some("Queued automatic reconnect".to_string());
+        if retryable {
+            self.playback.diagnostics.reconnect_attempts = 1;
+            self.playback.diagnostics.last_recovery =
+                Some("Queued automatic reconnect".to_string());
+        } else {
+            self.playback.diagnostics.reconnect_attempts = 0;
+            self.playback.diagnostics.last_recovery =
+                Some("Not retrying: this stream is not supported".to_string());
+        }
         self.playback.view.state = PlaybackState::Error(error);
     }
 }
@@ -282,6 +300,87 @@ mod tests {
             app.playback.diagnostics.last_error.as_deref(),
             Some("not found")
         );
+    }
+
+    fn app_playing_with_error(error: &str) -> App {
+        let audio = MockAudioSink::new();
+        audio
+            .statuses
+            .borrow_mut()
+            .push_back(AudioStatus::Error(error.to_string()));
+        let mut app = App::from_parts(test_parts_with_audio(audio));
+        app.playback.view.playing_url = Some("http://stream".to_string());
+        app.playback.view.state = PlaybackState::Connecting;
+        app.poll_audio_status();
+        app
+    }
+
+    #[test]
+    fn transient_errors_queue_a_reconnect() {
+        let mut app = app_playing_with_error("Connect error: could not connect: refused");
+
+        let due = app
+            .playback
+            .reconnect
+            .take_due(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!(due.as_deref(), Some("http://stream"));
+        assert_eq!(app.playback.diagnostics.reconnect_attempts, 1);
+        assert_eq!(
+            app.playback.diagnostics.last_recovery.as_deref(),
+            Some("Queued automatic reconnect")
+        );
+    }
+
+    #[test]
+    fn unsupported_hls_streams_are_not_retried() {
+        for error in [
+            "Decode error: HLS: encrypted streams are not supported",
+            "Decode error: HLS: fMP4/CMAF segments are not supported",
+            "Decode error: HLS: video-only streams are not supported",
+        ] {
+            let mut app = app_playing_with_error(error);
+
+            let due = app
+                .playback
+                .reconnect
+                .take_due(Instant::now() + Duration::from_secs(60));
+
+            assert_eq!(due, None, "{error}");
+            assert_eq!(app.playback.diagnostics.reconnect_attempts, 0);
+            assert_eq!(
+                app.playback.diagnostics.last_recovery.as_deref(),
+                Some("Not retrying: this stream is not supported")
+            );
+            assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+        }
+    }
+
+    #[test]
+    fn hls_network_failures_are_still_retried() {
+        let mut app =
+            app_playing_with_error("Connect error: HLS: segment download failed: HTTP 503");
+
+        let due = app
+            .playback
+            .reconnect
+            .take_due(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!(due.as_deref(), Some("http://stream"));
+    }
+
+    #[test]
+    fn only_hls_errors_can_be_permanent() {
+        assert!(is_permanent_failure(
+            "Decode error: HLS: x is not supported"
+        ));
+        assert!(!is_permanent_failure(
+            "Decode error: AAC probe failed: not supported"
+        ));
+        assert!(!is_permanent_failure(
+            "HLS: malformed playlist (missing #EXTM3U)"
+        ));
+        assert!(!is_permanent_failure(""));
     }
 
     #[test]

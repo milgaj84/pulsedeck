@@ -7,11 +7,14 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **HLS (`.m3u8`) streams**: stations that publish an HLS playlist now play. Master playlists are resolved to the lowest-bandwidth audio variant (AAC-LC and MP3 preferred over HE-AAC), live playlists start three segments from the live edge and refresh on the target duration, and segments can be MPEG-TS (AAC or MP3) or "packed" raw AAC/MP3. HLS is recognised from the playlist content type, a `.m3u8` URL, or the playlist body itself, so imported M3U entries work too. Encrypted, fMP4/CMAF, video-only and AC-3/E-AC-3 streams stop with a clear "not supported" message instead of retrying. No new dependencies: the MPEG-TS demuxer is built in. There are no track titles for HLS stations.
 - **`pulsedeck doctor`**: headless diagnostics for bug reports. Reports the config paths in use (and any legacy `driftfm` data), `pulsedeck.toml` and keybindings validity, audio output devices and the configured device, and library size. `--network` also probes the Radio Browser servers. It is read-only (no migration, seeding or writes) and exits with status 1 when a check fails.
 
 - **Prebuilt binaries** are attached to each GitHub Release for Linux x86_64, macOS (Intel and Apple Silicon) and Windows x86_64, with SHA-256 checksums.
 
 ### Improved
+- **No pointless reconnects**: HLS streams that can never play (encrypted, fMP4, video-only) are not retried, and the Doctor says so.
+- **WMA/ASF stations** are marked unplayable up front with a clear message instead of failing to decode (Symphonia has no WMA decoder).
 - **Playback Doctor "switch output device" fix** is only offered when another device exists, and its label names the target (for example "Switch to USB DAC"). The device list is cached, so rendering never touches audio hardware.
 - The Doctor footer and the help overlay mention the `1-9` fix keys.
 - **Automatic GitHub Releases**: pushing a `v*` tag now creates the GitHub Release from the matching changelog section.

@@ -12,6 +12,7 @@ pub(super) type Generation = u64;
 /// transitions go through `EngineLoop::transition`, which emits the
 /// corresponding `AudioStatus` exactly once per user-visible change.
 #[derive(Debug, Clone)]
+// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
 #[allow(dead_code)]
 pub(super) enum EngineState {
     /// No stream loaded; engine is idle.
@@ -46,6 +47,7 @@ pub(super) enum EngineState {
 // ---------------------------------------------------------------------------
 
 /// Internal messages sent from workers and `OutputManager` to `EngineLoop`.
+// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
 #[allow(dead_code)]
 pub(super) enum EngineEvent {
     /// Prebuffer progress update from the connection worker.
@@ -101,6 +103,7 @@ impl EngineEvent {
 /// `classify_playback_error` function parses them to decide reconnect policy
 /// and UI hints.
 #[derive(Debug, Clone)]
+// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
 #[allow(dead_code)]
 pub(super) enum EngineError {
     /// DNS / TCP / TLS / connect-timeout failure.
@@ -147,6 +150,7 @@ impl EngineError {
 
 /// Reason a stream worker terminated.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
 #[allow(dead_code)]
 pub(super) enum EndReason {
     /// Mid-stream network read error.
@@ -240,6 +244,7 @@ impl Default for DeviceRecoveryConfig {
 /// Used for diagnostics and for deciding between the MP3 fast-path and the
 /// generic Symphonia decoder.
 #[derive(Debug, Clone)]
+// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
 #[allow(dead_code)]
 pub(super) struct StreamFormat {
     /// Human-readable codec name (e.g. `"MP3"`, `"AAC"`, `"Vorbis"`).

@@ -529,9 +529,9 @@ mod tests {
     }
 
     #[test]
-    fn hls_codec_is_blocked_before_audio_command() {
-        let mut st = station("HLS Radio", "http://hls");
-        st.codec = "HLS".to_string();
+    fn unsupported_codec_is_blocked_before_audio_command() {
+        let mut st = station("WMA Radio", "http://wma");
+        st.codec = "WMA".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
 
         app.play_selected();
@@ -544,13 +544,13 @@ mod tests {
             .diagnostics
             .last_error
             .as_deref()
-            .is_some_and(|msg| msg.contains("HLS")));
+            .is_some_and(|msg| msg.contains("WMA")));
     }
 
     #[test]
-    fn hls_codec_does_not_set_playing_url_or_last_played_url() {
-        let mut st = station("HLS Radio", "http://hls");
-        st.codec = "HLS".to_string();
+    fn unsupported_codec_does_not_set_playing_url_or_last_played_url() {
+        let mut st = station("WMA Radio", "http://wma");
+        st.codec = "WMA".to_string();
         let mut app = App::new(Library::in_memory(vec![st]));
 
         app.play_selected();
@@ -558,6 +558,25 @@ mod tests {
         assert_eq!(app.playback.view.playing_url, None);
         assert_eq!(app.library.settings.last_played_url, None);
         assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn hls_codec_starts_playback() {
+        let mut st = station("HLS Radio", "http://hls/live.m3u8");
+        st.codec = "HLS".to_string();
+        let mut app = App::new(Library::in_memory(vec![st]));
+
+        app.play_selected();
+
+        assert_eq!(
+            app.playback.view.playing_url.as_deref(),
+            Some("http://hls/live.m3u8")
+        );
+        assert_eq!(
+            app.library.settings.last_played_url.as_deref(),
+            Some("http://hls/live.m3u8")
+        );
+        assert_eq!(app.playback.view.state, PlaybackState::Connecting);
     }
 
     #[test]

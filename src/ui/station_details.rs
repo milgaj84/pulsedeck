@@ -220,6 +220,9 @@ fn codec_detail(station: &crate::radio::Station) -> String {
     let capability = crate::audio::codec_capability(&station.codec);
 
     match capability.capability {
+        PlaybackCapability::Supported if capability.normalized_codec == "HLS" => {
+            format!("{codec} · playable (live segments, no track titles)")
+        }
         PlaybackCapability::Supported => format!("{codec} · playable"),
         PlaybackCapability::Unknown => format!("{codec} · playback will try"),
         PlaybackCapability::Unsupported => format!("{codec} · not playable yet"),
@@ -494,5 +497,22 @@ mod tests {
         let now = "1700000000";
         let prefix = health_dot_prefix_at(&station, now);
         assert!(prefix.is_none(), "dot should be absent when no health data");
+    }
+
+    #[test]
+    fn codec_detail_explains_hls_wma_and_unknown() {
+        let station = |codec: &str| {
+            let mut station = crate::radio::Station::basic("S", "http://s", "Pop", "US", 128);
+            station.codec = codec.to_string();
+            station
+        };
+
+        assert_eq!(
+            codec_detail(&station("HLS")),
+            "HLS · playable (live segments, no track titles)"
+        );
+        assert_eq!(codec_detail(&station("MP3")), "MP3 · playable");
+        assert_eq!(codec_detail(&station("WMA")), "WMA · not playable yet");
+        assert_eq!(codec_detail(&station("weird")), "weird · playback will try");
     }
 }
