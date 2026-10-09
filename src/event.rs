@@ -297,7 +297,7 @@ fn allows_normal_shortcut_modifier(modifiers: KeyModifiers) -> bool {
 }
 
 /// Key mapping for search mode.
-/// Printable characters remain search input, except Space auditions highlighted results.
+/// Printable characters (including Space) are search input; Tab auditions the highlighted result.
 #[cfg(test)]
 fn map_search(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
@@ -308,7 +308,8 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         (mods, KeyCode::Enter) if mods.contains(KeyModifiers::CONTROL) => {
             Some(Action::SearchAudition)
         }
-        (_, KeyCode::Char(' ')) => Some(Action::SearchAudition),
+        // Space types a space (multi-word queries), so audition is on Tab.
+        (_, KeyCode::Tab) => Some(Action::SearchAudition),
 
         // Confirm search: add highlighted result, play it, and leave search
         (_, KeyCode::Enter) => Some(Action::SearchConfirm),
@@ -860,9 +861,17 @@ mod tests {
     }
 
     #[test]
-    fn search_mode_space_auditions_selected_result() {
+    fn search_mode_space_types_a_space_for_multi_word_queries() {
         assert_eq!(
             map_key(key(KeyCode::Char(' ')), &InputMode::Search, &NORMAL_DISPLAY),
+            Some(Action::SearchInput(' '))
+        );
+    }
+
+    #[test]
+    fn search_mode_tab_auditions_selected_result() {
+        assert_eq!(
+            map_key(key(KeyCode::Tab), &InputMode::Search, &NORMAL_DISPLAY),
             Some(Action::SearchAudition)
         );
     }
@@ -1348,6 +1357,54 @@ mod registry_integration_tests {
         );
 
         assert_eq!(result, Some(Action::Stop));
+    }
+
+    #[test]
+    fn default_registry_types_spaces_in_search_and_auditions_on_tab() {
+        let registry = KeybindingRegistry::defaults();
+        let map = |code: KeyCode| {
+            map_key_with_registry(
+                KeyEvent::new(code, KeyModifiers::NONE),
+                &InputMode::Search,
+                &DisplayMode::Normal,
+                &registry,
+            )
+        };
+
+        assert_eq!(map(KeyCode::Char(' ')), Some(Action::SearchInput(' ')));
+        assert_eq!(map(KeyCode::Tab), Some(Action::SearchAudition));
+        // Normal mode is untouched: Space still pauses, Tab still changes genre.
+        let normal = |code: KeyCode| {
+            map_key_with_registry(
+                KeyEvent::new(code, KeyModifiers::NONE),
+                &InputMode::Normal,
+                &DisplayMode::Normal,
+                &registry,
+            )
+        };
+        assert_eq!(normal(KeyCode::Char(' ')), Some(Action::TogglePause));
+        assert_eq!(normal(KeyCode::Tab), Some(Action::NextGenre));
+    }
+
+    #[test]
+    fn a_multi_word_query_can_be_typed_through_the_default_registry() {
+        let registry = KeybindingRegistry::defaults();
+        let typed: String = "radio paradise"
+            .chars()
+            .filter_map(|c| {
+                match map_key_with_registry(
+                    KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+                    &InputMode::Search,
+                    &DisplayMode::Normal,
+                    &registry,
+                ) {
+                    Some(Action::SearchInput(c)) => Some(c),
+                    _ => None,
+                }
+            })
+            .collect();
+
+        assert_eq!(typed, "radio paradise");
     }
 
     #[test]

@@ -4,6 +4,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Multi-word search queries.** In worldwide search, Space was bound to "audition the highlighted result", so it was impossible to type a query such as `radio paradise`. Space now types a space, and audition moved to **Tab** (Ctrl+Enter still works where the terminal supports it). The help overlay, the footer hint, the search panel titles, the first-run onboarding card and the README all show the new key. If you use a custom `keybindings.json`, check that it does not bind Space in search mode.
+
+---
+
 ## [1.2.0] - 2026-10-09
 
 ### Added

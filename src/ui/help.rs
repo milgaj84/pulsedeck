@@ -161,10 +161,13 @@ fn search_rows() -> Vec<Row<'static>> {
     vec![
         shortcut("/ · Ctrl+f · F3", "Open worldwide station search"),
         shortcut(": · Ctrl+p", "Open command palette"),
-        shortcut("Type", "Search by name, tag, city, or country"),
+        shortcut(
+            "Type",
+            "Search by name, tag, city, or country (spaces are fine)",
+        ),
         shortcut("Prefixes", "tag: · country: · lang: · codec:"),
         shortcut("Aliases", "genre: · cc: · language: · format: · station:"),
-        shortcut("Space", "Audition highlighted result (no save)"),
+        shortcut("Tab", "Audition highlighted result (no save)"),
         shortcut("Ctrl+Enter", "Audition (alt, if terminal supports it)"),
         shortcut("Enter", "Save + play highlighted result"),
         shortcut("Esc", "Leave search without saving"),
@@ -317,6 +320,23 @@ mod tests {
         assert!(
             joined.contains("keybindings.json"),
             "Settings tab must mention keybindings.json customization"
+        );
+    }
+
+    #[test]
+    fn search_help_documents_tab_for_audition_and_that_spaces_are_fine() {
+        let joined = search_rows()
+            .iter()
+            .map(|row| format!("{row:?}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(joined.contains("Tab"));
+        assert!(joined.contains("Audition highlighted result"));
+        assert!(joined.contains("spaces are fine"));
+        assert!(
+            !joined.contains("Space"),
+            "search help must not mention Space"
         );
     }
 }

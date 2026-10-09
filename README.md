@@ -42,7 +42,7 @@ PulseDeck starts with handpicked stations ready to go. But you want something sp
 
 1. Press `/` — search opens
 2. Type `tag:ambient` — results appear as you type
-3. Press `Space` on one to preview it (no commitment)
+3. Press `Tab` on one to preview it (no commitment)
 4. Like it? Press `Enter` — saved to your library forever
 5. Press `Esc` to close search. You're listening.
 
@@ -133,7 +133,8 @@ PulseDeck is keyboard-driven. Press `h` anytime for the full reference.
 | :--- | :--- |
 | `/` | Open search |
 | `Enter` | Play (or save + play from search) |
-| `Space` | Pause/resume (or preview in search) |
+| `Space` | Pause/resume (types a space while searching) |
+| `Tab` | Preview the highlighted result (in search) |
 | `j`/`k` or `↑`/`↓` | Navigate |
 | `+`/`-` | Volume |
 | `m` | Mute |

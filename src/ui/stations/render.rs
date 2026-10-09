@@ -229,7 +229,7 @@ fn render_empty_library_onboarding(frame: &mut Frame, area: Rect) {
         Line::from(Span::styled("No saved stations yet", theme::title())),
         Line::from(""),
         onboarding_hint("/", "Search worldwide radio"),
-        onboarding_hint("Space", "Audition a search result"),
+        onboarding_hint("Tab", "Audition a search result"),
         onboarding_hint("Enter", "Save + play highlighted result"),
         onboarding_hint(",", "Configure theme and audio output"),
         onboarding_hint("h", "Open full help"),

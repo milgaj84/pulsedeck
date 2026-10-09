@@ -215,7 +215,7 @@ fn footer_line(app: &UiModel<'_>) -> Line<'static> {
     match app.input_mode {
         InputMode::Search => hint_line(
             &[
-                ("Space", "Audition"),
+                ("Tab", "Audition"),
                 ("Enter", "Save+Play"),
                 ("Esc", "Back"),
                 ("↑↓", "Results"),
@@ -426,5 +426,23 @@ mod tests {
         let model = UiModel::from(&app);
 
         assert_eq!(model.elapsed_display, None);
+    }
+
+    #[test]
+    fn search_footer_shows_tab_for_audition_and_not_space() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.input_mode = crate::app::InputMode::Search;
+        let model = UiModel::from(&app);
+
+        let text: String = footer_line(&model)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(text.contains("Tab"), "{text}");
+        assert!(text.contains("Audition"), "{text}");
+        assert!(!text.contains("Space"), "{text}");
     }
 }

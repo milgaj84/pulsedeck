@@ -269,8 +269,9 @@ pub fn search_mode_defaults() -> Vec<KeyBinding> {
             Action::SearchAudition,
             mode.clone(),
         ),
+        // Space must type a space (multi-word queries), so audition is on Tab.
         bind(
-            KeySpec::Char(' '),
+            KeySpec::Named(NamedKey::Tab),
             vec![],
             Action::SearchAudition,
             mode.clone(),

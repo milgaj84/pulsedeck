@@ -128,7 +128,7 @@ fn search_title_explains_preview_and_save_actions() {
 
     let title = station_list_title(&model, 3);
 
-    assert!(title.contains("Space preview"));
+    assert!(title.contains("Tab preview"));
     assert!(title.contains("Enter save"));
 }
 

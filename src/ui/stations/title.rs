@@ -15,7 +15,7 @@ pub(super) fn station_list_title(app: &UiModel<'_>, visible_count: usize) -> Str
 
 fn search_title(app: &UiModel<'_>, visible_count: usize) -> String {
     if app.search.query.is_empty() {
-        " 🔍 Search the airwaves · Space previews · Enter saves ".to_string()
+        " 🔍 Search the airwaves · Tab previews · Enter saves ".to_string()
     } else if app.search.searching_api {
         format!(" 🔍 Tuning {}... ", search_title_label(&app.search.query))
     } else if visible_count == 0 {
@@ -25,7 +25,7 @@ fn search_title(app: &UiModel<'_>, visible_count: usize) -> String {
         )
     } else {
         format!(
-            " 🔍 Search Results ({}) · {} · Space preview · Enter save ",
+            " 🔍 Search Results ({}) · {} · Tab preview · Enter save ",
             visible_count,
             search_title_label(&app.search.query)
         )

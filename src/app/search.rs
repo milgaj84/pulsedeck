@@ -413,6 +413,20 @@ mod tests {
     }
 
     #[test]
+    fn multi_word_queries_keep_their_spaces() {
+        let mut app = test_app();
+        app.update(Action::EnterSearch);
+
+        for c in "radio paradise".chars() {
+            app.update(Action::SearchInput(c));
+        }
+
+        assert_eq!(app.search.query, "radio paradise");
+        let parsed = crate::radio::StationSearchQuery::parse(&app.search.query);
+        assert_eq!(parsed.value(), "radio paradise");
+    }
+
+    #[test]
     fn short_search_query_clears_results_and_waits_for_input() {
         let mut app = test_app();
         app.update(Action::EnterSearch);
