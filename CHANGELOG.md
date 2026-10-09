@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.1.1] - 2026-10-09
 
 ### Fixed
 - **Ogg Vorbis stations now play.** The build had no Ogg demuxer, so every Ogg stream failed with "probe failed: end of stream" even though Ogg/Vorbis was listed as supported. The Ogg demuxer is now enabled (one new small dependency, `symphonia-format-ogg`).
