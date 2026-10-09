@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.2.0] - 2026-10-09
 
 ### Added
 - **AES-128 encrypted HLS streams play.** Playlists with `#EXT-X-KEY:METHOD=AES-128` are decrypted per segment (the key is fetched once and cached, rotated keys are followed, the IV is the playlist's `IV` or the segment's media sequence number). Verified against segments encrypted by two independent implementations, ffmpeg and OpenSSL. SAMPLE-AES and DRM key formats (such as FairPlay) are still reported as "not supported". Adds the `aes` and `cbc` RustCrypto crates (and a few small dependencies of theirs).
