@@ -1,0 +1,37 @@
+name: Audit
+
+# Advisories are published independently of our commits, so re-check the
+# lockfile weekly instead of only when someone pushes.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: RustSec audit + cargo deny
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny --locked
+
+      # Keep the ignores in sync with ci.yml and SECURITY.md.
+      - name: Audit dependencies
+        run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+
+      - name: Check licenses, bans, and advisories
+        run: cargo deny check
