@@ -34,6 +34,7 @@ impl Default for History {
 }
 
 impl History {
+    #[cfg_attr(test, allow(dead_code))] // Test builds start from defaults instead.
     pub fn load_with_warning() -> (Self, Option<String>) {
         let Some(path) = crate::config::config_path(HISTORY_FILE) else {
             return (Self::default(), None);

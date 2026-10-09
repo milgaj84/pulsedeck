@@ -35,13 +35,72 @@ fn base_dirs(
     dirs
 }
 
+#[cfg(not(test))]
 pub(crate) fn candidate_base_dirs() -> Vec<PathBuf> {
     base_dirs(
         absolute_dir(env::var_os("XDG_CONFIG_HOME")),
         absolute_dir(env::var_os("HOME")),
-        dirs::config_dir(),
+        native_config_dir(),
         cfg!(target_os = "macos"),
     )
+}
+
+/// Test builds never see the developer's real configuration: every lookup and
+/// save lands in a scratch directory that belongs to this test process.
+#[cfg(test)]
+pub(crate) fn candidate_base_dirs() -> Vec<PathBuf> {
+    vec![test_config_root()]
+}
+
+#[cfg(not(test))]
+fn native_config_dir() -> Option<PathBuf> {
+    dirs::config_dir()
+}
+
+#[cfg(test)]
+fn native_config_dir() -> Option<PathBuf> {
+    Some(test_config_root())
+}
+
+/// Scratch config root for test builds, unique per process and created lazily.
+#[cfg(test)]
+fn test_config_root() -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        prune_stale_test_roots(&env::temp_dir(), std::time::Duration::from_secs(3600));
+        let root = env::temp_dir().join(format!("pulsedeck-test-config-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        root
+    })
+    .clone()
+}
+
+/// Remove scratch roots left behind by earlier test runs (best effort). Only
+/// directories named exactly `pulsedeck-test-config-<digits>` that have not
+/// been modified for `max_age` are removed.
+#[cfg(test)]
+fn prune_stale_test_roots(dir: &Path, max_age: std::time::Duration) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(suffix) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix("pulsedeck-test-config-"))
+        else {
+            continue;
+        };
+        let old_enough = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= max_age);
+        if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) && old_enough {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 pub(crate) fn resolve_config_dir(bases: &[PathBuf]) -> Option<PathBuf> {
@@ -49,7 +108,7 @@ pub(crate) fn resolve_config_dir(bases: &[PathBuf]) -> Option<PathBuf> {
         .iter()
         .map(|base| base.join(NEW_CONFIG_DIR))
         .find(|dir| dir.exists())
-        .or_else(|| dirs::config_dir().map(|dir| dir.join(NEW_CONFIG_DIR)))
+        .or_else(|| native_config_dir().map(|dir| dir.join(NEW_CONFIG_DIR)))
 }
 
 pub fn config_dir() -> Option<PathBuf> {
@@ -376,5 +435,63 @@ mod tests {
             resolve_config_path(std::slice::from_ref(&first), "other.json"),
             Some(first.join(NEW_CONFIG_DIR).join("other.json"))
         );
+    }
+
+    #[test]
+    fn test_builds_resolve_only_to_a_scratch_directory() {
+        let scratch = env::temp_dir();
+        let bases = candidate_base_dirs();
+
+        assert_eq!(bases.len(), 1);
+        assert!(bases[0].starts_with(&scratch), "{bases:?}");
+
+        // Whatever the environment says, nothing resolves to the real config.
+        let real = dirs::config_dir();
+        for path in [
+            config_dir(),
+            config_path("ui-state.json"),
+            config_path("library.json"),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(path.starts_with(&scratch), "{path:?}");
+            if let Some(real) = &real {
+                assert!(!path.starts_with(real), "{path:?} is inside {real:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_scratch_root_is_stable_within_a_process() {
+        assert_eq!(test_config_root(), test_config_root());
+        assert_eq!(candidate_base_dirs(), vec![test_config_root()]);
+    }
+
+    #[test]
+    fn prune_removes_only_old_scratch_roots() {
+        let parent = unique_temp_path("prune").parent().unwrap().to_path_buf();
+        let _ = fs::remove_dir_all(&parent);
+        let make = |name: &str| {
+            let dir = parent.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        };
+        let scratch = make("pulsedeck-test-config-12345");
+        let other_prefix = make("pulsedeck-test-config-abc");
+        let unrelated = make("something-else");
+        let bare = make("pulsedeck-test-config-");
+
+        // Nothing is old enough yet.
+        prune_stale_test_roots(&parent, std::time::Duration::from_secs(3600));
+        assert!(scratch.exists());
+
+        // With a zero age limit only the exact scratch naming is removed.
+        prune_stale_test_roots(&parent, std::time::Duration::ZERO);
+        assert!(!scratch.exists());
+        assert!(other_prefix.exists());
+        assert!(unrelated.exists());
+        assert!(bare.exists());
+        let _ = fs::remove_dir_all(&parent);
     }
 }

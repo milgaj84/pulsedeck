@@ -3,7 +3,9 @@ use super::*;
 use crate::audio::AudioEngine;
 use crate::audio::{AudioCommand, AudioSink};
 use crate::config_toml::AppConfig;
-use crate::keybindings::{detect_shadows, KeybindingRegistry};
+#[cfg(not(test))]
+use crate::keybindings::detect_shadows;
+use crate::keybindings::KeybindingRegistry;
 use crate::radio::find_station_by_url;
 use crate::radio::stale_query::count_stale_stations;
 use crate::search_history::SearchHistoryRing;
@@ -11,6 +13,7 @@ use crate::search_history::SearchHistoryRing;
 use super::notification_cooldown::NotificationCooldown;
 use super::notifier;
 
+#[cfg_attr(test, allow(dead_code))] // Test builds never read the user keybindings file.
 pub(super) const KEYBINDINGS_FILE: &str = "keybindings.json";
 
 pub(crate) struct AppParts {
@@ -30,9 +33,17 @@ pub(crate) struct AppParts {
 
 impl AppParts {
     pub(super) fn load(library: Library) -> Self {
+        // Test builds must not read (or be influenced by) the developer's real
+        // state files, so they start from defaults.
+        #[cfg(not(test))]
         let (ui_state, ui_state_warning) = super::ui_state::UiState::load_with_warning();
+        #[cfg(test)]
+        let (ui_state, ui_state_warning) = (super::ui_state::UiState::default(), None);
         let sample_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(4096)));
+        #[cfg(not(test))]
         let (history, history_warning) = crate::history::History::load_with_warning();
+        #[cfg(test)]
+        let (history, history_warning) = (crate::history::History::default(), None);
 
         #[cfg(not(test))]
         let (config, config_preserved, config_warnings, config_loaded_from_file) =
@@ -74,6 +85,13 @@ impl AppParts {
 
 /// Load keybinding registry from `keybindings.json` in the config directory.
 /// Returns a registry with defaults populated; custom bindings are merged on top.
+/// Test builds use the default bindings, never the user's keybindings.json.
+#[cfg(test)]
+fn load_keybinding_registry() -> KeybindingRegistry {
+    KeybindingRegistry::defaults()
+}
+
+#[cfg(not(test))]
 fn load_keybinding_registry() -> KeybindingRegistry {
     let mut registry = KeybindingRegistry::defaults();
 
@@ -137,6 +155,12 @@ fn load_toml_config() -> (AppConfig, toml::Value, Vec<String>, bool) {
 
 /// Build a ConfigWatcher pointed at the config directory's pulsedeck.toml.
 /// Returns a watcher on a dummy path if no config directory is available.
+#[cfg(test)]
+fn build_config_watcher() -> ConfigWatcher {
+    ConfigWatcher::new(PathBuf::new())
+}
+
+#[cfg(not(test))]
 fn build_config_watcher() -> ConfigWatcher {
     let path = crate::config::config_dir()
         .map(|dir| dir.join("pulsedeck.toml"))
@@ -146,6 +170,12 @@ fn build_config_watcher() -> ConfigWatcher {
 
 /// Build a KeybindingWatcher pointed at the keybindings JSON file path.
 /// Returns a watcher with None path if no config directory is available.
+#[cfg(test)]
+fn build_keybinding_watcher() -> crate::keybindings::watcher::KeybindingWatcher {
+    crate::keybindings::watcher::KeybindingWatcher::new(None)
+}
+
+#[cfg(not(test))]
 fn build_keybinding_watcher() -> crate::keybindings::watcher::KeybindingWatcher {
     let path = crate::config::config_path(KEYBINDINGS_FILE).filter(|p| p.exists());
     crate::keybindings::watcher::KeybindingWatcher::new(path)
@@ -511,6 +541,19 @@ pub(crate) mod tests {
 
         assert_eq!(app.playback.view.playing_url, None);
         assert!(matches!(app.playback.view.state, PlaybackState::Error(_)));
+    }
+
+    #[test]
+    fn test_builds_start_from_defaults_instead_of_the_users_state_files() {
+        // A saved non-default visualizer mode on the developer's machine must
+        // not leak into tests (it once made other tests fail locally).
+        let parts = AppParts::load(Library::in_memory(vec![]));
+
+        assert_eq!(parts.ui_state.visualizer_mode(), 0);
+        assert!(parts.ui_state_warning.is_none());
+        assert!(parts.history_warning.is_none());
+        assert!(parts.config_warnings.is_empty());
+        assert!(!parts.config_loaded_from_file);
     }
 
     #[test]

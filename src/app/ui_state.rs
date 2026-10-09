@@ -46,6 +46,7 @@ impl Default for UiState {
 }
 
 impl UiState {
+    #[cfg_attr(test, allow(dead_code))] // Test builds start from defaults instead.
     pub(super) fn load_with_warning() -> (Self, Option<String>) {
         let Some(path) = crate::config::config_path(UI_STATE_FILE) else {
             return (Self::default(), None);

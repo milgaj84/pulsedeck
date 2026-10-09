@@ -6,6 +6,7 @@ pub mod watcher;
 
 use crate::action::Action;
 
+#[cfg(not(test))]
 pub use registry::detect_shadows;
 pub use registry::format_key_description;
 pub use registry::format_mode_name;

@@ -255,7 +255,7 @@ impl App {
             .path
             .as_ref()
             .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
-            .or_else(|| dirs::config_dir().map(|base| base.join("pulsedeck")))
+            .or_else(crate::config::config_dir)
     }
 }
 
