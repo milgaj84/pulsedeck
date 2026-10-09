@@ -4,7 +4,7 @@ use super::recovery_actions::{
     recovery_actions_for, truncate_recovery_error, ActionStatus, RecoveryActionKind,
 };
 use super::settings::{
-    available_output_device_choices, output_device_display_name, step_output_device_preference,
+    output_device_choices, output_device_display_name, step_output_device_preference,
 };
 use super::*;
 
@@ -24,7 +24,10 @@ impl App {
             return;
         }
 
-        let actions = recovery_actions_for(&self.playback.diagnostics);
+        let actions = recovery_actions_for(
+            &self.playback.diagnostics,
+            self.config.audio.output_device.as_deref(),
+        );
         let Some(action) = actions.into_iter().find(|action| action.number == number) else {
             return;
         };
@@ -40,7 +43,8 @@ impl App {
                 }
             }
             RecoveryActionKind::SwitchOutputDevice => {
-                self.switch_to_next_output_device(available_output_device_choices());
+                let choices = output_device_choices(&self.playback.diagnostics.output_devices);
+                self.switch_to_next_output_device(choices);
             }
         }
     }
@@ -65,6 +69,16 @@ impl App {
             self.fail_recovery(KIND, "Audio engine unavailable");
         }
     }
+
+    /// Re-read the usable output devices so the Doctor offers an accurate
+    /// "switch device" fix. Test builds never enumerate real hardware.
+    #[cfg(not(test))]
+    pub(super) fn refresh_output_devices(&mut self) {
+        self.playback.diagnostics.output_devices = crate::audio::list_output_device_names();
+    }
+
+    #[cfg(test)]
+    pub(super) fn refresh_output_devices(&mut self) {}
 
     /// Record the outcome of the fix currently in progress, if it is `kind`.
     pub(super) fn finish_recovery(&mut self, kind: RecoveryActionKind, status: ActionStatus) {
@@ -243,6 +257,37 @@ mod tests {
 
         app.update(Action::TogglePlaybackDoctor);
 
+        assert_eq!(app.playback.diagnostics.recovery, None);
+    }
+
+    #[test]
+    fn doctor_digit_switches_to_the_cached_device_and_marks_it_in_progress() {
+        let mut app = doctor_app();
+        app.playback.diagnostics.last_error = Some("audio output device vanished".to_string());
+        app.playback.diagnostics.output_devices = vec!["USB DAC".to_string()];
+
+        app.update(Action::NumberJumpDigit('1'));
+
+        assert_eq!(app.config.audio.output_device.as_deref(), Some("USB DAC"));
+        assert_eq!(app.playback.diagnostics.output_device, "USB DAC");
+        assert_eq!(
+            app.playback.diagnostics.recovery,
+            Some((
+                RecoveryActionKind::SwitchOutputDevice,
+                ActionStatus::InProgress
+            ))
+        );
+    }
+
+    #[test]
+    fn doctor_digit_ignores_the_switch_fix_when_no_device_is_cached() {
+        let mut app = doctor_app();
+        app.playback.diagnostics.last_error = Some("audio output device vanished".to_string());
+        app.playback.diagnostics.output_devices.clear();
+
+        app.update(Action::NumberJumpDigit('1'));
+
+        assert_eq!(app.config.audio.output_device, None);
         assert_eq!(app.playback.diagnostics.recovery, None);
     }
 }

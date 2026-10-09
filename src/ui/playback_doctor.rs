@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
     let last_error = app.diagnostics.last_error.as_deref().unwrap_or("N/A");
     let action_hint = match &app.player.state {
         PlaybackState::Error(error) => crate::app::playback_error_action_hint(error),
-        _ => "r retry  s stop  , output  / search  Esc close",
+        _ => "1-9 run fix  r retry  s stop  , output  / search  Esc close",
     };
 
     let mut lines = vec![
@@ -196,7 +196,7 @@ fn suggestion_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
 }
 
 fn recovery_action_lines(app: &UiModel<'_>) -> Vec<Line<'static>> {
-    let actions = recovery_actions_for(app.diagnostics);
+    let actions = recovery_actions_for(app.diagnostics, app.config.audio.output_device.as_deref());
 
     if actions.is_empty() {
         return vec![];
@@ -331,5 +331,82 @@ mod tests {
             lines.is_empty(),
             "section should not be rendered when no exclusions configured"
         );
+    }
+
+    fn spans_text(lines: &[Line<'_>]) -> String {
+        lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn app_with_output_error(devices: &[&str]) -> App {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.playback.diagnostics.last_error = Some("audio output device vanished".to_string());
+        app.playback.diagnostics.output_devices =
+            devices.iter().map(|name| name.to_string()).collect();
+        app
+    }
+
+    #[test]
+    fn recovery_lines_name_the_switch_target() {
+        let app = app_with_output_error(&["USB DAC"]);
+        let model = UiModel::from(&app);
+
+        let text = spans_text(&recovery_action_lines(&model));
+
+        assert!(text.contains("press the number to run"));
+        assert!(text.contains("[1]"));
+        assert!(text.contains("Switch to USB DAC"));
+    }
+
+    #[test]
+    fn recovery_lines_hidden_without_an_alternative_device() {
+        let app = app_with_output_error(&[]);
+        let model = UiModel::from(&app);
+
+        assert!(recovery_action_lines(&model).is_empty());
+    }
+
+    #[test]
+    fn recovery_lines_show_the_running_fix_status() {
+        let mut app = app_with_output_error(&["USB DAC"]);
+        app.playback.diagnostics.recovery = Some((
+            crate::app::recovery_actions::RecoveryActionKind::SwitchOutputDevice,
+            ActionStatus::Failed("device busy".to_string()),
+        ));
+        let model = UiModel::from(&app);
+
+        let text = spans_text(&recovery_action_lines(&model));
+
+        assert!(text.contains("device busy"));
+    }
+
+    #[test]
+    fn full_render_shows_audio_check_fix_and_key_hint() {
+        use ratatui::backend::TestBackend;
+
+        let mut app = app_with_output_error(&["USB DAC"]);
+        app.playback.diagnostics.startup_audio_check =
+            Some(crate::app::audio_check::AudioCheckResult::DeviceAvailable);
+        let model = UiModel::from(&app);
+        let mut terminal = Terminal::new(TestBackend::new(140, 50)).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &model))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let mut content = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                content.push_str(buffer.cell((x, y)).map_or("", |c| c.symbol()));
+            }
+        }
+        assert!(content.contains("Audio check"), "{content}");
+        assert!(content.contains("Output device found"));
+        assert!(content.contains("Switch to USB DAC"));
+        assert!(content.contains("1-9 run fix"));
     }
 }

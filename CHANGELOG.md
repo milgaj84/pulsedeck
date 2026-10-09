@@ -7,11 +7,16 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Improved
+- **Playback Doctor "switch output device" fix** is only offered when another device exists, and its label names the target (for example "Switch to USB DAC"). The device list is cached, so rendering never touches audio hardware.
+- The Doctor footer and the help overlay mention the `1-9` fix keys.
 - **Automatic GitHub Releases**: pushing a `v*` tag now creates the GitHub Release from the matching changelog section.
 - **Clearer publish failure**: the crates.io publish job stops early with a message when `CARGO_REGISTRY_TOKEN` is not set.
 
 ### Security
 - **Weekly dependency audit**: a scheduled workflow runs `cargo audit` and `cargo deny check` every Monday, so new advisories surface without a push.
+
+### Removed
+- Unused overlay and scroll animation state (it was advanced every frame but never rendered).
 
 ### Internal
 - `RELEASING.md` documents the release automation, the required secret and the weekly audit.

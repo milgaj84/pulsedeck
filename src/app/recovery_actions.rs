@@ -2,6 +2,9 @@
 //! Builds selectable actions from diagnostic suggestions and tracks execution status.
 
 use super::doctor_suggestions::suggest_actions;
+use super::settings::{
+    output_device_choices, output_device_display_name, step_output_device_preference,
+};
 use super::types::PlaybackDiagnostics;
 
 /// Maximum number of recovery actions displayed (keyed to number keys 1-9).
@@ -37,11 +40,11 @@ pub struct RecoveryAction {
 
 /// Build numbered recovery actions from diagnostic suggestions.
 ///
-/// Maps suggestion text to actionable operations. Only includes
-/// `SwitchOutputDevice` if alternative devices are available.
+/// Maps suggestion text to actionable operations. `SwitchOutputDevice` is only
+/// included when `switch_target` names the device it would switch to.
 pub fn build_recovery_actions(
     suggestions: &[&str],
-    alternative_devices_available: bool,
+    switch_target: Option<&str>,
 ) -> Vec<RecoveryAction> {
     let mut actions = Vec::new();
     let mut number: u8 = 1;
@@ -52,10 +55,10 @@ pub fn build_recovery_actions(
         }
 
         if suggestion.contains("output device") || suggestion.contains("output") {
-            if alternative_devices_available {
+            if let Some(target) = switch_target {
                 actions.push(RecoveryAction {
                     number,
-                    label: "Switch to next output device".to_string(),
+                    label: format!("Switch to {target}"),
                     kind: RecoveryActionKind::SwitchOutputDevice,
                     status: ActionStatus::Ready,
                 });
@@ -78,14 +81,31 @@ pub fn build_recovery_actions(
     actions
 }
 
+/// Display name of the device a "switch output" fix would select, or `None`
+/// when there is nowhere else to switch to.
+pub fn next_output_device_name(devices: &[String], current: Option<&str>) -> Option<String> {
+    let choices = output_device_choices(devices);
+    if choices.len() < 2 {
+        return None;
+    }
+    let next = output_device_display_name(
+        step_output_device_preference(current, &choices, true).as_deref(),
+    );
+    let current = output_device_display_name(current);
+    (!next.eq_ignore_ascii_case(&current)).then_some(next)
+}
+
 /// Recovery actions for the current diagnostics, carrying the status of the
 /// action the user last ran (if it is still offered).
-pub fn recovery_actions_for(diagnostics: &PlaybackDiagnostics) -> Vec<RecoveryAction> {
+///
+/// `current_device` is the configured output device preference (`None` = default).
+pub fn recovery_actions_for(
+    diagnostics: &PlaybackDiagnostics,
+    current_device: Option<&str>,
+) -> Vec<RecoveryAction> {
     let suggestions = suggest_actions(diagnostics);
-    // Simplified: assume alternatives exist whenever an output device is known.
-    let has_alternatives =
-        diagnostics.output_device != "N/A" && !diagnostics.output_device.is_empty();
-    let mut actions = build_recovery_actions(&suggestions, has_alternatives);
+    let target = next_output_device_name(&diagnostics.output_devices, current_device);
+    let mut actions = build_recovery_actions(&suggestions, target.as_deref());
 
     if let Some((kind, status)) = &diagnostics.recovery {
         for action in actions.iter_mut().filter(|action| action.kind == *kind) {
@@ -120,13 +140,13 @@ mod tests {
 
     #[test]
     fn test_empty_suggestions_returns_empty() {
-        let actions = build_recovery_actions(&[], true);
+        let actions = build_recovery_actions(&[], Some("USB DAC"));
         assert!(actions.is_empty());
     }
 
     #[test]
     fn test_retry_suggestion_creates_action() {
-        let actions = build_recovery_actions(&["Retry connection to station"], true);
+        let actions = build_recovery_actions(&["Retry connection to station"], Some("USB DAC"));
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].number, 1);
         assert_eq!(actions[0].kind, RecoveryActionKind::RetryConnection);
@@ -135,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_output_device_with_alternatives() {
-        let actions = build_recovery_actions(&["Try a different output device"], true);
+        let actions = build_recovery_actions(&["Try a different output device"], Some("USB DAC"));
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].number, 1);
         assert_eq!(actions[0].kind, RecoveryActionKind::SwitchOutputDevice);
@@ -143,14 +163,14 @@ mod tests {
 
     #[test]
     fn test_output_device_without_alternatives_excluded() {
-        let actions = build_recovery_actions(&["Try a different output device"], false);
+        let actions = build_recovery_actions(&["Try a different output device"], None);
         assert!(actions.is_empty());
     }
 
     #[test]
     fn test_sequential_numbering() {
         let suggestions = vec!["Try a different output device", "Retry connection"];
-        let actions = build_recovery_actions(&suggestions, true);
+        let actions = build_recovery_actions(&suggestions, Some("USB DAC"));
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].number, 1);
         assert_eq!(actions[1].number, 2);
@@ -159,7 +179,7 @@ mod tests {
     #[test]
     fn test_max_actions_capped() {
         let suggestions: Vec<&str> = (0..15).map(|_| "Retry connection").collect();
-        let actions = build_recovery_actions(&suggestions, true);
+        let actions = build_recovery_actions(&suggestions, Some("USB DAC"));
         assert_eq!(actions.len(), MAX_RECOVERY_ACTIONS);
     }
 
@@ -202,7 +222,7 @@ mod property_tests {
         #[test]
         fn prop_recovery_action_numbering(count in 1..=9usize) {
             let suggestions: Vec<&str> = (0..count).map(|_| "Retry connection").collect();
-            let actions = build_recovery_actions(&suggestions, true);
+            let actions = build_recovery_actions(&suggestions, Some("USB DAC"));
             prop_assert_eq!(actions.len(), count);
             for (i, action) in actions.iter().enumerate() {
                 prop_assert_eq!(action.number as usize, i + 1);
@@ -220,8 +240,10 @@ mod property_tests {
 
     #[test]
     fn test_unreachable_stream_suggestion_offers_retry() {
-        let actions =
-            build_recovery_actions(&["Stream may be unreachable — try again later"], true);
+        let actions = build_recovery_actions(
+            &["Stream may be unreachable — try again later"],
+            Some("USB DAC"),
+        );
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].kind, RecoveryActionKind::RetryConnection);
     }
@@ -235,9 +257,83 @@ mod property_tests {
             ActionStatus::InProgress,
         ));
 
-        let actions = recovery_actions_for(&diagnostics);
+        let actions = recovery_actions_for(&diagnostics, None);
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].status, ActionStatus::InProgress);
+    }
+
+    fn devices(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    fn output_error_diagnostics(devices: &[&str]) -> PlaybackDiagnostics {
+        let mut diagnostics = PlaybackDiagnostics::new("Default".to_string(), true, 5);
+        diagnostics.last_error = Some("audio output device vanished".to_string());
+        diagnostics.output_devices = self::devices(devices);
+        diagnostics
+    }
+
+    #[test]
+    fn test_next_output_device_none_without_alternatives() {
+        assert_eq!(next_output_device_name(&[], None), None);
+    }
+
+    #[test]
+    fn test_next_output_device_names_first_device_after_default() {
+        assert_eq!(
+            next_output_device_name(&devices(&["Speakers", "USB DAC"]), None).as_deref(),
+            Some("Speakers")
+        );
+    }
+
+    #[test]
+    fn test_next_output_device_steps_and_wraps_to_default() {
+        let all = devices(&["Speakers", "USB DAC"]);
+        assert_eq!(
+            next_output_device_name(&all, Some("Speakers")).as_deref(),
+            Some("USB DAC")
+        );
+        assert_eq!(
+            next_output_device_name(&all, Some("USB DAC")).as_deref(),
+            Some("Default")
+        );
+    }
+
+    #[test]
+    fn test_next_output_device_falls_back_to_default_when_current_is_unplugged() {
+        assert_eq!(
+            next_output_device_name(&devices(&["Speakers"]), Some("Gone DAC")).as_deref(),
+            Some("Default")
+        );
+    }
+
+    #[test]
+    fn test_switch_fix_hidden_when_no_device_is_cached() {
+        let actions = recovery_actions_for(&output_error_diagnostics(&[]), None);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_switch_fix_label_names_the_target_device() {
+        let actions = recovery_actions_for(&output_error_diagnostics(&["USB DAC"]), None);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, RecoveryActionKind::SwitchOutputDevice);
+        assert_eq!(actions[0].label, "Switch to USB DAC");
+    }
+
+    #[test]
+    fn test_switch_fix_numbering_stays_sequential_with_retry() {
+        let mut diagnostics = output_error_diagnostics(&["USB DAC"]);
+        diagnostics.reconnect_attempts = 2;
+
+        let actions = recovery_actions_for(&diagnostics, None);
+
+        assert_eq!(
+            actions.iter().map(|a| a.number).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(actions[1].kind, RecoveryActionKind::RetryConnection);
     }
 }

@@ -227,10 +227,15 @@ impl App {
     }
 }
 
-pub(super) fn available_output_device_choices() -> Vec<String> {
+/// "Default" followed by the given device names.
+pub(super) fn output_device_choices(devices: &[String]) -> Vec<String> {
     let mut choices = vec![crate::audio::DEFAULT_OUTPUT_DEVICE_LABEL.to_string()];
-    choices.extend(crate::audio::list_output_device_names());
+    choices.extend(devices.iter().cloned());
     choices
+}
+
+fn available_output_device_choices() -> Vec<String> {
+    output_device_choices(&crate::audio::list_output_device_names())
 }
 
 pub(super) fn output_device_display_name(value: Option<&str>) -> String {

@@ -150,6 +150,7 @@ fn library_rows() -> Vec<Row<'static>> {
         shortcut("u", "Undo most recent removal"),
         shortcut("i", "Station details"),
         shortcut("d", "Playback Doctor diagnostics"),
+        shortcut("1-9 (in Doctor)", "Run the numbered suggested fix"),
         shortcut("g", "Recent tracks / listening history"),
         shortcut("e", "Export Library to M3U"),
         shortcut(": Discover", "Discover stations (via command palette)"),
@@ -285,6 +286,16 @@ mod tests {
     #[test]
     fn app_tab_rows_are_non_empty() {
         assert!(!app_rows().is_empty());
+    }
+
+    #[test]
+    fn library_tab_documents_doctor_fix_keys() {
+        let joined = library_rows()
+            .iter()
+            .map(|row| format!("{row:?}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.contains("Run the numbered suggested fix"));
     }
 
     #[test]

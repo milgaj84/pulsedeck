@@ -42,6 +42,9 @@ pub enum PlaybackState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PlaybackDiagnostics {
     pub output_device: String,
+    /// Usable output device names (without "Default"), cached so the Playback
+    /// Doctor can decide on fixes without enumerating hardware per frame.
+    pub output_devices: Vec<String>,
     pub metadata_enabled: bool,
     pub reconnect_attempts: u8,
     pub reconnect_limit: u8,

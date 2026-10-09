@@ -61,6 +61,9 @@ impl App {
 
     pub(super) fn toggle_playback_doctor(&mut self) {
         self.playback.diagnostics.recovery = None;
+        if self.ui.overlays.active != ActiveOverlay::PlaybackDoctor {
+            self.refresh_output_devices();
+        }
         self.set_overlay(ActiveOverlay::PlaybackDoctor);
     }
 

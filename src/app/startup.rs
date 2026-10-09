@@ -179,6 +179,7 @@ impl App {
                 app.set_info_notice("No audio output device found — playback may not work");
             }
             app.playback.diagnostics.startup_audio_check = Some(result);
+            app.playback.diagnostics.output_devices = devices;
         }
 
         app
