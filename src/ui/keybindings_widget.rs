@@ -109,7 +109,7 @@ enum DisplayLine {
 }
 
 /// Total number of display lines for the given bindings (for scroll bounds).
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn total_lines(bindings: &[KeyBinding]) -> usize {
     build_grouped_lines(bindings).len()
 }

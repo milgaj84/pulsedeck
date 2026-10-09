@@ -6,7 +6,6 @@ use std::path::Path;
 
 const DEFAULT_VOLUME: u8 = 80;
 const MAX_VOLUME: u8 = 100;
-const VISUALIZER_MODE_COUNT: usize = 3;
 const STALE_SUPPRESSION_SECONDS: u64 = 604_800;
 const UI_STATE_FILE: &str = "ui-state.json";
 
@@ -47,11 +46,6 @@ impl Default for UiState {
 }
 
 impl UiState {
-    #[allow(dead_code)]
-    pub(super) fn load() -> Self {
-        Self::load_with_warning().0
-    }
-
     pub(super) fn load_with_warning() -> (Self, Option<String>) {
         let Some(path) = crate::config::config_path(UI_STATE_FILE) else {
             return (Self::default(), None);
@@ -101,7 +95,7 @@ impl UiState {
     }
 
     pub(super) fn visualizer_mode(&self) -> usize {
-        self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1)
+        self.visualizer_mode.min(VisualizerMode::COUNT - 1)
     }
 
     pub(super) fn stale_dismissed_at(&self) -> Option<u64> {
@@ -127,7 +121,7 @@ impl UiState {
         if parse_display_mode_key(&self.display_mode).is_none() {
             self.display_mode = default_display_mode_key();
         }
-        self.visualizer_mode = self.visualizer_mode.min(VISUALIZER_MODE_COUNT - 1);
+        self.visualizer_mode = self.visualizer_mode.min(VisualizerMode::COUNT - 1);
         self
     }
 }

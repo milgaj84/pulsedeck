@@ -11,7 +11,6 @@ pub enum VisualizerMode {
 
 impl VisualizerMode {
     /// Total number of modes (used for serialization bounds checking).
-    #[allow(dead_code)]
     pub const COUNT: usize = 3;
 
     /// Cycle to the next mode (wraps around).
@@ -45,6 +44,21 @@ impl VisualizerMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_matches_the_number_of_modes_in_the_cycle() {
+        let mut mode = VisualizerMode::Spectrum.next();
+        let mut cycle_len = 1;
+        while mode != VisualizerMode::Spectrum {
+            mode = mode.next();
+            cycle_len += 1;
+        }
+        assert_eq!(cycle_len, VisualizerMode::COUNT);
+        assert_eq!(
+            VisualizerMode::from_index(VisualizerMode::COUNT - 1),
+            VisualizerMode::SimOscilloscope
+        );
+    }
 
     #[test]
     fn next_cycles_through_all_modes() {
