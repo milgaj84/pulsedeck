@@ -9,6 +9,8 @@ All notable changes to the PulseDeck project will be documented in this file.
 ### Added
 - **`pulsedeck doctor`**: headless diagnostics for bug reports. Reports the config paths in use (and any legacy `driftfm` data), `pulsedeck.toml` and keybindings validity, audio output devices and the configured device, and library size. `--network` also probes the Radio Browser servers. It is read-only (no migration, seeding or writes) and exits with status 1 when a check fails.
 
+- **Prebuilt binaries** are attached to each GitHub Release for Linux x86_64, macOS (Intel and Apple Silicon) and Windows x86_64, with SHA-256 checksums.
+
 ### Improved
 - **Playback Doctor "switch output device" fix** is only offered when another device exists, and its label names the target (for example "Switch to USB DAC"). The device list is cached, so rendering never touches audio hardware.
 - The Doctor footer and the help overlay mention the `1-9` fix keys.

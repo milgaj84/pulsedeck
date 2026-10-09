@@ -56,13 +56,25 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 1. Verifies the tag matches `Cargo.toml`'s `version` (fails the job if they differ).
 2. Runs fmt, clippy, test, and release build on the 3-OS matrix.
 3. Pushes to crates.io via `cargo publish --locked`.
-4. Creates the GitHub Release from the matching `CHANGELOG.md` section (skipped if a release for the tag already exists).
+4. Builds release binaries for Linux x86_64, macOS (Intel + Apple Silicon) and Windows x86_64 with `scripts/package-release.sh`, which writes `pulsedeck-<tag>-<target>.{tar.gz,zip}` plus a `.sha256` file for each.
+5. Creates the GitHub Release from the matching `CHANGELOG.md` section and attaches the archives. If the release already exists, the archives are attached to it instead (`--clobber`), so a re-run is safe.
+
+## Dry-running the binary build
+
+The binary build also runs from a manual dispatch, without publishing or creating a release (those jobs only run on `v*` tags). Do this once before a release that changes the workflow or build setup:
+
+```bash
+gh workflow run release.yml --ref master
+gh run watch
+```
+
+Then download the `dist-*` artifacts from the run page and check an archive unpacks and the binary starts (`pulsedeck --version`). To test the packaging step locally: `scripts/package-release.sh v0.0.0-test x86_64-unknown-linux-gnu target/release/pulsedeck /tmp/dist`.
 
 ## Post-release
 
 - [ ] Confirm the GitHub Actions run passed.
 - [ ] Confirm the crates.io page shows the new version.
-- [ ] Confirm the GitHub Release exists and its notes look right.
+- [ ] Confirm the GitHub Release exists, its notes look right and the four archives plus `.sha256` files are attached.
 - [ ] If publishing failed, fix the cause and re-run the failed job (`gh run rerun --failed`) instead of re-pushing the tag.
 
 ## Rollback

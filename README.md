@@ -99,7 +99,9 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 
 ## Installation
 
-**You need:** [Rust & Cargo](https://rustup.rs/) (1.89+)
+**Prebuilt binaries:** download the archive for your platform from the [latest release](https://github.com/milgaj84/pulsedeck/releases/latest) (Linux x86_64, macOS Intel and Apple Silicon, Windows x86_64), unpack it and run `pulsedeck`. Each archive has a `.sha256` file to verify the download. On Linux the ALSA runtime library (`libasound2`) must be installed.
+
+**From source — you need:** [Rust & Cargo](https://rustup.rs/) (1.89+)
 
 ```bash
 cargo install pulsedeck
