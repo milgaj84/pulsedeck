@@ -46,6 +46,8 @@ dirs = "6"
 # Desktop Notifications
 notify-rust = "4"
 symphonia = { version = "0.5", default-features = false, features = ["ogg"] }
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
 
 [dev-dependencies]
 proptest = "1"

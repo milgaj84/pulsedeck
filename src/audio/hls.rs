@@ -6,6 +6,7 @@
 //! decode pipeline used for plain streams. Segments are demuxed into one
 //! continuous AAC/MP3 byte stream, so the decoder does not know it is HLS.
 
+mod crypto;
 mod fetcher;
 mod id3;
 mod playlist;
@@ -532,6 +533,90 @@ mod tests {
         assert_eq!(titles(&run), ["Some Band - Packed Song"]);
     }
 
+    // Encrypted by ffmpeg (explicit IV) and by openssl (IV = sequence number).
+    const AES_KEY: &[u8] = include_bytes!("hls/testdata/aes/iv/key.bin");
+    const FFMPEG_PLAYLIST: &[u8] = include_bytes!("hls/testdata/aes/iv/index.m3u8");
+    const FFMPEG_SEGMENTS: [&[u8]; 3] = [
+        include_bytes!("hls/testdata/aes/iv/seg0.ts"),
+        include_bytes!("hls/testdata/aes/iv/seg1.ts"),
+        include_bytes!("hls/testdata/aes/iv/seg2.ts"),
+    ];
+    const OPENSSL_PLAYLIST: &[u8] = include_bytes!("hls/testdata/aes/implicit/index.m3u8");
+    const OPENSSL_SEGMENTS: [&[u8]; 3] = [
+        include_bytes!("hls/testdata/aes/implicit/seg0.ts"),
+        include_bytes!("hls/testdata/aes/implicit/seg1.ts"),
+        include_bytes!("hls/testdata/aes/implicit/seg2.ts"),
+    ];
+
+    fn encrypted_server(playlist: &[u8], segments: [&[u8]; 3], key: &[u8]) -> TestServer {
+        let mut routes = vec![
+            ("/aes/index.m3u8", Response::ok(MPEGURL, playlist)),
+            (
+                "/aes/key.bin",
+                Response::ok("application/octet-stream", key),
+            ),
+        ];
+        let names = ["/aes/seg0.ts", "/aes/seg1.ts", "/aes/seg2.ts"];
+        for (name, bytes) in names.into_iter().zip(segments) {
+            routes.push((name, Response::ok("video/mp2t", bytes)));
+        }
+        server_with(routes)
+    }
+
+    #[test]
+    fn ffmpeg_aes_128_stream_with_an_explicit_iv_connects_and_decodes() {
+        let server = encrypted_server(FFMPEG_PLAYLIST, FFMPEG_SEGMENTS, AES_KEY);
+
+        let run = run_against(server, "/aes/index.m3u8", 4096);
+
+        assert_connected_as(&run, "HLS AAC");
+        assert_eq!(run._server.hits("/aes/key.bin"), 1);
+    }
+
+    #[test]
+    fn openssl_aes_128_stream_with_the_sequence_number_as_iv_connects_and_decodes() {
+        let server = encrypted_server(OPENSSL_PLAYLIST, OPENSSL_SEGMENTS, AES_KEY);
+
+        let run = run_against(server, "/aes/index.m3u8", 4096);
+
+        assert_connected_as(&run, "HLS AAC");
+    }
+
+    #[test]
+    fn a_wrong_aes_key_fails_instead_of_playing_noise() {
+        let mut wrong = AES_KEY.to_vec();
+        wrong[0] ^= 0xFF;
+        let server = encrypted_server(FFMPEG_PLAYLIST, FFMPEG_SEGMENTS, &wrong);
+
+        let run = run_against(server, "/aes/index.m3u8", 4096);
+
+        match terminal(&run) {
+            EngineEvent::Failed { error, .. } => {
+                let text = error.to_status_string();
+                assert!(
+                    text.contains("could not decrypt") || text.contains("probe failed"),
+                    "{text}"
+                );
+                assert!(!text.contains("not supported"), "{text}");
+            }
+            other => panic!("expected Failed, got {}", describe(other)),
+        }
+    }
+
+    #[test]
+    fn a_missing_aes_key_is_reported_as_a_key_problem() {
+        let mut routes = vec![("/aes/index.m3u8", Response::ok(MPEGURL, FFMPEG_PLAYLIST))];
+        let names = ["/aes/seg0.ts", "/aes/seg1.ts", "/aes/seg2.ts"];
+        for (name, bytes) in names.into_iter().zip(FFMPEG_SEGMENTS) {
+            routes.push((name, Response::ok("video/mp2t", bytes)));
+        }
+        let server = server_with(routes);
+
+        let run = run_against(server, "/aes/index.m3u8", 4096);
+
+        assert_failed_with(&run, "encryption key unavailable");
+    }
+
     #[test]
     fn mp3_segments_connect_through_the_mp3_path() {
         let mut segment = id3_tag(16);
@@ -580,8 +665,8 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_playlist_fails_as_not_supported_before_downloading_anything() {
-        let playlist = media_playlist(2, "ts", "#EXT-X-KEY:METHOD=AES-128,URI=\"k.key\"\n");
+    fn sample_aes_playlist_fails_as_not_supported_before_downloading_anything() {
+        let playlist = media_playlist(2, "ts", "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k.key\"\n");
         let server = server_with(vec![("/live.m3u8", Response::ok(MPEGURL, playlist))]);
 
         let run = run_against(server, "/live.m3u8", 4096);

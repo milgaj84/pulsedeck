@@ -1,10 +1,13 @@
 //! The HLS fetcher thread: downloads playlists and segments and hands audio
 //! bytes to [`HlsSource`](super::source::HlsSource) through a bounded channel.
 
-use super::playlist::{self, HlsError, MediaPlaylist, Playlist};
+use super::crypto;
+use super::playlist::{self, HlsError, MediaPlaylist, Playlist, Segment};
 use super::source::HlsChunk;
 use super::ts::AudioExtractor;
 use reqwest::Url;
+use std::collections::HashMap;
+use std::fmt;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 use std::sync::mpsc::{SyncSender, TrySendError};
@@ -14,6 +17,10 @@ use std::time::Duration;
 
 pub(crate) const MAX_PLAYLIST_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_SEGMENT_BYTES: usize = 8 * 1024 * 1024;
+/// An AES-128 key is 16 bytes; anything much larger is not a key.
+const MAX_KEY_BYTES: usize = 64;
+/// Distinct keys remembered at once (streams rotate keys occasionally).
+const MAX_CACHED_KEYS: usize = 8;
 
 /// How often waits and blocked sends re-check whether playback was abandoned.
 const POLL: Duration = Duration::from_millis(50);
@@ -55,6 +62,26 @@ pub(crate) fn read_capped(reader: impl Read, max_bytes: usize) -> Result<Vec<u8>
     }
     Ok(body)
 }
+
+/// Why a segment could not be turned into audio input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SegmentError {
+    Download(String),
+    Key(String),
+    Decrypt(HlsError),
+}
+
+impl fmt::Display for SegmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Download(message) => write!(f, "HLS: segment download failed: {message}"),
+            Self::Key(message) => write!(f, "HLS: encryption key unavailable: {message}"),
+            Self::Decrypt(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+type KeyCache = HashMap<Url, [u8; crypto::KEY_LEN]>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetcherConfig {
@@ -156,6 +183,9 @@ impl<H: HlsHttp> Fetcher<H> {
         let mut last_seq: Option<u64> = None;
         let mut extractor = AudioExtractor::default();
         let mut segment_failures = 0u32;
+        let mut last_failure: Option<SegmentError> = None;
+        let mut delivered = false;
+        let mut keys = KeyCache::new();
 
         loop {
             if !self.is_active() {
@@ -187,7 +217,7 @@ impl<H: HlsHttp> Fetcher<H> {
                     extractor.reset();
                 }
 
-                match self.http.get(&segment.uri, MAX_SEGMENT_BYTES) {
+                match self.fetch_segment(segment, &mut keys) {
                     Ok(bytes) => {
                         segment_failures = 0;
                         let mut audio = Vec::new();
@@ -201,23 +231,34 @@ impl<H: HlsHttp> Fetcher<H> {
                                 return;
                             }
                         }
-                        if !audio.is_empty() && !self.send(HlsChunk::Bytes(audio)) {
-                            return;
+                        if !audio.is_empty() {
+                            delivered = true;
+                            if !self.send(HlsChunk::Bytes(audio)) {
+                                return;
+                            }
                         }
                     }
-                    Err(FetchError(message)) => {
+                    Err(error) => {
                         segment_failures += 1;
                         if segment_failures > self.cfg.max_segment_failures {
-                            self.fail(format!("HLS: segment download failed: {message}"));
+                            self.fail(error.to_string());
                             return;
                         }
+                        last_failure = Some(error);
                     }
                 }
                 last_seq = Some(segment.seq);
             }
 
             if playlist.end_list {
-                let _ = self.send(HlsChunk::End);
+                // A short stream whose every segment failed would otherwise end
+                // silently; say why nothing played.
+                match (&last_failure, delivered) {
+                    (Some(error), false) => self.fail(error.to_string()),
+                    _ => {
+                        let _ = self.send(HlsChunk::End);
+                    }
+                }
                 return;
             }
 
@@ -235,6 +276,46 @@ impl<H: HlsHttp> Fetcher<H> {
                 None => return,
             }
         }
+    }
+
+    /// Download a segment and, if it is AES-128 encrypted, decrypt it.
+    fn fetch_segment(
+        &self,
+        segment: &Segment,
+        keys: &mut KeyCache,
+    ) -> Result<Vec<u8>, SegmentError> {
+        let bytes = self
+            .http
+            .get(&segment.uri, MAX_SEGMENT_BYTES)
+            .map_err(|FetchError(message)| SegmentError::Download(message))?;
+        let Some(key_info) = &segment.key else {
+            return Ok(bytes);
+        };
+
+        let key = match keys.get(&key_info.uri) {
+            Some(key) => *key,
+            None => {
+                let body = self
+                    .http
+                    .get(&key_info.uri, MAX_KEY_BYTES)
+                    .map_err(|FetchError(message)| SegmentError::Key(message))?;
+                let key: [u8; crypto::KEY_LEN] = body.as_slice().try_into().map_err(|_| {
+                    SegmentError::Key(format!(
+                        "the key is {} bytes, expected {}",
+                        body.len(),
+                        crypto::KEY_LEN
+                    ))
+                })?;
+                if keys.len() >= MAX_CACHED_KEYS {
+                    keys.clear();
+                }
+                keys.insert(key_info.uri.clone(), key);
+                key
+            }
+        };
+
+        let iv = crypto::segment_iv(key_info.iv, segment.seq);
+        crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)
     }
 
     /// Re-fetch the media playlist, retrying a few times. `None` means the
@@ -615,7 +696,7 @@ mod tests {
         http.fixed("/seg0.ts", segment(20));
         http.fixed(
             "/live.m3u8",
-            b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:1,\n/seg1.ts\n"
+            b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k\"\n#EXTINF:1,\n/seg1.ts\n"
                 .to_vec(),
         );
         let active = Arc::new(AtomicU64::new(1));
@@ -783,6 +864,263 @@ mod tests {
         assert!(chunks
             .iter()
             .all(|chunk| !matches!(chunk, HlsChunk::Title(_))));
+    }
+
+    const KEY: [u8; 16] = [
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+        0xAF,
+    ];
+
+    fn encrypt(data: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Vec<u8> {
+        use aes::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
+        cbc::Encryptor::<aes::Aes128>::new(key.into(), iv.into()).encrypt_padded_vec::<Pkcs7>(data)
+    }
+
+    /// A VOD playlist with an AES-128 key tag, the given first sequence number
+    /// and `count` segments.
+    fn encrypted_playlist(key_attrs: &str, first_seq: u64, count: usize) -> String {
+        let mut text = format!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:{first_seq}\n#EXT-X-KEY:METHOD=AES-128,{key_attrs}\n"
+        );
+        for seq in first_seq..first_seq + count as u64 {
+            text.push_str(&format!("#EXTINF:1,\n/seg{seq}.ts\n"));
+        }
+        text.push_str("#EXT-X-ENDLIST\n");
+        text
+    }
+
+    #[test]
+    fn encrypted_segments_are_decrypted_and_the_key_is_fetched_once() {
+        let http = FakeHttp::default();
+        let iv = [7u8; 16];
+        http.fixed("/key", KEY.to_vec());
+        for seq in 0..3u64 {
+            http.fixed(
+                &format!("/seg{seq}.ts"),
+                encrypt(&segment(20 + seq as usize), &KEY, &iv),
+            );
+        }
+        let playlist = encrypted_playlist(&format!("URI=\"/key\",IV=0x{}", "07".repeat(16)), 0, 3);
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(
+            audio,
+            (0..3)
+                .flat_map(|i| marker_frame(20 + i))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(http.hits("/key"), 1, "the key is cached");
+    }
+
+    #[test]
+    fn without_an_iv_attribute_the_sequence_number_is_the_iv() {
+        let http = FakeHttp::default();
+        http.fixed("/key", KEY.to_vec());
+        for seq in 40..43u64 {
+            let mut iv = [0u8; 16];
+            iv[8..].copy_from_slice(&seq.to_be_bytes());
+            http.fixed(
+                &format!("/seg{seq}.ts"),
+                encrypt(&segment(20 + (seq - 40) as usize), &KEY, &iv),
+            );
+        }
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(
+            &http,
+            &encrypted_playlist("URI=\"/key\"", 40, 3),
+            1,
+            &active,
+            fast(),
+        );
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(
+            audio,
+            (0..3)
+                .flat_map(|i| marker_frame(20 + i))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rotated_keys_are_each_fetched_for_their_segments() {
+        let http = FakeHttp::default();
+        let key_b = [0xB0u8; 16];
+        let iv = [1u8; 16];
+        http.fixed("/key-a", KEY.to_vec());
+        http.fixed("/key-b", key_b.to_vec());
+        http.fixed("/seg0.ts", encrypt(&segment(20), &KEY, &iv));
+        http.fixed("/seg1.ts", encrypt(&segment(21), &key_b, &iv));
+        let iv_attr = format!("IV=0x{}", "01".repeat(16));
+        let playlist = format!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=AES-128,URI=\"/key-a\",{iv_attr}\n#EXTINF:1,\n/seg0.ts\n#EXT-X-KEY:METHOD=AES-128,URI=\"/key-b\",{iv_attr}\n#EXTINF:1,\n/seg1.ts\n#EXT-X-ENDLIST\n"
+        );
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(audio, [marker_frame(20), marker_frame(21)].concat());
+        assert_eq!((http.hits("/key-a"), http.hits("/key-b")), (1, 1));
+    }
+
+    #[test]
+    fn unencrypted_segments_after_a_key_tag_cleared_by_none_are_not_decrypted() {
+        let http = FakeHttp::default();
+        http.fixed("/seg0.ts", segment(20));
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:1,\n/seg0.ts\n#EXT-X-ENDLIST\n";
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(audio, marker_frame(20));
+        assert_eq!(http.hits("/key"), 0);
+    }
+
+    fn failure_message(terminal: Option<HlsChunk>) -> String {
+        match terminal {
+            Some(HlsChunk::Fail(message)) => message,
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unavailable_key_fails_the_stream_with_a_key_message() {
+        let http = FakeHttp::default();
+        for seq in 0..6u64 {
+            http.fixed(
+                &format!("/seg{seq}.ts"),
+                encrypt(&segment(20), &KEY, &[0; 16]),
+            );
+        }
+        // /key has no route: 404.
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(
+            &http,
+            &encrypted_playlist("URI=\"/key\"", 0, 6),
+            1,
+            &active,
+            fast(),
+        );
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert!(audio.is_empty());
+        let message = failure_message(terminal);
+        assert!(
+            message.starts_with("HLS: encryption key unavailable"),
+            "{message}"
+        );
+        assert!(!message.contains("not supported"), "must stay retryable");
+    }
+
+    #[test]
+    fn a_key_of_the_wrong_size_is_rejected() {
+        let http = FakeHttp::default();
+        http.fixed("/key", vec![1u8; 15]);
+        for seq in 0..6u64 {
+            http.fixed(
+                &format!("/seg{seq}.ts"),
+                encrypt(&segment(20), &KEY, &[0; 16]),
+            );
+        }
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(
+            &http,
+            &encrypted_playlist("URI=\"/key\"", 0, 6),
+            1,
+            &active,
+            fast(),
+        );
+        let (_, terminal) = drain(&rx);
+        join(handle);
+
+        let message = failure_message(terminal);
+        assert!(
+            message.contains("the key is 15 bytes, expected 16"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn the_wrong_key_fails_with_a_decrypt_message_after_the_failure_limit() {
+        let http = FakeHttp::default();
+        http.fixed("/key", [0x55u8; 16].to_vec());
+        for seq in 0..6u64 {
+            http.fixed(
+                &format!("/seg{seq}.ts"),
+                encrypt(&segment(20), &KEY, &[0; 16]),
+            );
+        }
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(
+            &http,
+            &encrypted_playlist("URI=\"/key\"", 0, 6),
+            1,
+            &active,
+            fast(),
+        );
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert!(audio.is_empty());
+        let message = failure_message(terminal);
+        assert!(
+            message.starts_with("HLS: could not decrypt a segment"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_segment_that_is_not_block_aligned_is_a_decrypt_failure() {
+        let http = FakeHttp::default();
+        http.fixed("/key", KEY.to_vec());
+        http.fixed("/seg0.ts", vec![0u8; 100]);
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(
+            &http,
+            &encrypted_playlist("URI=\"/key\"", 0, 1),
+            1,
+            &active,
+            fast(),
+        );
+        let (_, terminal) = drain(&rx);
+        join(handle);
+
+        // Within the skip limit, but nothing ever played, so the reason is reported.
+        assert!(failure_message(terminal).contains("multiple of the AES block size"));
+    }
+
+    #[test]
+    fn a_stream_that_recovers_after_skipped_segments_still_ends_cleanly() {
+        let http = FakeHttp::default();
+        http.fixed("/seg1.ts", segment(21));
+        // seg0 is a 404 and is skipped; seg1 plays.
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist_text(0, 2, true), 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(audio, marker_frame(21));
     }
 
     #[test]

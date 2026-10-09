@@ -440,7 +440,7 @@ mod tests {
             "Decode error: AAC probe failed: not supported"
         ));
         assert!(!is_permanent_failure(
-            "HLS: malformed playlist (missing #EXTM3U)"
+            "HLS: malformed data (missing #EXTM3U)"
         ));
         assert!(!is_permanent_failure(""));
     }

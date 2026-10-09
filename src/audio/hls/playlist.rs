@@ -11,7 +11,10 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HlsError {
+    /// Encryption other than plain AES-128 (SAMPLE-AES, DRM key formats, ...).
     Encrypted,
+    /// A segment could not be decrypted (wrong key or IV, damaged data).
+    Decrypt(&'static str),
     Fmp4,
     VideoOnly,
     /// Audio variants exist but none uses a codec we can decode.
@@ -23,14 +26,18 @@ pub(crate) enum HlsError {
 impl fmt::Display for HlsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Encrypted => write!(f, "HLS: encrypted streams are not supported"),
+            Self::Encrypted => write!(
+                f,
+                "HLS: SAMPLE-AES and DRM encrypted streams are not supported"
+            ),
+            Self::Decrypt(why) => write!(f, "HLS: could not decrypt a segment ({why})"),
             Self::Fmp4 => write!(f, "HLS: fMP4/CMAF segments are not supported"),
             Self::VideoOnly => write!(f, "HLS: video-only streams are not supported"),
             Self::UnsupportedCodec(codec) => {
                 write!(f, "HLS: {codec} audio is not supported")
             }
             Self::NoAudioVariant => write!(f, "HLS: no audio stream found, not supported"),
-            Self::Malformed(why) => write!(f, "HLS: malformed playlist ({why})"),
+            Self::Malformed(why) => write!(f, "HLS: malformed data ({why})"),
         }
     }
 }
@@ -57,6 +64,14 @@ pub(crate) struct Master {
     pub renditions: Vec<Rendition>,
 }
 
+/// The AES-128 key a segment is encrypted with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SegmentKey {
+    pub uri: Url,
+    /// Explicit `IV` attribute; otherwise the segment's sequence number is used.
+    pub iv: Option<[u8; 16]>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Segment {
     /// Media sequence number (`EXT-X-MEDIA-SEQUENCE` + index).
@@ -64,6 +79,8 @@ pub(crate) struct Segment {
     pub uri: Url,
     /// A discontinuity precedes this segment.
     pub discontinuity: bool,
+    /// Set when the segment is AES-128 encrypted.
+    pub key: Option<SegmentKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,11 +217,6 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
             media_sequence = value.trim().parse().unwrap_or(0);
         } else if *line == "#EXT-X-ENDLIST" {
             end_list = true;
-        } else if let Some(value) = line.strip_prefix("#EXT-X-KEY:") {
-            let attrs = parse_attributes(value);
-            if attr(&attrs, "METHOD").is_some_and(|method| method != "NONE") {
-                return Err(HlsError::Encrypted);
-            }
         } else if line.starts_with("#EXT-X-MAP:") {
             return Err(HlsError::Fmp4);
         }
@@ -216,10 +228,14 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
 
     let mut segments = Vec::new();
     let mut discontinuity = false;
+    let mut key: Option<SegmentKey> = None;
 
     for line in lines {
         if *line == "#EXT-X-DISCONTINUITY" {
             discontinuity = true;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-KEY:") {
+            // A key applies to every following segment until the next key tag.
+            key = parse_key(value, base)?;
         } else if !line.starts_with('#') {
             let uri = resolve(base, line)?;
             if is_fmp4_uri(&uri) {
@@ -229,6 +245,7 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
                 seq: media_sequence + segments.len() as u64,
                 uri,
                 discontinuity: std::mem::take(&mut discontinuity),
+                key: key.clone(),
             });
         }
     }
@@ -238,6 +255,47 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
         end_list,
         segments,
     })
+}
+
+/// Parse the attributes of an `#EXT-X-KEY` tag. `None` means "not encrypted".
+fn parse_key(attributes: &str, base: &Url) -> Result<Option<SegmentKey>, HlsError> {
+    let attrs = parse_attributes(attributes);
+    match attr(&attrs, "METHOD") {
+        Some("NONE") => Ok(None),
+        Some("AES-128") => {
+            // Only the plain "identity" key format; FairPlay and friends are DRM.
+            if attr(&attrs, "KEYFORMAT").is_some_and(|format| format != "identity") {
+                return Err(HlsError::Encrypted);
+            }
+            let uri =
+                attr(&attrs, "URI").ok_or(HlsError::Malformed("AES-128 key without a URI"))?;
+            let iv = attr(&attrs, "IV").map(parse_iv).transpose()?;
+            Ok(Some(SegmentKey {
+                uri: resolve(base, uri)?,
+                iv,
+            }))
+        }
+        Some(_) => Err(HlsError::Encrypted),
+        None => Err(HlsError::Malformed("key without a METHOD")),
+    }
+}
+
+/// `IV=0x...`: up to 32 hex digits, left-padded with zeros to 128 bits.
+fn parse_iv(value: &str) -> Result<[u8; 16], HlsError> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .ok_or(HlsError::Malformed("IV without a 0x prefix"))?;
+    if digits.is_empty() || digits.len() > 32 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(HlsError::Malformed("invalid IV"));
+    }
+    let padded = format!("{digits:0>32}");
+    let mut iv = [0u8; 16];
+    for (index, byte) in iv.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&padded[index * 2..index * 2 + 2], 16)
+            .map_err(|_| HlsError::Malformed("invalid IV"))?;
+    }
+    Ok(iv)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,15 +508,110 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_playlists_are_rejected_but_method_none_is_fine() {
-        let encrypted = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:METHOD=AES-128,URI=\"k.key\"\n#EXTINF:4,\na.ts\n";
-        assert_eq!(parse(encrypted, &base()), Err(HlsError::Encrypted));
+    fn sample_aes_and_drm_key_formats_are_rejected() {
+        let with_key = |attrs: &str| {
+            format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:{attrs}\n#EXTINF:4,\na.ts\n")
+        };
 
-        let sample_aes = encrypted.replace("AES-128", "SAMPLE-AES");
-        assert_eq!(parse(&sample_aes, &base()), Err(HlsError::Encrypted));
+        for attrs in [
+            "METHOD=SAMPLE-AES,URI=\"k\"",
+            "METHOD=SAMPLE-AES-CTR,URI=\"k\"",
+            "METHOD=AES-128,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"",
+            "METHOD=SOMETHING-NEW,URI=\"k\"",
+        ] {
+            assert_eq!(
+                parse(&with_key(attrs), &base()),
+                Err(HlsError::Encrypted),
+                "{attrs}"
+            );
+        }
+    }
 
+    #[test]
+    fn method_none_means_unencrypted() {
         let none = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:4,\na.ts\n";
-        assert_eq!(media(none).segments.len(), 1);
+
+        let playlist = media(none);
+
+        assert_eq!(playlist.segments.len(), 1);
+        assert_eq!(playlist.segments[0].key, None);
+    }
+
+    #[test]
+    fn aes_128_keys_apply_to_the_following_segments_until_changed_or_cleared() {
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:4,\nplain.ts\n#EXT-X-KEY:METHOD=AES-128,URI=\"keys/one.key\"\n#EXTINF:4,\na.ts\n#EXTINF:4,\nb.ts\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://keys.example/two.key\",IV=0x01\n#EXTINF:4,\nc.ts\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:4,\nd.ts\n";
+
+        let playlist = media(text);
+        type KeySummary<'a> = Option<(&'a str, Option<[u8; 16]>)>;
+        let keys: Vec<KeySummary> = playlist
+            .segments
+            .iter()
+            .map(|s| s.key.as_ref().map(|k| (k.uri.as_str(), k.iv)))
+            .collect();
+
+        let mut iv1 = [0u8; 16];
+        iv1[15] = 1;
+        assert_eq!(
+            keys,
+            vec![
+                None,
+                Some(("https://radio.example/live/keys/one.key", None)),
+                Some(("https://radio.example/live/keys/one.key", None)),
+                Some(("https://keys.example/two.key", Some(iv1))),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn iv_attributes_are_parsed_padded_and_validated() {
+        let mut full = [0u8; 16];
+        for (i, byte) in full.iter_mut().enumerate() {
+            *byte = (i as u8) * 0x11;
+        }
+        assert_eq!(
+            parse_iv("0x00112233445566778899aabbccddeeff").unwrap(),
+            full
+        );
+        assert_eq!(
+            parse_iv("0X00112233445566778899AABBCCDDEEFF").unwrap(),
+            full
+        );
+
+        let mut short = [0u8; 16];
+        short[14] = 0x0A;
+        short[15] = 0xBC;
+        assert_eq!(parse_iv("0xabc").unwrap(), short);
+
+        for bad in [
+            "",
+            "0x",
+            "abc",
+            "0xzz",
+            "0x00112233445566778899aabbccddeeff00",
+        ] {
+            assert!(parse_iv(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn malformed_key_tags_are_errors() {
+        let with_key = |attrs: &str| {
+            format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:{attrs}\n#EXTINF:4,\na.ts\n")
+        };
+
+        assert_eq!(
+            parse(&with_key("METHOD=AES-128"), &base()),
+            Err(HlsError::Malformed("AES-128 key without a URI"))
+        );
+        assert_eq!(
+            parse(&with_key("URI=\"k\""), &base()),
+            Err(HlsError::Malformed("key without a METHOD"))
+        );
+        assert_eq!(
+            parse(&with_key("METHOD=AES-128,URI=\"k\",IV=nonsense"), &base()),
+            Err(HlsError::Malformed("IV without a 0x prefix"))
+        );
     }
 
     #[test]

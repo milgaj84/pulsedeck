@@ -7,7 +7,11 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **AES-128 encrypted HLS streams play.** Playlists with `#EXT-X-KEY:METHOD=AES-128` are decrypted per segment (the key is fetched once and cached, rotated keys are followed, the IV is the playlist's `IV` or the segment's media sequence number). Verified against segments encrypted by two independent implementations, ffmpeg and OpenSSL. SAMPLE-AES and DRM key formats (such as FairPlay) are still reported as "not supported". Adds the `aes` and `cbc` RustCrypto crates (and a few small dependencies of theirs).
 - **Track titles for HLS stations.** Stations that publish "now playing" information as ID3 timed metadata (a metadata stream in MPEG-TS, or ID3 tags in front of packed-audio segments) now show their artist and title, exactly like ICY stations do, and respect the stream-metadata setting. Titles are announced once per change. RTL, for example, shows the current show and presenter; stations that publish no metadata (France Inter, BBC Radio 4) show none, as before.
+
+### Improved
+- **Clearer failures for encrypted or broken HLS streams.** A short stream whose segments all fail now reports the real reason (for example "encryption key unavailable" or "could not decrypt a segment") instead of ending with a vague "stream ended before sending audio data".
 
 ---
 

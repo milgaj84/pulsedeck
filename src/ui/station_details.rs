@@ -221,7 +221,7 @@ fn codec_detail(station: &crate::radio::Station) -> String {
 
     match capability.capability {
         PlaybackCapability::Supported if capability.normalized_codec == "HLS" => {
-            format!("{codec} · playable (live segments, no track titles)")
+            format!("{codec} · playable (live segments)")
         }
         PlaybackCapability::Supported => format!("{codec} · playable"),
         PlaybackCapability::Unknown => format!("{codec} · playback will try"),
@@ -509,7 +509,7 @@ mod tests {
 
         assert_eq!(
             codec_detail(&station("HLS")),
-            "HLS · playable (live segments, no track titles)"
+            "HLS · playable (live segments)"
         );
         assert_eq!(codec_detail(&station("MP3")), "MP3 · playable");
         assert_eq!(codec_detail(&station("WMA")), "WMA · not playable yet");
