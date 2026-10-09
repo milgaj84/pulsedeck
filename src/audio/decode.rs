@@ -1,4 +1,5 @@
 use super::codec::{detect_codec, CodecDetection};
+use super::hls;
 use super::stream_source::StreamSource;
 use super::types::{
     ConnectRequest, DecodedSource, EndReason, EngineError, EngineEvent, Generation, StreamFormat,
@@ -111,13 +112,13 @@ fn guard_active(generation: Generation, active: &Arc<AtomicU64>) -> bool {
 }
 
 #[derive(Debug)]
-enum PrebufferFailure {
+pub(super) enum PrebufferFailure {
     Abandoned,
     Timeout,
     Read(io::Error),
 }
 
-fn fill_prebuffer<R: Read>(
+pub(super) fn fill_prebuffer<R: Read>(
     reader: &mut R,
     request: &ConnectRequest,
     event_tx: &mpsc::Sender<EngineEvent>,
@@ -210,15 +211,35 @@ fn is_abandoned_error(error: &io::Error) -> bool {
     error.to_string().eq_ignore_ascii_case("abandoned")
 }
 
-fn send_abandoned(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation) {
+pub(super) fn send_abandoned(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation) {
     let _ = event_tx.send(EngineEvent::StreamEnded {
         generation,
         reason: EndReason::Abandoned,
     });
 }
 
-fn send_failure(event_tx: &mpsc::Sender<EngineEvent>, generation: Generation, error: EngineError) {
+pub(super) fn send_failure(
+    event_tx: &mpsc::Sender<EngineEvent>,
+    generation: Generation,
+    error: EngineError,
+) {
     let _ = event_tx.send(EngineEvent::Failed { generation, error });
+}
+
+fn hls_context<'a>(
+    client: reqwest::blocking::Client,
+    request: &'a ConnectRequest,
+    event_tx: &'a mpsc::Sender<EngineEvent>,
+    active_generation: &'a Arc<AtomicU64>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+) -> hls::HlsContext<'a> {
+    hls::HlsContext {
+        client,
+        request,
+        event_tx,
+        active_generation,
+        sample_buffer,
+    }
 }
 
 /// Connect, prebuffer, classify, and construct one decoded stream source.
@@ -304,6 +325,32 @@ pub(super) fn run_worker(
         .to_string();
     let final_url = response.url().as_str().to_string();
 
+    if hls::looks_like_hls(&content_type, &final_url) {
+        let body = match hls::read_capped(response, hls::MAX_PLAYLIST_BODY) {
+            Ok(body) => body,
+            Err(error) => {
+                send_failure(
+                    &event_tx,
+                    generation,
+                    EngineError::Connect(format!("could not read HLS playlist: {}", error.0)),
+                );
+                return;
+            }
+        };
+        hls::run(
+            hls_context(
+                client,
+                &request,
+                &event_tx,
+                &active_generation,
+                sample_buffer,
+            ),
+            &final_url,
+            body,
+        );
+        return;
+    }
+
     let mut stream = StreamSource::new(
         response,
         metaint,
@@ -341,6 +388,27 @@ pub(super) fn run_worker(
 
     if !guard_active(generation, &active_generation) {
         send_abandoned(&event_tx, generation);
+        return;
+    }
+
+    if hls::looks_like_playlist(&prebuffer) {
+        // The server did not say it is HLS, but the body is a playlist.
+        let mut body = prebuffer;
+        if body.len() < hls::MAX_PLAYLIST_BODY {
+            let room = (hls::MAX_PLAYLIST_BODY - body.len()) as u64;
+            let _ = stream.by_ref().take(room).read_to_end(&mut body);
+        }
+        hls::run(
+            hls_context(
+                client,
+                &request,
+                &event_tx,
+                &active_generation,
+                sample_buffer,
+            ),
+            &final_url,
+            body,
+        );
         return;
     }
 
@@ -572,6 +640,135 @@ mod tests {
 
             if let Ok(prebuffer) = result {
                 prop_assert!(prebuffer.len() <= max_bytes);
+            }
+        }
+    }
+
+    mod worker_hls {
+        use super::*;
+        use crate::audio::test_http::{fixed, Handler, Response, TestServer};
+
+        const TONE_AAC: &[u8] = include_bytes!("hls/testdata/tone.aac");
+        const MPEGURL: &str = "application/vnd.apple.mpegurl";
+        const PLAYLIST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1,\ns0.aac\n#EXTINF:1,\ns1.aac\n#EXTINF:1,\ns2.aac\n#EXT-X-ENDLIST\n";
+
+        fn route(
+            response: impl Fn() -> Response + Send + Sync + 'static,
+        ) -> Box<dyn Fn(u32) -> Response + Send + Sync> {
+            fixed(response)
+        }
+
+        fn segments() -> Vec<(&'static str, Handler)> {
+            ["/s0.aac", "/s1.aac", "/s2.aac"]
+                .into_iter()
+                .map(|path| (path, route(|| Response::ok("audio/aac", TONE_AAC))))
+                .collect()
+        }
+
+        fn run_worker_against(url: String) -> Vec<EngineEvent> {
+            let (event_tx, event_rx) = mpsc::channel();
+            let active = active_generation();
+            let mut req = request(Duration::from_secs(8), 4096, 512 * 1024);
+            req.url = url;
+
+            run_worker(
+                req,
+                event_tx,
+                Arc::clone(&active),
+                Arc::new(Mutex::new(VecDeque::new())),
+            );
+            active.store(0, SeqCst);
+            event_rx.try_iter().collect()
+        }
+
+        fn terminal(events: &[EngineEvent]) -> &EngineEvent {
+            events
+                .iter()
+                .rfind(|event| !matches!(event, EngineEvent::Buffering { .. }))
+                .expect("a terminal event")
+        }
+
+        fn assert_hls_connected(events: &[EngineEvent]) {
+            match terminal(events) {
+                EngineEvent::Connected { format, .. } => assert_eq!(format.codec, "HLS AAC"),
+                EngineEvent::Failed { error, .. } => {
+                    panic!("expected Connected, got {}", error.to_status_string())
+                }
+                _ => panic!("expected Connected"),
+            }
+        }
+
+        #[test]
+        fn playlist_content_type_takes_the_hls_path() {
+            let mut routes = segments();
+            routes.push(("/live", route(|| Response::ok(MPEGURL, PLAYLIST))));
+            let server = TestServer::start(routes);
+
+            assert_hls_connected(&run_worker_against(server.url("/live")));
+        }
+
+        #[test]
+        fn m3u8_extension_takes_the_hls_path_even_with_a_wrong_content_type() {
+            let mut routes = segments();
+            routes.push(("/live.m3u8", route(|| Response::ok("text/plain", PLAYLIST))));
+            let server = TestServer::start(routes);
+
+            assert_hls_connected(&run_worker_against(server.url("/live.m3u8")));
+        }
+
+        #[test]
+        fn playlist_body_is_recognised_without_any_hint() {
+            let mut routes = segments();
+            routes.push(("/stream", route(|| Response::ok("text/plain", PLAYLIST))));
+            let server = TestServer::start(routes);
+
+            assert_hls_connected(&run_worker_against(server.url("/stream")));
+        }
+
+        #[test]
+        fn plain_m3u_is_not_treated_as_hls() {
+            let plain = "#EXTM3U\n#EXTINF:-1,Some Radio\nhttp://example.invalid/stream\n";
+            let server = TestServer::start(vec![(
+                "/radio.pls",
+                route(move || Response::ok("text/plain", plain)),
+            )]);
+
+            let events = run_worker_against(server.url("/radio.pls"));
+
+            match terminal(&events) {
+                EngineEvent::Failed { error, .. } => {
+                    assert!(!error.to_status_string().contains("HLS"));
+                }
+                _ => panic!("a plain playlist is not decodable audio"),
+            }
+        }
+
+        #[test]
+        fn plain_audio_streams_are_unaffected() {
+            let server = TestServer::start(vec![(
+                "/radio",
+                route(|| Response::ok("audio/aac", TONE_AAC)),
+            )]);
+
+            let events = run_worker_against(server.url("/radio"));
+
+            match terminal(&events) {
+                EngineEvent::Connected { format, .. } => assert_eq!(format.codec, "AAC"),
+                _ => panic!("expected a plain AAC stream to connect"),
+            }
+        }
+
+        #[test]
+        fn hls_playlist_http_errors_fail_without_starting_hls() {
+            let server = TestServer::start(vec![("/live.m3u8", route(|| Response::status(500)))]);
+
+            let events = run_worker_against(server.url("/live.m3u8"));
+
+            match terminal(&events) {
+                EngineEvent::Failed { error, .. } => {
+                    assert!(matches!(error, EngineError::Http(500)))
+                }
+                _ => panic!("expected an HTTP failure"),
             }
         }
     }

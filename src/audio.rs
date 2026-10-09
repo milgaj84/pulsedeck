@@ -2,11 +2,14 @@ mod capability;
 mod codec;
 pub(super) mod decode;
 pub(super) mod engine_loop_v2;
+mod hls;
 mod metadata;
 mod output;
 mod output_manager;
 pub(super) mod stream_source;
 mod supervisor;
+#[cfg(test)]
+mod test_http;
 pub(super) mod types;
 mod visualizer;
 pub(super) mod volume;
