@@ -4,6 +4,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Track titles for HLS stations.** Stations that publish "now playing" information as ID3 timed metadata (a metadata stream in MPEG-TS, or ID3 tags in front of packed-audio segments) now show their artist and title, exactly like ICY stations do, and respect the stream-metadata setting. Titles are announced once per change. RTL, for example, shows the current show and presenter; stations that publish no metadata (France Inter, BBC Radio 4) show none, as before.
+
+---
+
 ## [1.1.1] - 2026-10-09
 
 ### Fixed

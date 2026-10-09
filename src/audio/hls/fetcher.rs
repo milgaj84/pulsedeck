@@ -195,6 +195,12 @@ impl<H: HlsHttp> Fetcher<H> {
                             self.fail(error.to_string());
                             return;
                         }
+                        // A title applies to this segment's audio, so it goes first.
+                        for title in extractor.take_titles() {
+                            if !self.send(HlsChunk::Title(title)) {
+                                return;
+                            }
+                        }
                         if !audio.is_empty() && !self.send(HlsChunk::Bytes(audio)) {
                             return;
                         }
@@ -717,6 +723,66 @@ mod tests {
         let (_, terminal) = drain(&rx);
         join(handle);
         assert_eq!(terminal, Some(HlsChunk::End));
+    }
+
+    fn drain_all(rx: &Receiver<HlsChunk>) -> Vec<HlsChunk> {
+        let mut chunks = Vec::new();
+        while let Ok(chunk) = rx.recv_timeout(Duration::from_secs(10)) {
+            let done = matches!(chunk, HlsChunk::End | HlsChunk::Fail(_));
+            chunks.push(chunk);
+            if done {
+                break;
+            }
+        }
+        chunks
+    }
+
+    #[test]
+    fn titles_precede_their_audio_and_are_sent_only_when_they_change() {
+        let http = FakeHttp::default();
+        let titled = |title: &str, marker: usize| {
+            ts_segment_with_metadata(
+                &[marker_frame(marker)],
+                &[id3_text_tag(title, Some("Band"))],
+            )
+        };
+        http.fixed("/seg0.ts", titled("Alpha", 20));
+        http.fixed("/seg1.ts", titled("Alpha", 21));
+        http.fixed("/seg2.ts", titled("Beta", 22));
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist_text(0, 3, true), 1, &active, fast());
+        let chunks = drain_all(&rx);
+        join(handle);
+
+        assert_eq!(
+            chunks,
+            vec![
+                HlsChunk::Title("Band - Alpha".to_string()),
+                HlsChunk::Bytes(marker_frame(20)),
+                HlsChunk::Bytes(marker_frame(21)),
+                HlsChunk::Title("Band - Beta".to_string()),
+                HlsChunk::Bytes(marker_frame(22)),
+                HlsChunk::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn streams_without_metadata_send_no_title_chunks() {
+        let http = FakeHttp::default();
+        for i in 0..2 {
+            http.fixed(&format!("/seg{i}.ts"), segment(20 + i));
+        }
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist_text(0, 2, true), 1, &active, fast());
+        let chunks = drain_all(&rx);
+        join(handle);
+
+        assert!(chunks
+            .iter()
+            .all(|chunk| !matches!(chunk, HlsChunk::Title(_))));
     }
 
     #[test]

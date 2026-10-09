@@ -159,3 +159,64 @@ pub(crate) fn ts_segment(stream_type: u8, frames: &[Vec<u8>]) -> Vec<u8> {
 
 pub(crate) const AUDIO_PID: u16 = 0x101;
 pub(crate) const PMT_PID: u16 = 0x100;
+
+pub(crate) const META_PID: u16 = 0x102;
+
+/// An ID3v2.4 tag with UTF-8 `TIT2` (and optionally `TPE1`) text frames.
+pub(crate) fn id3_text_tag(title: &str, artist: Option<&str>) -> Vec<u8> {
+    fn frame(id: &str, text: &str) -> Vec<u8> {
+        let size = 1 + text.len() + 1;
+        let mut out = id.as_bytes().to_vec();
+        out.extend_from_slice(&[
+            ((size >> 21) & 0x7F) as u8,
+            ((size >> 14) & 0x7F) as u8,
+            ((size >> 7) & 0x7F) as u8,
+            (size & 0x7F) as u8,
+            0,
+            0,
+            3,
+        ]);
+        out.extend_from_slice(text.as_bytes());
+        out.push(0);
+        out
+    }
+    let mut body = frame("TIT2", title);
+    if let Some(artist) = artist {
+        body.extend(frame("TPE1", artist));
+    }
+    let size = body.len();
+    let mut tag = vec![
+        b'I',
+        b'D',
+        b'3',
+        4,
+        0,
+        0,
+        ((size >> 21) & 0x7F) as u8,
+        ((size >> 14) & 0x7F) as u8,
+        ((size >> 7) & 0x7F) as u8,
+        (size & 0x7F) as u8,
+    ];
+    tag.extend(body);
+    tag
+}
+
+/// A TS segment with an audio stream and an ID3 timed-metadata stream (type
+/// 0x15). `tags` are written as one metadata PES each, before the audio.
+pub(crate) fn ts_segment_with_metadata(frames: &[Vec<u8>], tags: &[Vec<u8>]) -> Vec<u8> {
+    let mut segment = pat_packet(PMT_PID);
+    segment.extend(pmt_packet(PMT_PID, &[(0x0F, AUDIO_PID), (0x15, META_PID)]));
+    let mut meta_cc = 0;
+    for tag in tags {
+        let packets = pes_packets(META_PID, meta_cc, tag);
+        meta_cc = (meta_cc + (packets.len() / PACKET_SIZE) as u8) & 0x0F;
+        segment.extend(packets);
+    }
+    let mut cc = 0;
+    for frame in frames {
+        let packets = pes_packets(AUDIO_PID, cc, frame);
+        cc = (cc + (packets.len() / PACKET_SIZE) as u8) & 0x0F;
+        segment.extend(packets);
+    }
+    segment
+}

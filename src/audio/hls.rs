@@ -7,6 +7,7 @@
 //! continuous AAC/MP3 byte stream, so the decoder does not know it is HLS.
 
 mod fetcher;
+mod id3;
 mod playlist;
 mod source;
 #[cfg(test)]
@@ -156,6 +157,9 @@ pub(super) fn run(ctx: HlsContext<'_>, playlist_url: &str, body: Vec<u8>) {
         Arc::clone(active_generation),
         idle_timeout(&media),
     );
+    if request.options.metadata_enabled {
+        source = source.with_title_events(event_tx.clone());
+    }
 
     let spawned = thread::Builder::new()
         .name(format!("pulsedeck-hls-{generation}"))
@@ -327,6 +331,15 @@ mod tests {
 
     /// Run the HLS worker against a local server and collect its events.
     fn run_against(server: TestServer, entry_path: &str, min_bytes: usize) -> Run {
+        run_against_with(server, entry_path, min_bytes, false)
+    }
+
+    fn run_against_with(
+        server: TestServer,
+        entry_path: &str,
+        min_bytes: usize,
+        metadata_enabled: bool,
+    ) -> Run {
         let (event_tx, event_rx) = mpsc::channel();
         let active = Arc::new(AtomicU64::new(1));
         let url = server.url(entry_path);
@@ -344,7 +357,7 @@ mod tests {
                 fill_timeout: Duration::from_secs(8),
             },
             PlaybackOptions {
-                metadata_enabled: false,
+                metadata_enabled,
                 ..PlaybackOptions::default()
             },
         );
@@ -456,6 +469,67 @@ mod tests {
         let run = run_against(server, "/live.m3u8", 4096);
 
         assert_connected_as(&run, "HLS AAC");
+    }
+
+    fn titles(run: &Run) -> Vec<&str> {
+        run.events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::TrackChanged { title, .. } => Some(title.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn titled_stream(title: &str) -> TestServer {
+        let segment =
+            ts_segment_with_metadata(&tone_frames(), &[id3_text_tag(title, Some("Some Band"))]);
+        server_with(vec![
+            (
+                "/live.m3u8",
+                Response::ok(MPEGURL, media_playlist(3, "ts", "")),
+            ),
+            ("/seg0.ts", Response::ok("video/mp2t", segment.clone())),
+            ("/seg1.ts", Response::ok("video/mp2t", segment.clone())),
+            ("/seg2.ts", Response::ok("video/mp2t", segment)),
+        ])
+    }
+
+    #[test]
+    fn hls_titles_reach_the_engine_as_one_track_change() {
+        let run = run_against_with(titled_stream("Great Song"), "/live.m3u8", 4096, true);
+
+        assert_connected_as(&run, "HLS AAC");
+        // The same title repeats in every segment but is announced once.
+        assert_eq!(titles(&run), ["Some Band - Great Song"]);
+    }
+
+    #[test]
+    fn hls_titles_are_not_reported_when_stream_metadata_is_off() {
+        let run = run_against_with(titled_stream("Great Song"), "/live.m3u8", 4096, false);
+
+        assert_connected_as(&run, "HLS AAC");
+        assert!(titles(&run).is_empty());
+    }
+
+    #[test]
+    fn packed_audio_id3_titles_reach_the_engine_too() {
+        let mut segment = id3_text_tag("Packed Song", Some("Some Band"));
+        segment.extend_from_slice(TONE_AAC);
+        let server = server_with(vec![
+            (
+                "/live.m3u8",
+                Response::ok(MPEGURL, media_playlist(3, "aac", "")),
+            ),
+            ("/seg0.aac", Response::ok("audio/aac", segment.clone())),
+            ("/seg1.aac", Response::ok("audio/aac", segment.clone())),
+            ("/seg2.aac", Response::ok("audio/aac", segment)),
+        ]);
+
+        let run = run_against_with(server, "/live.m3u8", 4096, true);
+
+        assert_connected_as(&run, "HLS AAC");
+        assert_eq!(titles(&run), ["Some Band - Packed Song"]);
     }
 
     #[test]

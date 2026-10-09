@@ -684,18 +684,26 @@ mod tests {
         /// Run the worker and collect its events. The stream is abandoned when
         /// this returns; use `run_worker_alive` to keep it playing.
         fn run_worker_against(url: String) -> Vec<EngineEvent> {
-            let (events, active) = run_worker_alive(url);
+            let (events, active, _rx) = run_worker_alive(url, false);
             active.store(0, SeqCst);
             events
         }
 
         /// Like `run_worker_against`, but leaves the stream active so the
         /// caller can keep reading it. The caller must set the flag to 0.
-        fn run_worker_alive(url: String) -> (Vec<EngineEvent>, Arc<AtomicU64>) {
+        fn run_worker_alive(
+            url: String,
+            metadata_enabled: bool,
+        ) -> (
+            Vec<EngineEvent>,
+            Arc<AtomicU64>,
+            mpsc::Receiver<EngineEvent>,
+        ) {
             let (event_tx, event_rx) = mpsc::channel();
             let active = active_generation();
             let mut req = request(Duration::from_secs(8), 4096, 512 * 1024);
             req.url = url;
+            req.options.metadata_enabled = metadata_enabled;
 
             run_worker(
                 req,
@@ -703,7 +711,7 @@ mod tests {
                 Arc::clone(&active),
                 Arc::new(Mutex::new(VecDeque::new())),
             );
-            (event_rx.try_iter().collect(), active)
+            (event_rx.try_iter().collect(), active, event_rx)
         }
 
         fn terminal(events: &[EngineEvent]) -> &EngineEvent {
@@ -791,7 +799,14 @@ mod tests {
             let Ok(url) = std::env::var("PULSEDECK_HLS_URL") else {
                 return;
             };
-            let (events, active) = run_worker_alive(url);
+            let (events, active, event_rx) = run_worker_alive(url, true);
+            let mut titles: Vec<String> = events
+                .iter()
+                .filter_map(|event| match event {
+                    EngineEvent::TrackChanged { title, .. } => Some(title.clone()),
+                    _ => None,
+                })
+                .collect();
             let Some(EngineEvent::Connected { source, format, .. }) = events
                 .into_iter()
                 .rfind(|event| !matches!(event, EngineEvent::Buffering { .. }))
@@ -807,6 +822,11 @@ mod tests {
             let wanted = format.sample_rate as usize * usize::from(format.channels) * 15;
             let samples: Vec<f32> = source.take(wanted).collect();
             active.store(0, SeqCst);
+            titles.extend(event_rx.try_iter().filter_map(|event| match event {
+                EngineEvent::TrackChanged { title, .. } => Some(title),
+                _ => None,
+            }));
+            println!("TITLES {titles:?}");
             let peak = samples.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
             println!(
                 "DECODED {} of {} samples, peak {peak:.3}",

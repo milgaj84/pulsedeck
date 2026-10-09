@@ -8,6 +8,7 @@
 //! a 7-byte header and rejects multi-frame ADTS, so every ADTS frame is
 //! rewritten into that canonical form (MPEG-2 id bit cleared, CRC removed).
 
+use super::id3;
 use super::playlist::HlsError;
 
 pub(crate) const PACKET_SIZE: usize = 188;
@@ -153,7 +154,14 @@ pub(crate) struct TsDemuxer {
     pes_valid: bool,
     last_cc: Option<u8>,
     adts: AdtsNormalizer,
+    /// PID of the ID3 timed-metadata stream (type 0x15), if the program has one.
+    meta_pid: Option<u16>,
+    meta_pes: Vec<u8>,
+    titles: Vec<String>,
 }
+
+/// Upper bound for one metadata PES; real ones are a few hundred bytes.
+const MAX_META_PES: usize = 64 * 1024;
 
 impl Default for TsDemuxer {
     fn default() -> Self {
@@ -166,6 +174,9 @@ impl Default for TsDemuxer {
             pes_valid: false,
             last_cc: None,
             adts: AdtsNormalizer::default(),
+            meta_pid: None,
+            meta_pes: Vec::new(),
+            titles: Vec::new(),
         }
     }
 }
@@ -207,7 +218,39 @@ impl TsDemuxer {
 
     /// Emit the PES still being assembled. Call at the end of each segment.
     pub(crate) fn flush(&mut self, out: &mut Vec<u8>) -> Result<(), HlsError> {
+        self.flush_meta();
         self.flush_pes(out)
+    }
+
+    /// "Now playing" titles found in the timed-metadata stream since the last call.
+    pub(crate) fn take_titles(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.titles)
+    }
+
+    fn meta_packet(&mut self, payload: &[u8], pusi: bool) {
+        if pusi {
+            self.flush_meta();
+        }
+        if pusi || !self.meta_pes.is_empty() {
+            if self.meta_pes.len() + payload.len() > MAX_META_PES {
+                self.meta_pes.clear();
+                return;
+            }
+            self.meta_pes.extend_from_slice(payload);
+        }
+    }
+
+    fn flush_meta(&mut self) {
+        let pes = std::mem::take(&mut self.meta_pes);
+        if pes.len() < 9 || pes[..3] != [0, 0, 1] {
+            return;
+        }
+        let Some(tag) = pes.get(9 + usize::from(pes[8])..) else {
+            return;
+        };
+        if let Some(title) = id3::parse_leading_tags(tag).display() {
+            self.titles.push(title);
+        }
     }
 
     fn packet(&mut self, packet: &[u8], out: &mut Vec<u8>) -> Result<(), HlsError> {
@@ -236,6 +279,8 @@ impl TsDemuxer {
             self.parse_pmt(payload, pusi)?;
         } else if Some(pid) == self.audio_pid {
             self.audio_packet(payload, pusi, cc, out)?;
+        } else if Some(pid) == self.meta_pid {
+            self.meta_packet(payload, pusi);
         }
         Ok(())
     }
@@ -306,6 +351,7 @@ impl TsDemuxer {
         let mut video = false;
         let mut other_audio: Option<&'static str> = None;
         let mut found: Option<(u16, EsKind)> = None;
+        let mut meta: Option<u16> = None;
 
         while pos + 5 <= end {
             let stream_type = section[pos];
@@ -317,6 +363,7 @@ impl TsDemuxer {
             match stream_type {
                 0x0F if found.is_none() => found = Some((pid, EsKind::Adts)),
                 0x03 | 0x04 if found.is_none() => found = Some((pid, EsKind::MpegAudio)),
+                0x15 if meta.is_none() => meta = Some(pid),
                 0x01 | 0x02 | 0x10 | 0x1B | 0x24 => video = true,
                 0x11 => other_audio = Some("LATM AAC"),
                 0x81 => other_audio = Some("AC-3"),
@@ -325,6 +372,9 @@ impl TsDemuxer {
             }
         }
 
+        if found.is_some() && self.meta_pid.is_none() {
+            self.meta_pid = meta;
+        }
         if let Some((pid, kind)) = found {
             return match self.resolution {
                 Resolution::Waiting => {
@@ -396,6 +446,8 @@ pub(crate) struct AudioExtractor {
     ts: TsDemuxer,
     adts: AdtsNormalizer,
     kind: Option<EsKind>,
+    titles: Vec<String>,
+    last_title: Option<String>,
 }
 
 impl AudioExtractor {
@@ -411,6 +463,18 @@ impl AudioExtractor {
         self.adts.reset();
     }
 
+    /// "Now playing" titles that changed since the last call, in order.
+    pub(crate) fn take_titles(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.titles)
+    }
+
+    fn note_title(&mut self, title: String) {
+        if self.last_title.as_deref() != Some(title.as_str()) {
+            self.last_title = Some(title.clone());
+            self.titles.push(title);
+        }
+    }
+
     pub(crate) fn push_segment(
         &mut self,
         segment: &[u8],
@@ -420,13 +484,22 @@ impl AudioExtractor {
             SegmentFormat::Ts => {
                 self.ts.push(segment, out)?;
                 self.ts.flush(out)?;
+                for title in self.ts.take_titles() {
+                    self.note_title(title);
+                }
                 self.ts.kind()
             }
             SegmentFormat::Adts => {
+                if let Some(title) = id3::parse_leading_tags(segment).display() {
+                    self.note_title(title);
+                }
                 self.adts.push(strip_id3(segment), out)?;
                 Some(EsKind::Adts)
             }
             SegmentFormat::MpegAudio => {
+                if let Some(title) = id3::parse_leading_tags(segment).display() {
+                    self.note_title(title);
+                }
                 out.extend_from_slice(strip_id3(segment));
                 Some(EsKind::MpegAudio)
             }
@@ -865,6 +938,145 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, HlsError::Malformed("unrecognised segment data"));
+    }
+
+    #[test]
+    fn ts_metadata_stream_yields_titles() {
+        let segment =
+            ts_segment_with_metadata(&frames(2, 60), &[id3_text_tag("Song", Some("Band"))]);
+        let mut demuxer = TsDemuxer::default();
+        let mut out = Vec::new();
+
+        demuxer.push(&segment, &mut out).unwrap();
+        demuxer.flush(&mut out).unwrap();
+
+        assert_eq!(demuxer.take_titles(), vec!["Band - Song".to_string()]);
+        assert!(demuxer.take_titles().is_empty(), "titles are drained");
+        assert_eq!(out, frames(2, 60).concat(), "audio is unaffected");
+    }
+
+    #[test]
+    fn ts_metadata_titles_keep_their_order_and_a_title_alone_is_fine() {
+        let segment = ts_segment_with_metadata(
+            &frames(1, 40),
+            &[
+                id3_text_tag("First", None),
+                id3_text_tag("Second", Some("Artist")),
+            ],
+        );
+        let mut demuxer = TsDemuxer::default();
+        demuxer.push(&segment, &mut Vec::new()).unwrap();
+        demuxer.flush(&mut Vec::new()).unwrap();
+
+        assert_eq!(
+            demuxer.take_titles(),
+            vec!["First".to_string(), "Artist - Second".to_string()]
+        );
+    }
+
+    #[test]
+    fn ts_metadata_without_text_frames_yields_no_title() {
+        // France Inter's tag: a header and no frames.
+        let segment = ts_segment_with_metadata(&frames(1, 40), &[id3_tag(0)]);
+        let mut demuxer = TsDemuxer::default();
+        demuxer.push(&segment, &mut Vec::new()).unwrap();
+        demuxer.flush(&mut Vec::new()).unwrap();
+
+        assert!(demuxer.take_titles().is_empty());
+    }
+
+    #[test]
+    fn ts_without_a_metadata_stream_has_no_titles() {
+        let mut demuxer = TsDemuxer::default();
+        demuxer
+            .push(&ts_segment(0x0F, &frames(2, 50)), &mut Vec::new())
+            .unwrap();
+        demuxer.flush(&mut Vec::new()).unwrap();
+
+        assert!(demuxer.take_titles().is_empty());
+    }
+
+    #[test]
+    fn ts_long_metadata_spanning_many_packets_is_reassembled() {
+        let long_title = "x".repeat(900);
+        let segment =
+            ts_segment_with_metadata(&frames(1, 40), &[id3_text_tag(&long_title, Some("Band"))]);
+        let mut demuxer = TsDemuxer::default();
+        demuxer.push(&segment, &mut Vec::new()).unwrap();
+        demuxer.flush(&mut Vec::new()).unwrap();
+
+        assert_eq!(demuxer.take_titles(), vec![format!("Band - {long_title}")]);
+    }
+
+    #[test]
+    fn ts_metadata_titles_do_not_depend_on_how_the_input_is_split() {
+        let segment =
+            ts_segment_with_metadata(&frames(2, 80), &[id3_text_tag("Song", Some("Band"))]);
+
+        for split in (0..segment.len()).step_by(13) {
+            let mut demuxer = TsDemuxer::default();
+            let mut out = Vec::new();
+            demuxer.push(&segment[..split], &mut out).unwrap();
+            demuxer.push(&segment[split..], &mut out).unwrap();
+            demuxer.flush(&mut out).unwrap();
+            assert_eq!(
+                demuxer.take_titles(),
+                vec!["Band - Song".to_string()],
+                "split at {split}"
+            );
+        }
+    }
+
+    #[test]
+    fn extractor_reports_titles_once_per_change() {
+        let mut extractor = AudioExtractor::default();
+        let mut out = Vec::new();
+        let seg = |title: &str| {
+            ts_segment_with_metadata(&frames(1, 40), &[id3_text_tag(title, Some("Band"))])
+        };
+
+        extractor.push_segment(&seg("One"), &mut out).unwrap();
+        assert_eq!(extractor.take_titles(), vec!["Band - One".to_string()]);
+
+        // The same title repeats in every segment on real stations.
+        extractor.push_segment(&seg("One"), &mut out).unwrap();
+        assert!(extractor.take_titles().is_empty());
+
+        extractor.push_segment(&seg("Two"), &mut out).unwrap();
+        assert_eq!(extractor.take_titles(), vec!["Band - Two".to_string()]);
+
+        // A discontinuity does not make the same title count as new.
+        extractor.reset();
+        extractor.push_segment(&seg("Two"), &mut out).unwrap();
+        assert!(extractor.take_titles().is_empty());
+    }
+
+    #[test]
+    fn extractor_reads_titles_from_packed_audio_id3_tags() {
+        let mut aac = id3_text_tag("Packed", Some("Band"));
+        aac.extend(frames(2, 50).concat());
+        let mut mp3 = id3_text_tag("Mp3 Song", None);
+        mp3.extend(mp3_frame(80));
+
+        let mut extractor = AudioExtractor::default();
+        extractor.push_segment(&aac, &mut Vec::new()).unwrap();
+        assert_eq!(extractor.take_titles(), vec!["Band - Packed".to_string()]);
+
+        let mut extractor = AudioExtractor::default();
+        extractor.push_segment(&mp3, &mut Vec::new()).unwrap();
+        assert_eq!(extractor.take_titles(), vec!["Mp3 Song".to_string()]);
+    }
+
+    #[test]
+    fn extractor_ignores_packed_id3_tags_without_text() {
+        // The usual packed-audio tag only holds a PRIV timestamp.
+        let mut segment = id3_tag(40);
+        segment.extend(frames(1, 50).concat());
+        let mut extractor = AudioExtractor::default();
+
+        extractor.push_segment(&segment, &mut Vec::new()).unwrap();
+
+        assert!(extractor.take_titles().is_empty());
     }
 
     mod property_tests {

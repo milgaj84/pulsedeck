@@ -3,9 +3,10 @@
 //! The decoder reads on the audio thread, so downloading happens on a separate
 //! thread and this type only hands over bytes that are already in memory.
 
+use super::super::types::EngineEvent;
 use std::io::{self, Read};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,8 @@ const POLL: Duration = Duration::from_millis(250);
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum HlsChunk {
     Bytes(Vec<u8>),
+    /// The "now playing" title changed; applies to the audio that follows.
+    Title(String),
     /// The stream ended cleanly (VOD with `#EXT-X-ENDLIST`).
     End,
     /// The stream failed; the message becomes the read error.
@@ -30,6 +33,8 @@ pub(crate) struct HlsSource {
     pending: Vec<u8>,
     pos: usize,
     ended: bool,
+    /// Where title changes are reported; `None` when stream metadata is off.
+    title_events: Option<Sender<EngineEvent>>,
 }
 
 impl HlsSource {
@@ -47,7 +52,14 @@ impl HlsSource {
             pending: Vec::new(),
             pos: 0,
             ended: false,
+            title_events: None,
         }
+    }
+
+    /// Report title changes as `TrackChanged` events, like ICY metadata does.
+    pub(crate) fn with_title_events(mut self, events: Sender<EngineEvent>) -> Self {
+        self.title_events = Some(events);
+        self
     }
 
     fn abandoned(&self) -> bool {
@@ -89,6 +101,14 @@ impl Read for HlsSource {
                 Ok(HlsChunk::Bytes(bytes)) => {
                     self.pending = bytes;
                     self.pos = 0;
+                }
+                Ok(HlsChunk::Title(title)) => {
+                    if let Some(events) = &self.title_events {
+                        let _ = events.send(EngineEvent::TrackChanged {
+                            generation: self.generation,
+                            title,
+                        });
+                    }
                 }
                 Ok(HlsChunk::End) | Err(RecvTimeoutError::Disconnected) => {
                     self.ended = true;
@@ -177,6 +197,41 @@ mod tests {
         let err = source.read(&mut buf).unwrap_err();
         assert_eq!(err.to_string(), "HLS: boom");
         assert_eq!(source.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn titles_become_track_changed_events_between_the_surrounding_bytes() {
+        let (tx, source, _) = source(Duration::from_secs(5));
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut source = source.with_title_events(event_tx);
+        tx.send(HlsChunk::Bytes(vec![1, 2])).unwrap();
+        tx.send(HlsChunk::Title("Band - Song".to_string())).unwrap();
+        tx.send(HlsChunk::Bytes(vec![3])).unwrap();
+        tx.send(HlsChunk::End).unwrap();
+        let mut buf = [0u8; 8];
+
+        assert_eq!(source.read(&mut buf).unwrap(), 2);
+        assert!(event_rx.try_recv().is_err(), "title not reached yet");
+        assert_eq!(source.read(&mut buf).unwrap(), 1);
+
+        match event_rx.try_recv() {
+            Ok(EngineEvent::TrackChanged { generation, title }) => {
+                assert_eq!(generation, 1);
+                assert_eq!(title, "Band - Song");
+            }
+            _ => panic!("expected a TrackChanged event"),
+        }
+        assert_eq!(source.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn titles_are_dropped_silently_when_metadata_is_off() {
+        let (tx, mut source, _) = source(Duration::from_secs(5));
+        tx.send(HlsChunk::Title("ignored".to_string())).unwrap();
+        tx.send(HlsChunk::Bytes(vec![7])).unwrap();
+        tx.send(HlsChunk::End).unwrap();
+
+        assert_eq!(read_all(&mut source).unwrap(), [7]);
     }
 
     #[test]
