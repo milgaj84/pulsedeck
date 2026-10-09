@@ -3,7 +3,7 @@
 /// This module answers one question: given a station codec string, what
 /// should playback do? The active decode path uses Symphonia probe-based
 /// decoding (via rodio's `Decoder::new`), which supports MP3, AAC, OGG/Vorbis,
-/// Opus, FLAC, and WAV. HLS playlists are played by the HLS fetcher
+/// FLAC, and WAV. Opus has no Symphonia decoder and is `Unsupported`. HLS playlists are played by the HLS fetcher
 /// (`audio::hls`) for audio-only AAC/MP3 streams; encrypted, fMP4 and
 /// video-only variants are rejected at runtime with a clear error. Windows
 /// Media (WMA/ASF) has no Symphonia decoder and is `Unsupported`. Missing or
@@ -26,7 +26,7 @@ pub struct CodecCapability {
 
 /// Return the capability policy for a given raw codec string.
 ///
-/// MP3 and all Symphonia-supported formats (AAC, OGG/Vorbis, Opus, FLAC, WAV)
+/// MP3 and all Symphonia-supported formats (AAC, OGG/Vorbis, FLAC, WAV)
 /// are `Supported`, and so is HLS/M3U8 (audio-only streams; see the reason
 /// text for the limits). WMA/ASF is `Unsupported`. Everything else (including
 /// empty) is `Unknown` and allowed to attempt playback.
@@ -54,8 +54,8 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
         },
         "OPUS" | "AUDIO/OPUS" => CodecCapability {
             normalized_codec: "OPUS",
-            capability: PlaybackCapability::Supported,
-            reason: "Opus streams are supported via Symphonia decoding",
+            capability: PlaybackCapability::Unsupported,
+            reason: "Opus streams cannot be decoded (Symphonia has no Opus decoder)",
         },
         "FLAC" | "AUDIO/FLAC" => CodecCapability {
             normalized_codec: "FLAC",
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn known_non_mp3_codecs_are_now_supported() {
-        for codec in ["AAC", "aac+", "OGG", "Opus", "FLAC", "WAV"] {
+        for codec in ["AAC", "aac+", "OGG", "FLAC", "WAV"] {
             assert_eq!(
                 codec_capability(codec).capability,
                 PlaybackCapability::Supported,
@@ -229,6 +229,21 @@ mod tests {
             "MP3", "AAC", "OGG", "OPUS", "FLAC", "HLS", "WMA", "", "unknown",
         ] {
             assert!(!codec_capability(codec).reason.is_empty());
+        }
+    }
+
+    #[test]
+    fn opus_is_unsupported_with_an_honest_reason() {
+        for codec in ["opus", "OPUS", "audio/opus"] {
+            let capability = codec_capability(codec);
+            assert_eq!(
+                capability.capability,
+                PlaybackCapability::Unsupported,
+                "{codec}"
+            );
+            assert_eq!(capability.normalized_codec, "OPUS");
+            assert!(capability.reason.contains("Opus"));
+            assert!(!is_codec_playback_supported(codec));
         }
     }
 }

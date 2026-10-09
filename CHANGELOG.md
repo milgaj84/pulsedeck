@@ -7,6 +7,9 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Ogg Vorbis stations now play.** The build had no Ogg demuxer, so every Ogg stream failed with "probe failed: end of stream" even though Ogg/Vorbis was listed as supported. The Ogg demuxer is now enabled (one new small dependency, `symphonia-format-ogg`).
+- **Opus is reported honestly.** Symphonia has no Opus decoder, so Opus stations are marked unplayable up front, and Opus streams inside Ogg fail with "Opus audio is not supported" instead of a confusing probe error. They are not retried.
+- **A decoder panic can no longer hang a connection.** Some container formats make a third-party decoder panic (a streamed fragmented MP4 did). The panic is now caught, reported as a normal "not supported" error, and kept off the screen. Previously the engine would wait forever in "Connecting".
 - **Retired Radio Browser mirrors**: `nl1` and `at1` no longer exist (they do not resolve in DNS). They are removed and the project's round-robin name, `all.api.radio-browser.info`, is added, so mirrors that come back are used without a new release.
 
 ### Improved

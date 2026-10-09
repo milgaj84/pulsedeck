@@ -1,5 +1,6 @@
-use super::codec::{detect_codec, CodecDetection};
+use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
+use super::panic_guard;
 use super::stream_source::StreamSource;
 use super::types::{
     ConnectRequest, DecodedSource, EndReason, EngineError, EngineEvent, Generation, StreamFormat,
@@ -30,44 +31,59 @@ impl DecodePipeline {
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         detection: CodecDetection,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
+        // Symphonia has no Opus decoder, so say so plainly instead of failing
+        // later with a confusing "probe failed".
+        if detection.hint == CodecHint::Opus {
+            return Err(EngineError::Decode(
+                "Opus audio is not supported".to_string(),
+            ));
+        }
+
         let wrapped = ReadWrapper::new(reader);
         let buf_reader = BufReader::new(wrapped);
+        let verified_mp3 = detection.verified_mp3();
 
-        if detection.verified_mp3() {
-            return match Decoder::new_mp3(buf_reader) {
-                Ok(decoder) => {
-                    let format = StreamFormat {
-                        codec: detection.hint.label().to_string(),
-                        sample_rate: decoder.sample_rate(),
-                        channels: decoder.channels(),
-                    };
-                    let visualizer =
-                        VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
-                    Ok((Box::new(visualizer), format))
-                }
-                Err(error) => Err(EngineError::Decode(format!(
-                    "verified MP3 stream could not be decoded: {error}"
-                ))),
-            };
-        }
-
-        match Decoder::new(buf_reader) {
-            Ok(decoder) => {
-                let format = StreamFormat {
-                    codec: detection.hint.label().to_string(),
-                    sample_rate: decoder.sample_rate(),
-                    channels: decoder.channels(),
-                };
-                let visualizer =
-                    VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
-                Ok((Box::new(visualizer), format))
+        // Third-party decoders can panic on input they cannot handle, so the
+        // probe runs inside a guard that turns a panic into an error.
+        let probed = panic_guard::run_quiet(|| {
+            if verified_mp3 {
+                Decoder::new_mp3(buf_reader)
+            } else {
+                Decoder::new(buf_reader)
             }
-            Err(error) => Err(EngineError::Decode(format!(
-                "{} probe failed: {error}",
-                detection.hint.label()
-            ))),
-        }
+            .map_err(|error| error.to_string())
+        });
+        let decoder = match probed {
+            Ok(Ok(decoder)) => decoder,
+            Ok(Err(message)) if verified_mp3 => {
+                return Err(EngineError::Decode(format!(
+                    "verified MP3 stream could not be decoded: {message}"
+                )))
+            }
+            Ok(Err(message)) => {
+                return Err(EngineError::Decode(format!(
+                    "{} probe failed: {message}",
+                    detection.hint.label()
+                )))
+            }
+            Err(()) => return Err(decoder_crashed()),
+        };
+
+        let format = StreamFormat {
+            codec: detection.hint.label().to_string(),
+            sample_rate: decoder.sample_rate(),
+            channels: decoder.channels(),
+        };
+        let visualizer = VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
+        Ok((Box::new(visualizer), format))
     }
+}
+
+/// The error for a decoder that panicked while probing a stream.
+pub(super) fn decoder_crashed() -> EngineError {
+    EngineError::Decode(
+        "this stream's container crashed the decoder and is not supported".to_string(),
+    )
 }
 
 /// Adapts a live reader to rodio's `Read + Seek + Send + Sync` requirement.
@@ -813,6 +829,135 @@ mod tests {
                 }
                 _ => panic!("expected an HTTP failure"),
             }
+        }
+    }
+
+    mod real_codecs {
+        use super::*;
+        use crate::audio::test_http::{fixed, Response, TestServer};
+
+        const OGG_VORBIS: &[u8] = include_bytes!("testdata/tone.ogg");
+        const OPUS: &[u8] = include_bytes!("testdata/tone.opus");
+        const FLAC: &[u8] = include_bytes!("testdata/tone.flac");
+        const FRAGMENTED_MP4: &[u8] = include_bytes!("testdata/tone_frag.mp4");
+
+        fn build(bytes: &[u8]) -> Result<(DecodedSource, StreamFormat), EngineError> {
+            DecodePipeline::build(
+                Cursor::new(bytes.to_vec()),
+                Arc::new(Mutex::new(VecDeque::new())),
+                detect_codec(bytes, "", ""),
+            )
+        }
+
+        fn first_samples(bytes: &[u8], count: usize) -> (StreamFormat, Vec<f32>) {
+            let (source, format) =
+                build(bytes).unwrap_or_else(|e| panic!("{}", e.to_status_string()));
+            (format, source.take(count).collect())
+        }
+
+        #[test]
+        fn ogg_vorbis_decodes_real_audio() {
+            let (format, samples) = first_samples(OGG_VORBIS, 4000);
+
+            assert_eq!(format.codec, "Ogg Vorbis");
+            assert_eq!(format.sample_rate, 48_000);
+            assert_eq!(samples.len(), 4000);
+            assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
+        }
+
+        #[test]
+        fn flac_still_decodes_real_audio() {
+            let (format, samples) = first_samples(FLAC, 4000);
+
+            assert_eq!(format.codec, "FLAC");
+            assert_eq!(format.sample_rate, 44_100);
+            assert_eq!(samples.len(), 4000);
+        }
+
+        #[test]
+        fn opus_fails_with_a_clear_not_supported_error() {
+            let Err(EngineError::Decode(message)) = build(OPUS) else {
+                panic!("Opus must be rejected as a decode error");
+            };
+
+            assert_eq!(message, "Opus audio is not supported");
+        }
+
+        #[test]
+        fn a_fragmented_mp4_stream_is_an_error_not_a_panic() {
+            // rodio asserts "unreachable" on this input; the guard must turn it
+            // into an ordinary error and leave the panic hook active again.
+            let result = build(FRAGMENTED_MP4);
+
+            assert!(matches!(result, Err(EngineError::Decode(_))));
+            assert!(!crate::audio::quiet_panics_on_this_thread());
+        }
+
+        fn run_worker_collecting(url: String) -> Vec<EngineEvent> {
+            let (event_tx, event_rx) = mpsc::channel();
+            let active = active_generation();
+            let mut req = request(Duration::from_secs(8), 1024, 512 * 1024);
+            req.url = url;
+            run_worker(
+                req,
+                event_tx,
+                Arc::clone(&active),
+                Arc::new(Mutex::new(VecDeque::new())),
+            );
+            active.store(0, SeqCst);
+            event_rx.try_iter().collect()
+        }
+
+        fn serve(content_type: &'static str, body: &'static [u8]) -> TestServer {
+            TestServer::start(vec![(
+                "/stream",
+                fixed(move || Response::ok(content_type, body)),
+            )])
+        }
+
+        #[test]
+        fn an_ogg_vorbis_station_connects_through_the_worker() {
+            let server = serve("application/ogg", OGG_VORBIS);
+
+            let events = run_worker_collecting(server.url("/stream"));
+
+            match events.last() {
+                Some(EngineEvent::Connected { format, .. }) => {
+                    assert_eq!(format.codec, "Ogg Vorbis")
+                }
+                _ => panic!("expected the Ogg stream to connect"),
+            }
+        }
+
+        #[test]
+        fn an_opus_station_fails_with_the_clear_message() {
+            let server = serve("audio/ogg", OPUS);
+
+            let events = run_worker_collecting(server.url("/stream"));
+
+            match events.last() {
+                Some(EngineEvent::Failed { error, .. }) => {
+                    assert!(error
+                        .to_status_string()
+                        .contains("Opus audio is not supported"))
+                }
+                _ => panic!("expected an Opus failure"),
+            }
+        }
+
+        #[test]
+        fn a_fragmented_mp4_station_fails_without_taking_down_the_worker() {
+            let server = serve("audio/mp4", FRAGMENTED_MP4);
+
+            let events = run_worker_collecting(server.url("/stream"));
+
+            assert!(matches!(
+                events.last(),
+                Some(EngineEvent::Failed {
+                    error: EngineError::Decode(_),
+                    ..
+                })
+            ));
         }
     }
 }

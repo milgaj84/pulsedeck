@@ -6,6 +6,7 @@ mod hls;
 mod metadata;
 mod output;
 mod output_manager;
+mod panic_guard;
 pub(super) mod stream_source;
 mod supervisor;
 #[cfg(test)]
@@ -15,6 +16,7 @@ mod visualizer;
 pub(super) mod volume;
 
 pub use capability::{codec_capability, PlaybackCapability};
+pub use panic_guard::quiet_panics_on_this_thread;
 
 use std::collections::VecDeque;
 

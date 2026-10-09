@@ -13,10 +13,15 @@ pub(super) fn last_played_station_position(
     find_station_index_by_url(stations, last_played_url)
 }
 
-/// An HLS stream that can never play (encrypted, fMP4, video-only, ...).
-/// Retrying it would only repeat the same failure.
+/// Failures that retrying can never fix: an HLS stream that is encrypted,
+/// fMP4 or video-only, Opus audio, or a container that crashes the decoder.
+/// Only errors that PulseDeck itself words as "not supported" qualify, so
+/// transient network errors are never mistaken for permanent ones.
 fn is_permanent_failure(error: &str) -> bool {
-    error.contains("HLS:") && error.contains("not supported")
+    error.contains("not supported")
+        && (error.contains("HLS:")
+            || error.contains("Opus audio")
+            || error.contains("crashed the decoder"))
 }
 
 pub(super) fn unix_now_string() -> String {
@@ -417,7 +422,17 @@ mod tests {
     }
 
     #[test]
-    fn only_hls_errors_can_be_permanent() {
+    fn opus_and_decoder_crashes_are_not_retried() {
+        assert!(is_permanent_failure(
+            "Decode error: Opus audio is not supported"
+        ));
+        assert!(is_permanent_failure(
+            "Decode error: this stream's container crashed the decoder and is not supported"
+        ));
+    }
+
+    #[test]
+    fn only_authored_unsupported_errors_can_be_permanent() {
         assert!(is_permanent_failure(
             "Decode error: HLS: x is not supported"
         ));

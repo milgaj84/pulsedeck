@@ -60,6 +60,11 @@ async fn main() -> Result<()> {
     // add the friendly message; the original hook still prints the panic details.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic that was caught and reported as a playback error (see
+        // audio::panic_guard) is not a crash; keep the screen clean.
+        if audio::quiet_panics_on_this_thread() {
+            return;
+        }
         eprintln!("\nPulseDeck hit an unexpected error and will close safely.");
         eprintln!("Please report this at https://github.com/milgaj84/pulsedeck/issues");
         eprintln!("---");

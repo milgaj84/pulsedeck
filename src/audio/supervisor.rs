@@ -27,6 +27,29 @@ pub(super) struct ConnectionSupervisor {
     retired_workers: VecDeque<JoinHandle<()>>,
 }
 
+/// Run a connection worker, reporting a panic as a failed connection. Without
+/// this the engine would wait forever for an event from a dead thread.
+fn run_guarded<W>(
+    worker: W,
+    req: ConnectRequest,
+    event_tx: mpsc::Sender<EngineEvent>,
+    active_generation: Arc<AtomicU64>,
+    sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+) where
+    W: FnOnce(ConnectRequest, mpsc::Sender<EngineEvent>, Arc<AtomicU64>, Arc<Mutex<VecDeque<f32>>>),
+{
+    let generation = req.generation;
+    let failure_tx = event_tx.clone();
+    let outcome =
+        super::panic_guard::run_quiet(|| worker(req, event_tx, active_generation, sample_buffer));
+    if outcome.is_err() {
+        let _ = failure_tx.send(EngineEvent::Failed {
+            generation,
+            error: super::decode::decoder_crashed(),
+        });
+    }
+}
+
 impl ConnectionSupervisor {
     pub(super) fn new() -> Self {
         Self {
@@ -69,7 +92,13 @@ impl ConnectionSupervisor {
 
         let active_gen_arc = Arc::clone(&self.active_generation);
         let handle = std::thread::spawn(move || {
-            super::decode::run_worker(req, event_tx, active_gen_arc, sample_buffer);
+            run_guarded(
+                super::decode::run_worker,
+                req,
+                event_tx,
+                active_gen_arc,
+                sample_buffer,
+            );
         });
         self.worker = Some(handle);
     }
@@ -119,6 +148,57 @@ mod tests {
     use super::*;
     use std::sync::mpsc as std_mpsc;
     use std::time::Duration;
+
+    fn guarded_request(generation: Generation) -> ConnectRequest {
+        ConnectRequest::new(
+            generation,
+            "http://test.invalid/stream".to_string(),
+            super::super::types::PrebufferConfig {
+                min_bytes: 1,
+                max_bytes: 2,
+                fill_timeout: Duration::from_secs(1),
+            },
+            super::super::types::PlaybackOptions::default(),
+        )
+    }
+
+    #[test]
+    fn a_panicking_worker_is_reported_as_a_failed_connection() {
+        let (tx, rx) = std_mpsc::channel();
+
+        run_guarded(
+            |_req, _tx, _active, _samples| panic!("decoder blew up"),
+            guarded_request(7),
+            tx,
+            Arc::new(AtomicU64::new(7)),
+            Arc::new(Mutex::new(VecDeque::new())),
+        );
+
+        match rx.try_recv() {
+            Ok(EngineEvent::Failed { generation, error }) => {
+                assert_eq!(generation, 7);
+                assert!(error.to_status_string().contains("crashed the decoder"));
+            }
+            _ => panic!("expected a Failed event for the panicking worker"),
+        }
+        assert!(rx.try_recv().is_err());
+        assert!(!super::super::quiet_panics_on_this_thread());
+    }
+
+    #[test]
+    fn a_worker_that_returns_normally_sends_no_extra_failure() {
+        let (tx, rx) = std_mpsc::channel();
+
+        run_guarded(
+            |_req, _tx, _active, _samples| {},
+            guarded_request(1),
+            tx,
+            Arc::new(AtomicU64::new(1)),
+            Arc::new(Mutex::new(VecDeque::new())),
+        );
+
+        assert!(rx.try_recv().is_err());
+    }
 
     #[test]
     fn next_generation_starts_at_one() {
