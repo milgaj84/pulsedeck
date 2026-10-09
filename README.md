@@ -208,9 +208,16 @@ PulseDeck also works headless for library management:
 pulsedeck export ~/backup.m3u        # export library
 pulsedeck import ~/stations.m3u      # merge new stations
 pulsedeck import file.json --preview # dry run, show what would change
+pulsedeck import file.m3u --enrich-only  # refresh existing stations, add nothing
 pulsedeck config init                # generate default pulsedeck.toml
+pulsedeck config show                # print the effective configuration
 pulsedeck keybindings validate       # check your keybindings file
+pulsedeck keybindings list           # list every effective keybinding
+pulsedeck doctor                     # diagnostics: paths, config, audio, library
+pulsedeck doctor --network           # also check the Radio Browser servers
 ```
+
+`pulsedeck doctor` is read-only and exits non-zero when a check fails, so paste its output into bug reports.
 
 ---
 

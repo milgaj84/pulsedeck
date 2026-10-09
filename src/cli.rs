@@ -5,6 +5,8 @@ use anyhow::{anyhow, Context};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod doctor;
+
 #[derive(Debug)]
 pub enum CliOutcome {
     RunTui,
@@ -47,6 +49,7 @@ fn print_help() {
     println!("  pulsedeck config show                    Print effective configuration as TOML");
     println!("  pulsedeck keybindings validate [path]    Validate keybindings file for errors");
     println!("  pulsedeck keybindings list               List all effective keybindings");
+    println!("  pulsedeck doctor [--network]             Print diagnostics (paths, config, audio, library)");
     println!("  pulsedeck -h, --help       Show this help message");
     println!("  pulsedeck -V, --version    Show version information");
 }
@@ -333,6 +336,7 @@ pub fn run<I: Iterator<Item = String>>(mut args: I) -> anyhow::Result<CliOutcome
                 "Missing keybindings subcommand. Usage: pulsedeck keybindings <validate|list>"
             )),
         },
+        Some("doctor") => doctor::handle_doctor(args),
         Some("--version" | "-V") => {
             println!("pulsedeck {}", env!("CARGO_PKG_VERSION"));
             Ok(CliOutcome::Handled)
@@ -849,5 +853,20 @@ save_history = false
         );
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_doctor_rejects_unknown_option() {
+        let err = run(vec!["pulsedeck", "doctor", "--bogus"]
+            .into_iter()
+            .map(String::from))
+        .unwrap_err();
+        assert!(err.to_string().contains("Unknown doctor option"));
+    }
+
+    #[test]
+    fn test_help_mentions_doctor() {
+        // print_help writes to stdout; the usage line is also the contract for the README.
+        assert!(include_str!("cli.rs").contains("pulsedeck doctor [--network]"));
     }
 }

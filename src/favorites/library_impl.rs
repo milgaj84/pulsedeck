@@ -14,6 +14,20 @@ impl Library {
         Self::load_with_policy(MissingLibraryPolicy::SeedAndSave(seed_stations))
     }
 
+    /// Read-only summary of a library file for diagnostics: no seeding, no legacy
+    /// migration and no writes. A damaged file falls back to its backup, and the
+    /// fallback is reported as a warning.
+    pub fn summarize_file(path: &Path) -> LibrarySummary {
+        let mut warnings = Vec::new();
+        let (stations, settings, _) =
+            read_library_file_or_fallback(path, &MissingLibraryPolicy::Empty, &mut warnings);
+        LibrarySummary {
+            stations: stations.len(),
+            favorites: settings.favorites.len(),
+            warnings,
+        }
+    }
+
     /// Load the library for read-only/CLI use without seeding starters or writing a file.
     /// Keeps the resolved path so a later import can still persist.
     pub fn load_existing() -> Self {

@@ -35,7 +35,7 @@ fn base_dirs(
     dirs
 }
 
-fn candidate_base_dirs() -> Vec<PathBuf> {
+pub(crate) fn candidate_base_dirs() -> Vec<PathBuf> {
     base_dirs(
         absolute_dir(env::var_os("XDG_CONFIG_HOME")),
         absolute_dir(env::var_os("HOME")),
@@ -44,7 +44,7 @@ fn candidate_base_dirs() -> Vec<PathBuf> {
     )
 }
 
-fn resolve_config_dir(bases: &[PathBuf]) -> Option<PathBuf> {
+pub(crate) fn resolve_config_dir(bases: &[PathBuf]) -> Option<PathBuf> {
     bases
         .iter()
         .map(|base| base.join(NEW_CONFIG_DIR))
@@ -60,11 +60,26 @@ pub fn config_dir() -> Option<PathBuf> {
 /// config directory (so a stray empty `~/.config/pulsedeck` cannot shadow a
 /// real config elsewhere).
 fn resolve_config_path(bases: &[PathBuf], file: &str) -> Option<PathBuf> {
+    existing_config_file(bases, file)
+        .or_else(|| resolve_config_dir(bases).map(|dir| dir.join(file)))
+}
+
+/// First base that already holds `file` under the PulseDeck config directory.
+/// Read-only: unlike `config_path` it never migrates legacy files.
+pub(crate) fn existing_config_file(bases: &[PathBuf], file: &str) -> Option<PathBuf> {
     bases
         .iter()
         .map(|base| path_for(base, NEW_CONFIG_DIR, file))
         .find(|path| path.exists())
-        .or_else(|| resolve_config_dir(bases).map(|dir| dir.join(file)))
+}
+
+/// Bases that still hold a legacy `driftfm` config directory.
+pub(crate) fn legacy_config_dirs(bases: &[PathBuf]) -> Vec<PathBuf> {
+    bases
+        .iter()
+        .map(|base| base.join(OLD_CONFIG_DIR))
+        .filter(|dir| dir.exists())
+        .collect()
 }
 
 pub fn config_path(file: &str) -> Option<PathBuf> {

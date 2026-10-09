@@ -36,7 +36,7 @@ pub trait RadioApi: Send + Sync {
     ) -> impl std::future::Future<Output = Result<Vec<Station>, String>> + Send;
 }
 
-const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
+pub(crate) const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
     "https://de1.api.radio-browser.info",
     "https://de2.api.radio-browser.info",
     "https://nl1.api.radio-browser.info",

@@ -87,6 +87,14 @@ pub fn resolve_parent_genre(subgenre: &str) -> &'static str {
     }
 }
 
+/// Read-only view of a library file, used by `pulsedeck doctor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibrarySummary {
+    pub stations: usize,
+    pub favorites: usize,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSummary {
     pub added: usize,

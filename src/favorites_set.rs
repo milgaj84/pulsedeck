@@ -36,13 +36,11 @@ impl FavoritesSet {
     }
 
     /// Return the number of favorites.
-    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.urls.len()
     }
 
     /// Check if the favorites set is empty.
-    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.urls.is_empty()
     }
