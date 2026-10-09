@@ -4,6 +4,20 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Improved
+- **Automatic GitHub Releases**: pushing a `v*` tag now creates the GitHub Release from the matching changelog section.
+- **Clearer publish failure**: the crates.io publish job stops early with a message when `CARGO_REGISTRY_TOKEN` is not set.
+
+### Security
+- **Weekly dependency audit**: a scheduled workflow runs `cargo audit` and `cargo deny check` every Monday, so new advisories surface without a push.
+
+### Internal
+- `RELEASING.md` documents the release automation, the required secret and the weekly audit.
+
+---
+
 ## [1.0.1] - 2026-10-08
 
 ### Added
