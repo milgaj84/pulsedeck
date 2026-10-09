@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.1.0] - 2026-10-09
 
 ### Added
 - **HLS (`.m3u8`) streams**: stations that publish an HLS playlist now play. Master playlists are resolved to the lowest-bandwidth audio variant (AAC-LC and MP3 preferred over HE-AAC), live playlists start three segments from the live edge and refresh on the target duration, and segments can be MPEG-TS (AAC or MP3) or "packed" raw AAC/MP3. HLS is recognised from the playlist content type, a `.m3u8` URL, or the playlist body itself, so imported M3U entries work too. Encrypted, fMP4/CMAF, video-only and AC-3/E-AC-3 streams stop with a clear "not supported" message instead of retrying. No new dependencies: the MPEG-TS demuxer is built in. There are no track titles for HLS stations.
