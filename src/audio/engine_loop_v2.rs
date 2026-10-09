@@ -243,17 +243,20 @@ impl EngineLoop {
             EngineEvent::Connected {
                 generation,
                 source,
-                format: _,
+                format,
             } => {
                 let url = self.current_url().unwrap_or_default().to_string();
+                let description = format.describe();
                 match self.output.attach(source) {
                     Ok(()) if self.pause_after_connect => {
+                        self.emit(AudioStatus::StreamInfo { description });
                         self.pause_after_connect = false;
                         self.output.pause();
                         self.transition_to(EngineState::Paused { generation, url });
                         self.emit(AudioStatus::Paused);
                     }
                     Ok(()) => {
+                        self.emit(AudioStatus::StreamInfo { description });
                         self.volume.begin_fade_in();
                         self.transition_to(EngineState::Playing { generation, url });
                         self.emit(AudioStatus::Playing);

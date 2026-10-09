@@ -84,6 +84,19 @@ mod tests {
     }
 
     #[test]
+    fn retired_mirrors_are_not_listed_and_the_round_robin_name_is() {
+        for server in RADIO_BROWSER_HTTPS_SERVERS
+            .iter()
+            .chain(RADIO_BROWSER_HTTP_SERVERS)
+        {
+            assert!(!server.contains("//nl1."), "{server}");
+            assert!(!server.contains("//at1."), "{server}");
+        }
+        assert!(RADIO_BROWSER_HTTPS_SERVERS.contains(&"https://all.api.radio-browser.info"));
+        assert!(RADIO_BROWSER_HTTP_SERVERS.contains(&"http://all.api.radio-browser.info"));
+    }
+
+    #[test]
     fn format_search_errors_keeps_server_context() {
         let errors = vec![
             "https://de1.api.radio-browser.info: timeout".to_string(),

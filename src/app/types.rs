@@ -42,6 +42,8 @@ pub enum PlaybackState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PlaybackDiagnostics {
     pub output_device: String,
+    /// Codec, sample rate and channels of the connected stream.
+    pub stream_info: Option<String>,
     /// Usable output device names (without "Default"), cached so the Playback
     /// Doctor can decide on fixes without enumerating hardware per frame.
     pub output_devices: Vec<String>,

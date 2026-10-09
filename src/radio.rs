@@ -36,18 +36,20 @@ pub trait RadioApi: Send + Sync {
     ) -> impl std::future::Future<Output = Result<Vec<Station>, String>> + Send;
 }
 
+/// Radio Browser mirrors, tried in order. `nl1` and `at1` were retired and no
+/// longer resolve. `all.api.radio-browser.info` is the project's round-robin
+/// name: it resolves to every live server, so mirrors that come back are used
+/// without a new release.
 pub(crate) const RADIO_BROWSER_HTTPS_SERVERS: &[&str] = &[
     "https://de1.api.radio-browser.info",
     "https://de2.api.radio-browser.info",
-    "https://nl1.api.radio-browser.info",
-    "https://at1.api.radio-browser.info",
+    "https://all.api.radio-browser.info",
 ];
 
 const RADIO_BROWSER_HTTP_SERVERS: &[&str] = &[
     "http://de1.api.radio-browser.info",
     "http://de2.api.radio-browser.info",
-    "http://nl1.api.radio-browser.info",
-    "http://at1.api.radio-browser.info",
+    "http://all.api.radio-browser.info",
 ];
 
 /// Search for stations through the Radio Browser API.

@@ -53,6 +53,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
         row("URL", url),
         row("Output", &app.diagnostics.output_device),
         row(
+            "Stream",
+            app.diagnostics.stream_info.as_deref().unwrap_or("N/A"),
+        ),
+        row(
             "Audio check",
             app.diagnostics
                 .startup_audio_check
@@ -390,6 +394,7 @@ mod tests {
         let mut app = app_with_output_error(&["USB DAC"]);
         app.playback.diagnostics.startup_audio_check =
             Some(crate::app::audio_check::AudioCheckResult::DeviceAvailable);
+        app.playback.diagnostics.stream_info = Some("HLS AAC · 48 kHz · stereo".to_string());
         let model = UiModel::from(&app);
         let mut terminal = Terminal::new(TestBackend::new(140, 50)).unwrap();
 
@@ -405,6 +410,7 @@ mod tests {
             }
         }
         assert!(content.contains("Audio check"), "{content}");
+        assert!(content.contains("HLS AAC · 48 kHz · stereo"));
         assert!(content.contains("Output device found"));
         assert!(content.contains("Switch to USB DAC"));
         assert!(content.contains("1-9 run fix"));

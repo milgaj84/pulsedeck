@@ -48,6 +48,10 @@ pub enum AudioStatus {
     Stopped,
     Error(String),
     Connecting,
+    /// What the connected stream turned out to be, e.g. `"AAC · 48 kHz · stereo"`.
+    StreamInfo {
+        description: String,
+    },
     Buffering {
         percent: u8,
     },

@@ -244,8 +244,6 @@ impl Default for DeviceRecoveryConfig {
 /// Used for diagnostics and for deciding between the MP3 fast-path and the
 /// generic Symphonia decoder.
 #[derive(Debug, Clone)]
-// Typed engine model: variants and fields not yet read are kept for diagnostics and recovery.
-#[allow(dead_code)]
 pub(super) struct StreamFormat {
     /// Human-readable codec name (e.g. `"MP3"`, `"AAC"`, `"Vorbis"`).
     pub(super) codec: String,
@@ -253,6 +251,22 @@ pub(super) struct StreamFormat {
     pub(super) sample_rate: u32,
     /// Channel count reported by the probed format.
     pub(super) channels: u16,
+}
+
+impl StreamFormat {
+    /// Short human-readable description, e.g. `"HLS AAC · 48 kHz · stereo"`.
+    pub(super) fn describe(&self) -> String {
+        let channels = match self.channels {
+            1 => "mono".to_string(),
+            2 => "stereo".to_string(),
+            count => format!("{count} ch"),
+        };
+        format!(
+            "{} · {} kHz · {channels}",
+            self.codec,
+            f64::from(self.sample_rate) / 1000.0
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -497,5 +511,25 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn stream_format_describes_codec_rate_and_channels() {
+        let format = |codec: &str, sample_rate, channels| StreamFormat {
+            codec: codec.to_string(),
+            sample_rate,
+            channels,
+        };
+
+        assert_eq!(
+            format("HLS AAC", 48_000, 2).describe(),
+            "HLS AAC · 48 kHz · stereo"
+        );
+        assert_eq!(format("MP3", 44_100, 1).describe(), "MP3 · 44.1 kHz · mono");
+        assert_eq!(
+            format("AAC", 22_050, 2).describe(),
+            "AAC · 22.05 kHz · stereo"
+        );
+        assert_eq!(format("FLAC", 96_000, 6).describe(), "FLAC · 96 kHz · 6 ch");
     }
 }

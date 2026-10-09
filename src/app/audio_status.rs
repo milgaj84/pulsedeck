@@ -76,7 +76,11 @@ impl App {
                     };
                     self.playback.diagnostics.last_event = Some("Fading out".to_string());
                 }
+                AudioStatus::StreamInfo { description } => {
+                    self.playback.diagnostics.stream_info = Some(description);
+                }
                 AudioStatus::Connecting => {
+                    self.playback.diagnostics.stream_info = None;
                     self.playback.view.current_track = None;
                     self.playback.view.state = PlaybackState::Connecting;
                     self.playback.diagnostics.decoder_state = DecoderState::Connecting;
@@ -185,6 +189,7 @@ impl App {
     }
 
     fn handle_audio_stopped(&mut self) {
+        self.playback.diagnostics.stream_info = None;
         let was_playing = self.playback.view.playing_url.is_some();
         if self.playback.view.intentional_stop || !was_playing {
             self.playback.view.intentional_stop = false;
@@ -313,6 +318,48 @@ mod tests {
         app.playback.view.state = PlaybackState::Connecting;
         app.poll_audio_status();
         app
+    }
+
+    #[test]
+    fn stream_info_is_recorded_and_cleared_on_connect_and_stop() {
+        let audio = MockAudioSink::new();
+        audio
+            .statuses
+            .borrow_mut()
+            .push_back(AudioStatus::StreamInfo {
+                description: "HLS AAC · 48 kHz · stereo".to_string(),
+            });
+        let mut app = App::from_parts(test_parts_with_audio(audio));
+
+        app.poll_audio_status();
+        assert_eq!(
+            app.playback.diagnostics.stream_info.as_deref(),
+            Some("HLS AAC · 48 kHz · stereo")
+        );
+
+        // A new connection clears the previous stream's description.
+        let mut app = app;
+        app.playback.diagnostics.stream_info = Some("old".to_string());
+        app.playback.audio = Box::new({
+            let audio = MockAudioSink::new();
+            audio
+                .statuses
+                .borrow_mut()
+                .push_back(AudioStatus::Connecting);
+            audio
+        });
+        app.poll_audio_status();
+        assert_eq!(app.playback.diagnostics.stream_info, None);
+
+        // Stopping clears it too.
+        app.playback.diagnostics.stream_info = Some("again".to_string());
+        app.playback.audio = Box::new({
+            let audio = MockAudioSink::new();
+            audio.statuses.borrow_mut().push_back(AudioStatus::Stopped);
+            audio
+        });
+        app.poll_audio_status();
+        assert_eq!(app.playback.diagnostics.stream_info, None);
     }
 
     #[test]

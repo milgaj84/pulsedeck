@@ -4,6 +4,19 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Retired Radio Browser mirrors**: `nl1` and `at1` no longer exist (they do not resolve in DNS). They are removed and the project's round-robin name, `all.api.radio-browser.info`, is added, so mirrors that come back are used without a new release.
+
+### Improved
+- **Stream description in the Playback Doctor**: a new "Stream" row shows what is actually playing, for example `HLS AAC · 48 kHz · stereo`, which makes HE-AAC (half sample rate) and other format surprises visible.
+
+### Internal
+- **Tests no longer touch your real configuration.** Test builds resolved the config directory exactly like the app, so running `cargo test` rewrote `ui-state.json` (volume, mute, layout, visualizer) and re-saved `library.json` in the developer's real `~/.config/pulsedeck`, and made tests flaky depending on those saved values. Test builds now use a per-process scratch directory, start from default UI state, history and keybindings, and clean up stale scratch folders. Installed copies of PulseDeck were never affected.
+
+---
+
 ## [1.1.0] - 2026-10-09
 
 ### Added
