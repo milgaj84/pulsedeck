@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.3.0] - 2026-10-15
 
 ### Added
 - **Opus stations play.** Opus streams (Ogg Opus, mono and stereo) are decoded with libopus, including chained streams whose channel count changes between tracks, and the stream's output gain is applied. Opus stations are no longer marked unplayable. Opus with more than two channels still reports "not supported". libopus is compiled into PulseDeck, so building from source (`cargo install`) now needs CMake and a C compiler.
