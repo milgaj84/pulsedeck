@@ -4,7 +4,7 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.2.2] - 2026-10-14
 
 ### Fixed
 - **Preset slot keys work.** Alt+1–5 (play slot) and Ctrl+1–5 (assign the playing station to a slot) were documented but had no default binding, so they did nothing.
