@@ -4,8 +4,8 @@
 /// should playback do? The active decode path uses Symphonia probe-based
 /// decoding (driven directly, see `audio::symphonia_backend`), which supports MP3, AAC, OGG/Vorbis,
 /// FLAC, WAV and Opus (decoded with libopus). HLS playlists are played by the HLS fetcher
-/// (`audio::hls`) for audio-only AAC/MP3 streams, including AES-128 encrypted
-/// ones; SAMPLE-AES/DRM, fMP4 and
+/// (`audio::hls`) for audio-only AAC/MP3/Opus streams in MPEG-TS, packed audio
+/// or fragmented MP4, including AES-128 encrypted ones; SAMPLE-AES/DRM and
 /// video-only variants are rejected at runtime with a clear error. Windows
 /// Media (WMA/ASF) has no Symphonia decoder and is `Unsupported`. Missing or
 /// unrecognized codec metadata is `Unknown`, which allows a playback attempt
@@ -67,7 +67,7 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
             CodecCapability {
                 normalized_codec: "HLS",
                 capability: PlaybackCapability::Supported,
-                reason: "HLS audio (AAC/MP3, AES-128 supported) is played from live segments; SAMPLE-AES/DRM, fMP4 and video-only streams are not supported",
+                reason: "HLS audio (AAC/MP3/Opus, AES-128 supported) is played from live segments; SAMPLE-AES/DRM and video-only streams are not supported",
             }
         }
         "WMA" | "ASF" | "AUDIO/X-MS-WMA" | "AUDIO/X-MS-ASF" => CodecCapability {

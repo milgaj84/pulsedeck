@@ -2,7 +2,8 @@
 //! bytes to [`HlsSource`](super::source::HlsSource) through a bounded channel.
 
 use super::crypto;
-use super::playlist::{self, HlsError, MediaPlaylist, Playlist, Segment};
+use super::fmp4::Fmp4Init;
+use super::playlist::{self, ByteRange, HlsError, MediaPlaylist, Playlist, Segment, SegmentKey};
 use super::source::HlsChunk;
 use super::ts::AudioExtractor;
 use reqwest::Url;
@@ -17,8 +18,12 @@ use std::time::Duration;
 
 pub(crate) const MAX_PLAYLIST_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_SEGMENT_BYTES: usize = 8 * 1024 * 1024;
+/// An init section is a few hundred bytes of boxes; this is generous.
+const MAX_INIT_BYTES: usize = 1024 * 1024;
 /// An AES-128 key is 16 bytes; anything much larger is not a key.
 const MAX_KEY_BYTES: usize = 64;
+/// Distinct init sections remembered at once.
+const MAX_CACHED_INITS: usize = 4;
 /// Distinct keys remembered at once (streams rotate keys occasionally).
 const MAX_CACHED_KEYS: usize = 8;
 
@@ -32,6 +37,33 @@ pub(crate) struct FetchError(pub String);
 pub(crate) trait HlsHttp: Send + 'static {
     /// GET `url`, failing if the body is larger than `max_bytes`.
     fn get(&self, url: &Url, max_bytes: usize) -> Result<Vec<u8>, FetchError>;
+
+    /// GET only `range` of `url`, failing if it is longer than `max_bytes`. The
+    /// default downloads the whole body and cuts the range out of it.
+    fn get_range(
+        &self,
+        url: &Url,
+        range: ByteRange,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, FetchError> {
+        let offset = usize::try_from(range.offset).unwrap_or(usize::MAX);
+        let body = self.get(url, offset.saturating_add(max_bytes))?;
+        cut_range(&body, range, max_bytes)
+    }
+}
+
+/// `range` of `body`, if it is all there and no longer than `max_bytes`.
+fn cut_range(body: &[u8], range: ByteRange, max_bytes: usize) -> Result<Vec<u8>, FetchError> {
+    let outside = || FetchError("byte range outside the response".to_string());
+    let length = usize::try_from(range.length).map_err(|_| outside())?;
+    if length > max_bytes {
+        return Err(FetchError(format!(
+            "byte range larger than {max_bytes} bytes"
+        )));
+    }
+    let start = usize::try_from(range.offset).map_err(|_| outside())?;
+    let end = start.checked_add(length).ok_or_else(outside)?;
+    body.get(start..end).map(<[u8]>::to_vec).ok_or_else(outside)
 }
 
 impl HlsHttp for reqwest::blocking::Client {
@@ -45,6 +77,34 @@ impl HlsHttp for reqwest::blocking::Client {
             return Err(FetchError(format!("HTTP {}", status.as_u16())));
         }
         read_capped(response, max_bytes)
+    }
+
+    fn get_range(
+        &self,
+        url: &Url,
+        range: ByteRange,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, FetchError> {
+        let last = range.offset.saturating_add(range.length).saturating_sub(1);
+        let response = self
+            .get(url.clone())
+            .header(
+                reqwest::header::RANGE,
+                format!("bytes={}-{last}", range.offset),
+            )
+            .send()
+            .map_err(|error| FetchError(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(FetchError(format!("HTTP {}", status.as_u16())));
+        }
+        if status == reqwest::StatusCode::PARTIAL_CONTENT {
+            return read_capped(response, max_bytes);
+        }
+        // The server ignored the Range header and sent the whole resource.
+        let offset = usize::try_from(range.offset).unwrap_or(usize::MAX);
+        let body = read_capped(response, offset.saturating_add(max_bytes))?;
+        cut_range(&body, range, max_bytes)
     }
 }
 
@@ -69,6 +129,9 @@ enum SegmentError {
     Download(String),
     Key(String),
     Decrypt(HlsError),
+    /// The segment's init section can never be used (unsupported codec,
+    /// malformed). Retrying the next segment would not help.
+    Unusable(HlsError),
 }
 
 impl fmt::Display for SegmentError {
@@ -76,12 +139,13 @@ impl fmt::Display for SegmentError {
         match self {
             Self::Download(message) => write!(f, "HLS: segment download failed: {message}"),
             Self::Key(message) => write!(f, "HLS: encryption key unavailable: {message}"),
-            Self::Decrypt(error) => write!(f, "{error}"),
+            Self::Decrypt(error) | Self::Unusable(error) => write!(f, "{error}"),
         }
     }
 }
 
 type KeyCache = HashMap<Url, [u8; crypto::KEY_LEN]>;
+type InitCache = HashMap<(Url, Option<ByteRange>), Arc<Fmp4Init>>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetcherConfig {
@@ -186,6 +250,7 @@ impl<H: HlsHttp> Fetcher<H> {
         let mut last_failure: Option<SegmentError> = None;
         let mut delivered = false;
         let mut keys = KeyCache::new();
+        let mut inits = InitCache::new();
 
         loop {
             if !self.is_active() {
@@ -217,11 +282,17 @@ impl<H: HlsHttp> Fetcher<H> {
                     extractor.reset();
                 }
 
-                match self.fetch_segment(segment, &mut keys) {
-                    Ok(bytes) => {
+                let fetched = self.fetch_segment(segment, &mut keys).and_then(|bytes| {
+                    let init = self.init_for(segment, &mut keys, &mut inits)?;
+                    Ok((bytes, init))
+                });
+                match fetched {
+                    Ok((bytes, init)) => {
                         segment_failures = 0;
                         let mut audio = Vec::new();
-                        if let Err(error) = extractor.push_segment(&bytes, &mut audio) {
+                        if let Err(error) =
+                            extractor.push_segment_with_init(&bytes, init.as_deref(), &mut audio)
+                        {
                             self.fail(error.to_string());
                             return;
                         }
@@ -237,6 +308,10 @@ impl<H: HlsHttp> Fetcher<H> {
                                 return;
                             }
                         }
+                    }
+                    Err(SegmentError::Unusable(error)) => {
+                        self.fail(error.to_string());
+                        return;
                     }
                     Err(error) => {
                         segment_failures += 1;
@@ -278,44 +353,89 @@ impl<H: HlsHttp> Fetcher<H> {
         }
     }
 
+    /// GET a resource, or only `range` of it.
+    fn get_section(
+        &self,
+        uri: &Url,
+        range: Option<ByteRange>,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, SegmentError> {
+        match range {
+            Some(range) => self.http.get_range(uri, range, max_bytes),
+            None => self.http.get(uri, max_bytes),
+        }
+        .map_err(|FetchError(message)| SegmentError::Download(message))
+    }
+
+    /// The AES-128 key for `key_info`, from the cache or downloaded.
+    fn key_for(
+        &self,
+        key_info: &SegmentKey,
+        keys: &mut KeyCache,
+    ) -> Result<[u8; crypto::KEY_LEN], SegmentError> {
+        if let Some(key) = keys.get(&key_info.uri) {
+            return Ok(*key);
+        }
+        let body = self
+            .http
+            .get(&key_info.uri, MAX_KEY_BYTES)
+            .map_err(|FetchError(message)| SegmentError::Key(message))?;
+        let key: [u8; crypto::KEY_LEN] = body.as_slice().try_into().map_err(|_| {
+            SegmentError::Key(format!(
+                "the key is {} bytes, expected {}",
+                body.len(),
+                crypto::KEY_LEN
+            ))
+        })?;
+        if keys.len() >= MAX_CACHED_KEYS {
+            keys.clear();
+        }
+        keys.insert(key_info.uri.clone(), key);
+        Ok(key)
+    }
+
     /// Download a segment and, if it is AES-128 encrypted, decrypt it.
     fn fetch_segment(
         &self,
         segment: &Segment,
         keys: &mut KeyCache,
     ) -> Result<Vec<u8>, SegmentError> {
-        let bytes = self
-            .http
-            .get(&segment.uri, MAX_SEGMENT_BYTES)
-            .map_err(|FetchError(message)| SegmentError::Download(message))?;
+        let bytes = self.get_section(&segment.uri, segment.range, MAX_SEGMENT_BYTES)?;
         let Some(key_info) = &segment.key else {
             return Ok(bytes);
         };
-
-        let key = match keys.get(&key_info.uri) {
-            Some(key) => *key,
-            None => {
-                let body = self
-                    .http
-                    .get(&key_info.uri, MAX_KEY_BYTES)
-                    .map_err(|FetchError(message)| SegmentError::Key(message))?;
-                let key: [u8; crypto::KEY_LEN] = body.as_slice().try_into().map_err(|_| {
-                    SegmentError::Key(format!(
-                        "the key is {} bytes, expected {}",
-                        body.len(),
-                        crypto::KEY_LEN
-                    ))
-                })?;
-                if keys.len() >= MAX_CACHED_KEYS {
-                    keys.clear();
-                }
-                keys.insert(key_info.uri.clone(), key);
-                key
-            }
-        };
-
+        let key = self.key_for(key_info, keys)?;
         let iv = crypto::segment_iv(key_info.iv, segment.seq);
         crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)
+    }
+
+    /// The parsed init section of a fragmented MP4 segment, downloaded once.
+    fn init_for(
+        &self,
+        segment: &Segment,
+        keys: &mut KeyCache,
+        inits: &mut InitCache,
+    ) -> Result<Option<Arc<Fmp4Init>>, SegmentError> {
+        let Some(map) = &segment.map else {
+            return Ok(None);
+        };
+        let id = (map.uri.clone(), map.range);
+        if let Some(init) = inits.get(&id) {
+            return Ok(Some(Arc::clone(init)));
+        }
+
+        let mut bytes = self.get_section(&map.uri, map.range, MAX_INIT_BYTES)?;
+        if let Some(key_info) = &map.key {
+            let key = self.key_for(key_info, keys)?;
+            let iv = crypto::segment_iv(key_info.iv, segment.seq);
+            bytes = crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)?;
+        }
+        let init = Arc::new(Fmp4Init::parse(&bytes).map_err(SegmentError::Unusable)?);
+        if inits.len() >= MAX_CACHED_INITS {
+            inits.clear();
+        }
+        inits.insert(id, Arc::clone(&init));
+        Ok(Some(init))
     }
 
     /// Re-fetch the media playlist, retrying a few times. `None` means the
@@ -331,7 +451,7 @@ impl<H: HlsHttp> Fetcher<H> {
                             self.fail("HLS: playlist changed into a master playlist");
                             return None;
                         }
-                        Err(error @ (HlsError::Encrypted | HlsError::Fmp4)) => {
+                        Err(error @ HlsError::Encrypted) => {
                             self.fail(error.to_string());
                             return None;
                         }
@@ -492,6 +612,187 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         handle.join().unwrap();
+    }
+
+    const FMP4_INIT: &[u8] = include_bytes!("testdata/fmp4/aac/init.mp4");
+    const FMP4_SEGMENTS: [&[u8]; 3] = [
+        include_bytes!("testdata/fmp4/aac/seg0.m4s"),
+        include_bytes!("testdata/fmp4/aac/seg1.m4s"),
+        include_bytes!("testdata/fmp4/aac/seg2.m4s"),
+    ];
+
+    /// What the fMP4 segments turn into, worked out without the fetcher.
+    fn expected_fmp4_audio() -> Vec<u8> {
+        let init = Fmp4Init::parse(FMP4_INIT).unwrap();
+        let mut demuxer = super::super::fmp4::Fmp4Demuxer::default();
+        let mut audio = Vec::new();
+        for segment in FMP4_SEGMENTS {
+            demuxer.push(&init, segment, &mut audio).unwrap();
+        }
+        audio
+    }
+
+    #[test]
+    fn fmp4_init_is_fetched_once_for_every_segment() {
+        let http = FakeHttp::default();
+        http.fixed("/init.mp4", FMP4_INIT.to_vec());
+        for (i, segment) in FMP4_SEGMENTS.iter().enumerate() {
+            http.fixed(&format!("/seg{i}.m4s"), segment.to_vec());
+        }
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MAP:URI=\"/init.mp4\"\n\
+                        #EXTINF:1,\n/seg0.m4s\n#EXTINF:1,\n/seg1.m4s\n#EXTINF:1,\n/seg2.m4s\n\
+                        #EXT-X-ENDLIST\n";
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(audio, expected_fmp4_audio());
+        assert_eq!(http.hits("/init.mp4"), 1);
+    }
+
+    #[test]
+    fn segments_cut_out_of_one_file_by_byte_range_are_played() {
+        // The common CMAF layout: init section and fragments in a single file.
+        let mut file = FMP4_INIT.to_vec();
+        let mut ranges = Vec::new();
+        for segment in FMP4_SEGMENTS {
+            ranges.push((file.len(), segment.len()));
+            file.extend_from_slice(segment);
+        }
+        let http = FakeHttp::default();
+        http.fixed("/main.mp4", file);
+        let mut playlist = format!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MAP:URI=\"/main.mp4\",BYTERANGE=\"{}@0\"\n",
+            FMP4_INIT.len()
+        );
+        for (offset, length) in &ranges {
+            playlist.push_str(&format!(
+                "#EXT-X-BYTERANGE:{length}@{offset}\n#EXTINF:1,\n/main.mp4\n"
+            ));
+        }
+        playlist.push_str("#EXT-X-ENDLIST\n");
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, &playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert_eq!(terminal, Some(HlsChunk::End));
+        assert_eq!(audio, expected_fmp4_audio());
+    }
+
+    #[test]
+    fn a_range_outside_the_file_is_a_failed_segment() {
+        let http = FakeHttp::default();
+        http.fixed("/main.mp4", vec![0; 100]);
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-BYTERANGE:50@90\n\
+                        #EXTINF:1,\n/main.mp4\n#EXT-X-ENDLIST\n";
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert!(audio.is_empty());
+        match terminal {
+            Some(HlsChunk::Fail(message)) => {
+                assert!(
+                    message.contains("byte range outside the response"),
+                    "{message}"
+                )
+            }
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_init_section_that_cannot_be_read_ends_the_stream() {
+        let http = FakeHttp::default();
+        http.fixed("/init.mp4", b"not an mp4 at all".to_vec());
+        http.fixed("/seg0.m4s", FMP4_SEGMENTS[0].to_vec());
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MAP:URI=\"/init.mp4\"\n\
+                        #EXTINF:1,\n/seg0.m4s\n#EXT-X-ENDLIST\n";
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert!(audio.is_empty());
+        assert!(matches!(terminal, Some(HlsChunk::Fail(m)) if m.starts_with("HLS:")));
+    }
+
+    #[test]
+    fn a_missing_init_section_is_a_failed_segment_download() {
+        let http = FakeHttp::default();
+        http.fixed("/seg0.m4s", FMP4_SEGMENTS[0].to_vec());
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MAP:URI=\"/init.mp4\"\n\
+                        #EXTINF:1,\n/seg0.m4s\n#EXT-X-ENDLIST\n";
+        let active = Arc::new(AtomicU64::new(1));
+
+        let (rx, handle) = spawn(&http, playlist, 1, &active, fast());
+        let (audio, terminal) = drain(&rx);
+        join(handle);
+
+        assert!(audio.is_empty());
+        assert!(matches!(terminal, Some(HlsChunk::Fail(m)) if m.contains("HTTP 404")));
+    }
+
+    #[test]
+    fn the_real_http_client_fetches_byte_ranges() {
+        use crate::audio::test_http::{fixed, Response, TestServer};
+        // 200 bytes: within offset (100) + the size limit (100) used below.
+        let body: Vec<u8> = (0..200).collect();
+        let (honoring, ignoring) = (body.clone(), body.clone());
+        let server = TestServer::start(vec![
+            (
+                "/ranges",
+                fixed(move || Response::ok("video/mp4", honoring.clone())),
+            ),
+            (
+                "/no-ranges",
+                fixed(move || Response::ok("video/mp4", ignoring.clone()).ignoring_ranges()),
+            ),
+            ("/gone", fixed(|| Response::status(404))),
+        ]);
+        let client = reqwest::blocking::Client::new();
+        let range = ByteRange {
+            offset: 100,
+            length: 20,
+        };
+        let fetch = |path: &str, max: usize| {
+            let url = Url::parse(&server.url(path)).unwrap();
+            HlsHttp::get_range(&client, &url, range, max)
+        };
+
+        // A server that supports ranges sends just the slice.
+        assert_eq!(fetch("/ranges", 100).unwrap(), body[100..120].to_vec());
+        // One that does not sends everything; the range is cut out of it.
+        assert_eq!(fetch("/no-ranges", 100).unwrap(), body[100..120].to_vec());
+        // The size limit applies to the range, not the file...
+        assert!(fetch("/ranges", 10).is_err());
+        // ...but a server that ignores ranges cannot be trusted with a bigger file.
+        assert_eq!(
+            fetch("/no-ranges", 50),
+            Err(FetchError("response larger than 150 bytes".to_string()))
+        );
+        assert_eq!(fetch("/gone", 100), Err(FetchError("HTTP 404".to_string())));
+    }
+
+    #[test]
+    fn cut_range_takes_only_what_is_asked_for() {
+        let body: Vec<u8> = (0..20).collect();
+        let range = |offset, length| ByteRange { offset, length };
+
+        assert_eq!(cut_range(&body, range(5, 3), 100).unwrap(), vec![5, 6, 7]);
+        assert_eq!(cut_range(&body, range(0, 20), 100).unwrap(), body);
+        assert!(cut_range(&body, range(18, 5), 100).is_err());
+        assert!(cut_range(&body, range(30, 1), 100).is_err());
+        assert!(cut_range(&body, range(0, 20), 10).is_err());
+        assert!(cut_range(&body, range(u64::MAX - 1, 5), 100).is_err());
     }
 
     #[test]

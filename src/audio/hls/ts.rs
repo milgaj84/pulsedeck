@@ -3,11 +3,13 @@
 //! Supported segment formats:
 //! - MPEG-TS carrying ADTS AAC (stream type 0x0F) or MPEG audio (0x03/0x04)
 //! - "packed audio": raw ADTS AAC or raw MP3, each segment prefixed by an ID3 tag
+//! - fragmented MP4 (see [`super::fmp4`]), which needs its init segment
 //!
 //! Symphonia's ADTS reader only accepts the exact sync word `0xFFF1`, assumes
 //! a 7-byte header and rejects multi-frame ADTS, so every ADTS frame is
 //! rewritten into that canonical form (MPEG-2 id bit cleared, CRC removed).
 
+use super::fmp4::{Fmp4Demuxer, Fmp4Init};
 use super::id3;
 use super::playlist::HlsError;
 
@@ -20,6 +22,8 @@ const SYNC: u8 = 0x47;
 pub(crate) enum EsKind {
     Adts,
     MpegAudio,
+    /// Opus packets wrapped in Ogg (what fMP4 Opus is turned into).
+    OggOpus,
 }
 
 impl EsKind {
@@ -27,6 +31,7 @@ impl EsKind {
         match self {
             Self::Adts => "AAC",
             Self::MpegAudio => "MP3",
+            Self::OggOpus => "Opus",
         }
     }
 }
@@ -59,12 +64,24 @@ pub(crate) enum SegmentFormat {
     Ts,
     Adts,
     MpegAudio,
+    Fmp4,
     Unknown,
+}
+
+/// Box types a fragmented MP4 segment can start with.
+fn starts_like_fmp4(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(4..8),
+        Some(b"styp" | b"moof" | b"sidx" | b"ftyp" | b"prft" | b"emsg")
+    )
 }
 
 pub(crate) fn classify_segment(bytes: &[u8]) -> SegmentFormat {
     if bytes.first() == Some(&SYNC) && bytes.get(PACKET).is_none_or(|b| *b == SYNC) {
         return SegmentFormat::Ts;
+    }
+    if starts_like_fmp4(bytes) {
+        return SegmentFormat::Fmp4;
     }
     let audio = strip_id3(bytes);
     match audio {
@@ -326,7 +343,8 @@ impl TsDemuxer {
                 out.extend_from_slice(es);
                 Ok(())
             }
-            Resolution::Waiting => Ok(()),
+            // The TS demuxer only ever finds AAC or MPEG audio.
+            Resolution::Audio(EsKind::OggOpus) | Resolution::Waiting => Ok(()),
         }
     }
 
@@ -445,6 +463,7 @@ fn parse_pat(payload: &[u8], pusi: bool) -> Option<u16> {
 pub(crate) struct AudioExtractor {
     ts: TsDemuxer,
     adts: AdtsNormalizer,
+    fmp4: Fmp4Demuxer,
     kind: Option<EsKind>,
     titles: Vec<String>,
     last_title: Option<String>,
@@ -461,6 +480,7 @@ impl AudioExtractor {
     pub(crate) fn reset(&mut self) {
         self.ts.reset();
         self.adts.reset();
+        self.fmp4.reset();
     }
 
     /// "Now playing" titles that changed since the last call, in order.
@@ -475,9 +495,21 @@ impl AudioExtractor {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn push_segment(
         &mut self,
         segment: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<(), HlsError> {
+        self.push_segment_with_init(segment, None, out)
+    }
+
+    /// Like [`Self::push_segment`], for playlists that give an init segment
+    /// (`#EXT-X-MAP`), which fragmented MP4 segments cannot be read without.
+    pub(crate) fn push_segment_with_init(
+        &mut self,
+        segment: &[u8],
+        init: Option<&Fmp4Init>,
         out: &mut Vec<u8>,
     ) -> Result<(), HlsError> {
         let kind = match classify_segment(segment) {
@@ -502,6 +534,11 @@ impl AudioExtractor {
                 }
                 out.extend_from_slice(strip_id3(segment));
                 Some(EsKind::MpegAudio)
+            }
+            SegmentFormat::Fmp4 => {
+                let init = init.ok_or(HlsError::Malformed("fMP4 segment without #EXT-X-MAP"))?;
+                self.fmp4.push(init, segment, out)?;
+                Some(init.kind())
             }
             SegmentFormat::Unknown => return Err(HlsError::Malformed("unrecognised segment data")),
         };

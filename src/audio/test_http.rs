@@ -2,7 +2,9 @@
 //!
 //! Each route maps a path to a closure that receives the hit number (1 for the
 //! first request) and returns the response, so tests can simulate playlists
-//! that change between refreshes.
+//! that change between refreshes. A request with a `Range: bytes=a-b` header
+//! gets a `206 Partial Content` slice of a 200 response, unless the response
+//! says to ignore ranges.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -15,6 +17,9 @@ pub(crate) struct Response {
     pub status: u16,
     pub content_type: String,
     pub body: Vec<u8>,
+    /// False to answer a range request with the whole body, like a server that
+    /// does not support ranges.
+    pub honors_range: bool,
 }
 
 impl Response {
@@ -23,7 +28,13 @@ impl Response {
             status: 200,
             content_type: content_type.to_string(),
             body: body.into(),
+            honors_range: true,
         }
+    }
+
+    pub(crate) fn ignoring_ranges(mut self) -> Self {
+        self.honors_range = false;
+        self
     }
 
     pub(crate) fn status(status: u16) -> Self {
@@ -31,6 +42,7 @@ impl Response {
             status,
             content_type: "text/plain".to_string(),
             body: Vec::new(),
+            honors_range: true,
         }
     }
 }
@@ -114,13 +126,20 @@ fn serve(
     if reader.read_line(&mut request_line).is_err() {
         return;
     }
-    // Drain the headers.
+    // Read the headers, keeping only the range.
+    let mut range = None;
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) | Err(_) => break,
             Ok(_) if line == "\r\n" || line == "\n" => break,
-            Ok(_) => {}
+            Ok(_) => {
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("range") {
+                        range = parse_range(value.trim());
+                    }
+                }
+            }
         }
     }
 
@@ -143,15 +162,32 @@ fn serve(
         Some(handler) => handler(hit),
         None => Response::status(404),
     };
+    let total = response.body.len();
+    let (status, body, content_range) = match range {
+        Some((first, last)) if response.status == 200 && response.honors_range && first < total => {
+            let last = last.min(total - 1);
+            (
+                206,
+                response.body[first..=last].to_vec(),
+                format!("Content-Range: bytes {first}-{last}/{total}\r\n"),
+            )
+        }
+        _ => (response.status, response.body, String::new()),
+    };
     let head = format!(
-        "HTTP/1.1 {} X\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        response.status,
+        "HTTP/1.1 {status} X\r\nContent-Type: {}\r\n{content_range}Content-Length: {}\r\nConnection: close\r\n\r\n",
         response.content_type,
-        response.body.len()
+        body.len()
     );
     let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(&response.body);
+    let _ = stream.write_all(&body);
     let _ = stream.flush();
+}
+
+/// `bytes=first-last` as inclusive byte positions.
+fn parse_range(value: &str) -> Option<(usize, usize)> {
+    let (first, last) = value.strip_prefix("bytes=")?.split_once('-')?;
+    Some((first.parse().ok()?, last.parse().ok()?))
 }
 
 #[cfg(test)]
@@ -190,6 +226,38 @@ mod tests {
         assert_eq!(get(&server.url("/missing")).0, 404);
         assert_eq!(server.hits("/count"), 2);
         assert_eq!(server.hits("/never"), 0);
+    }
+
+    #[test]
+    fn range_requests_get_partial_content_unless_ignored() {
+        let body: Vec<u8> = (0..100).collect();
+        let server = TestServer::start(vec![
+            (
+                "/r",
+                fixed(|| Response::ok("x/y", (0..100).collect::<Vec<u8>>())),
+            ),
+            (
+                "/ignored",
+                fixed(|| Response::ok("x/y", (0..100).collect::<Vec<u8>>()).ignoring_ranges()),
+            ),
+        ]);
+        let client = reqwest::blocking::Client::new();
+        let ranged = |path: &str| {
+            let response = client
+                .get(server.url(path))
+                .header("Range", "bytes=10-19")
+                .send()
+                .unwrap();
+            (
+                response.status().as_u16(),
+                response.bytes().unwrap().to_vec(),
+            )
+        };
+
+        assert_eq!(ranged("/r"), (206, body[10..20].to_vec()));
+        assert_eq!(ranged("/ignored"), (200, body));
+        // Without a Range header nothing changes.
+        assert_eq!(get(&server.url("/r")).0, 200);
     }
 
     #[test]

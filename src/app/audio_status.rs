@@ -13,9 +13,9 @@ pub(super) fn last_played_station_position(
     find_station_index_by_url(stations, last_played_url)
 }
 
-/// Failures that retrying can never fix: an HLS stream that is encrypted,
-/// fMP4 or video-only, Opus audio with more than two channels, or a container
-/// that crashes the decoder.
+/// Failures that retrying can never fix: an HLS stream that is encrypted or
+/// video-only, audio in a codec PulseDeck cannot decode (Opus with more than
+/// two channels, an unknown fMP4 codec), or a container that crashes the decoder.
 /// Only errors that PulseDeck itself words as "not supported" qualify, so
 /// transient network errors are never mistaken for permanent ones.
 fn is_permanent_failure(error: &str) -> bool {
@@ -389,7 +389,7 @@ mod tests {
     fn unsupported_hls_streams_are_not_retried() {
         for error in [
             "Decode error: HLS: encrypted streams are not supported",
-            "Decode error: HLS: fMP4/CMAF segments are not supported",
+            "Decode error: HLS: ac-3 audio is not supported",
             "Decode error: HLS: video-only streams are not supported",
         ] {
             let mut app = app_playing_with_error(error);

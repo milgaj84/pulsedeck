@@ -8,6 +8,7 @@
 
 mod crypto;
 mod fetcher;
+mod fmp4;
 mod id3;
 mod playlist;
 mod source;
@@ -422,14 +423,19 @@ mod tests {
         let routes = routes
             .into_iter()
             .map(|(path, response)| {
-                let (status, content_type, body) =
-                    (response.status, response.content_type, response.body);
+                let (status, content_type, body, honors_range) = (
+                    response.status,
+                    response.content_type,
+                    response.body,
+                    response.honors_range,
+                );
                 (
                     path,
                     fixed(move || Response {
                         status,
                         content_type: content_type.clone(),
                         body: body.clone(),
+                        honors_range,
                     }),
                 )
             })
@@ -675,14 +681,93 @@ mod tests {
         assert_eq!(run._server.hits("/seg0.ts"), 0);
     }
 
+    const FMP4_AAC_INIT: &[u8] = include_bytes!("hls/testdata/fmp4/aac/init.mp4");
+    const FMP4_AAC_SEGMENTS: [&[u8]; 5] = [
+        include_bytes!("hls/testdata/fmp4/aac/seg0.m4s"),
+        include_bytes!("hls/testdata/fmp4/aac/seg1.m4s"),
+        include_bytes!("hls/testdata/fmp4/aac/seg2.m4s"),
+        include_bytes!("hls/testdata/fmp4/aac/seg3.m4s"),
+        include_bytes!("hls/testdata/fmp4/aac/seg4.m4s"),
+    ];
+    const FMP4_OPUS_INIT: &[u8] = include_bytes!("hls/testdata/fmp4/opus/init.mp4");
+    const FMP4_OPUS_SEGMENTS: [&[u8]; 4] = [
+        include_bytes!("hls/testdata/fmp4/opus/seg0.m4s"),
+        include_bytes!("hls/testdata/fmp4/opus/seg1.m4s"),
+        include_bytes!("hls/testdata/fmp4/opus/seg2.m4s"),
+        include_bytes!("hls/testdata/fmp4/opus/seg3.m4s"),
+    ];
+
+    fn fmp4_server(init: &[u8], segments: &[&[u8]], extra: &str) -> TestServer {
+        let playlist = media_playlist(segments.len(), "m4s", extra);
+        let mut routes = vec![("/live.m3u8".to_string(), Response::ok(MPEGURL, playlist))];
+        routes.push((
+            "/init.mp4".to_string(),
+            Response::ok("video/mp4", init.to_vec()),
+        ));
+        for (index, segment) in segments.iter().enumerate() {
+            routes.push((
+                format!("/seg{index}.m4s"),
+                Response::ok("video/iso.segment", segment.to_vec()),
+            ));
+        }
+        let (paths, responses): (Vec<String>, Vec<Response>) = routes.into_iter().unzip();
+        server_with(paths.iter().map(String::as_str).zip(responses).collect())
+    }
+
     #[test]
-    fn fmp4_playlist_fails_as_not_supported() {
-        let playlist = media_playlist(2, "m4s", "#EXT-X-MAP:URI=\"init.mp4\"\n");
-        let server = server_with(vec![("/live.m3u8", Response::ok(MPEGURL, playlist))]);
+    fn fmp4_aac_stream_connects_and_decodes() {
+        let server = fmp4_server(
+            FMP4_AAC_INIT,
+            &FMP4_AAC_SEGMENTS,
+            "#EXT-X-MAP:URI=\"init.mp4\"\n",
+        );
 
         let run = run_against(server, "/live.m3u8", 4096);
 
-        assert_failed_with(&run, "fMP4/CMAF segments are not supported");
+        assert_connected_as(&run, "HLS AAC");
+        assert_eq!(run._server.hits("/init.mp4"), 1);
+    }
+
+    #[test]
+    fn fmp4_opus_stream_connects_and_decodes() {
+        let server = fmp4_server(
+            FMP4_OPUS_INIT,
+            &FMP4_OPUS_SEGMENTS,
+            "#EXT-X-MAP:URI=\"init.mp4\"\n",
+        );
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        match terminal(&run) {
+            EngineEvent::Connected { format, .. } => {
+                assert_eq!(format.codec, "HLS Opus");
+                assert_eq!(format.sample_rate, 48_000);
+                assert_eq!(format.channels, 2);
+            }
+            other => panic!("expected Connected, got {}", describe(other)),
+        }
+    }
+
+    #[test]
+    fn fmp4_segments_without_a_map_fail_clearly() {
+        let server = fmp4_server(FMP4_AAC_INIT, &FMP4_AAC_SEGMENTS, "");
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_failed_with(&run, "fMP4 segment without #EXT-X-MAP");
+    }
+
+    #[test]
+    fn a_broken_init_section_fails_the_stream() {
+        let server = fmp4_server(
+            b"not an mp4 at all",
+            &FMP4_AAC_SEGMENTS,
+            "#EXT-X-MAP:URI=\"init.mp4\"\n",
+        );
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_failed_with(&run, "HLS:");
     }
 
     #[test]

@@ -1,12 +1,13 @@
 //! HLS playlist parsing (RFC 8216). Pure: no I/O, no clock.
 //!
 //! Only what PulseDeck needs for audio-only radio streams is understood.
-//! Encrypted streams, fMP4/CMAF segments and video-only variants are rejected
-//! with an error whose text says "not supported", so the app can stop
-//! reconnecting instead of retrying something that can never work.
+//! Encryption it cannot undo and video-only variants are rejected with an
+//! error whose text says "not supported", so the app can stop reconnecting
+//! instead of retrying something that can never work.
 
 use reqwest::Url;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,7 +16,6 @@ pub(crate) enum HlsError {
     Encrypted,
     /// A segment could not be decrypted (wrong key or IV, damaged data).
     Decrypt(&'static str),
-    Fmp4,
     VideoOnly,
     /// Audio variants exist but none uses a codec we can decode.
     UnsupportedCodec(String),
@@ -31,7 +31,6 @@ impl fmt::Display for HlsError {
                 "HLS: SAMPLE-AES and DRM encrypted streams are not supported"
             ),
             Self::Decrypt(why) => write!(f, "HLS: could not decrypt a segment ({why})"),
-            Self::Fmp4 => write!(f, "HLS: fMP4/CMAF segments are not supported"),
             Self::VideoOnly => write!(f, "HLS: video-only streams are not supported"),
             Self::UnsupportedCodec(codec) => {
                 write!(f, "HLS: {codec} audio is not supported")
@@ -72,15 +71,36 @@ pub(crate) struct SegmentKey {
     pub iv: Option<[u8; 16]>,
 }
 
+/// A part of a resource, from `#EXT-X-BYTERANGE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ByteRange {
+    pub offset: u64,
+    pub length: u64,
+}
+
+/// The media initialization section fragmented MP4 segments need
+/// (`#EXT-X-MAP`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapRef {
+    pub uri: Url,
+    pub range: Option<ByteRange>,
+    /// The key in effect where the tag appears, if the section is encrypted.
+    pub key: Option<SegmentKey>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Segment {
     /// Media sequence number (`EXT-X-MEDIA-SEQUENCE` + index).
     pub seq: u64,
     pub uri: Url,
+    /// Only this part of the resource is the segment.
+    pub range: Option<ByteRange>,
     /// A discontinuity precedes this segment.
     pub discontinuity: bool,
     /// Set when the segment is AES-128 encrypted.
     pub key: Option<SegmentKey>,
+    /// Set for fragmented MP4: the init section the segment is read with.
+    pub map: Option<Arc<MapRef>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,11 +159,22 @@ fn resolve(base: &Url, uri: &str) -> Result<Url, HlsError> {
         .map_err(|_| HlsError::Malformed("invalid URI"))
 }
 
-fn is_fmp4_uri(uri: &Url) -> bool {
-    let path = uri.path().to_ascii_lowercase();
-    [".mp4", ".m4s", ".m4a", ".cmfa", ".cmfv"]
-        .iter()
-        .any(|ext| path.ends_with(ext))
+/// `length[@offset]`. Without an offset the range follows the previous one.
+fn parse_byte_range(value: &str, previous_end: u64) -> Result<ByteRange, HlsError> {
+    const BAD: HlsError = HlsError::Malformed("invalid byte range");
+    let (length, offset) = match value.trim().split_once('@') {
+        Some((length, offset)) => (length, Some(offset)),
+        None => (value.trim(), None),
+    };
+    let length: u64 = length.trim().parse().map_err(|_| BAD)?;
+    let offset = match offset {
+        Some(offset) => offset.trim().parse().map_err(|_| BAD)?,
+        None => previous_end,
+    };
+    if length == 0 || offset.checked_add(length).is_none() {
+        return Err(BAD);
+    }
+    Ok(ByteRange { offset, length })
 }
 
 /// Parse a playlist body fetched from `base` (the final URL after redirects).
@@ -217,8 +248,6 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
             media_sequence = value.trim().parse().unwrap_or(0);
         } else if *line == "#EXT-X-ENDLIST" {
             end_list = true;
-        } else if line.starts_with("#EXT-X-MAP:") {
-            return Err(HlsError::Fmp4);
         }
     }
 
@@ -229,6 +258,10 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
     let mut segments = Vec::new();
     let mut discontinuity = false;
     let mut key: Option<SegmentKey> = None;
+    let mut map: Option<Arc<MapRef>> = None;
+    let mut pending_range: Option<&str> = None;
+    // Where the previous byte range ended, for a range written without an offset.
+    let mut range_end = 0u64;
 
     for line in lines {
         if *line == "#EXT-X-DISCONTINUITY" {
@@ -236,16 +269,35 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
         } else if let Some(value) = line.strip_prefix("#EXT-X-KEY:") {
             // A key applies to every following segment until the next key tag.
             key = parse_key(value, base)?;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-MAP:") {
+            // A map applies to every following segment until the next map tag.
+            let attrs = parse_attributes(value);
+            let uri = attr(&attrs, "URI").ok_or(HlsError::Malformed("map without a URI"))?;
+            let range = attr(&attrs, "BYTERANGE")
+                .map(|value| parse_byte_range(value, 0))
+                .transpose()?;
+            map = Some(Arc::new(MapRef {
+                uri: resolve(base, uri)?,
+                range,
+                key: key.clone(),
+            }));
+        } else if let Some(value) = line.strip_prefix("#EXT-X-BYTERANGE:") {
+            pending_range = Some(value);
         } else if !line.starts_with('#') {
-            let uri = resolve(base, line)?;
-            if is_fmp4_uri(&uri) {
-                return Err(HlsError::Fmp4);
+            let range = pending_range
+                .take()
+                .map(|value| parse_byte_range(value, range_end))
+                .transpose()?;
+            if let Some(range) = range {
+                range_end = range.offset + range.length;
             }
             segments.push(Segment {
                 seq: media_sequence + segments.len() as u64,
-                uri,
+                uri: resolve(base, line)?,
+                range,
                 discontinuity: std::mem::take(&mut discontinuity),
                 key: key.clone(),
+                map: map.clone(),
             });
         }
     }
@@ -304,8 +356,10 @@ enum CodecClass {
     Good,
     /// HE-AAC: Symphonia decodes only the LC core (half rate, muffled).
     HeAac,
+    /// Opus (in fragmented MP4).
+    Opus,
     Video,
-    /// Audio we cannot decode (AC-3, E-AC-3, Opus in mp4, ...).
+    /// Audio we cannot decode (AC-3, E-AC-3, ...).
     Other,
 }
 
@@ -323,6 +377,8 @@ fn classify_codecs(codecs: &str) -> CodecClass {
             || codec == "mp4a.69"
         {
             CodecClass::Good
+        } else if codec == "opus" || codec == "mp4a.ad" {
+            CodecClass::Opus
         } else if codec == "mp4a.40.5" || codec == "mp4a.40.29" {
             CodecClass::HeAac
         } else if codec.starts_with("mp4a.40.") {
@@ -333,6 +389,7 @@ fn classify_codecs(codecs: &str) -> CodecClass {
         class = match (class, this) {
             (CodecClass::Video, _) | (_, CodecClass::Video) => CodecClass::Video,
             (CodecClass::Other, _) | (_, CodecClass::Other) => CodecClass::Other,
+            (CodecClass::Opus, _) | (_, CodecClass::Opus) => CodecClass::Opus,
             (CodecClass::HeAac, _) | (_, CodecClass::HeAac) => CodecClass::HeAac,
             _ => CodecClass::Good,
         };
@@ -344,7 +401,7 @@ fn classify_codecs(codecs: &str) -> CodecClass {
 ///
 /// An audio rendition with its own URI wins (default first). Otherwise the
 /// lowest-bandwidth audio-only variant is chosen, preferring AAC-LC/MP3 over
-/// HE-AAC. A variant without a `CODECS` attribute is accepted as a last resort
+/// HE-AAC, and both over Opus. A variant without a `CODECS` attribute is accepted as a last resort
 /// and the demuxer decides what it really contains.
 pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
     if let Some(rendition) = master
@@ -376,6 +433,7 @@ pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
 
     if let Some(uri) = lowest(Some(CodecClass::Good))
         .or_else(|| lowest(Some(CodecClass::HeAac)))
+        .or_else(|| lowest(Some(CodecClass::Opus)))
         .or_else(|| lowest(None))
     {
         return Ok(uri);
@@ -615,20 +673,102 @@ mod tests {
     }
 
     #[test]
-    fn fmp4_is_rejected_via_map_or_segment_extension() {
-        let with_map =
-            "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4,\na.m4s\n";
-        assert_eq!(parse(with_map, &base()), Err(HlsError::Fmp4));
+    fn a_map_applies_to_the_segments_after_it() {
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n\
+                    #EXTINF:4,\nplain.ts\n\
+                    #EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4,\na.m4s\n#EXTINF:4,\nb.m4s\n\
+                    #EXT-X-MAP:URI=\"/other/init2.mp4\"\n#EXTINF:4,\nc.m4s\n";
+        let segments = media(text).segments;
 
-        let by_extension = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nA.M4S\n";
-        assert_eq!(parse(by_extension, &base()), Err(HlsError::Fmp4));
+        assert_eq!(segments.len(), 4);
+        assert_eq!(segments[0].map, None);
+        let first = segments[1].map.as_ref().expect("map");
+        assert_eq!(first.uri.as_str(), "https://radio.example/live/init.mp4");
+        assert_eq!(segments[2].map, segments[1].map);
+        let second = segments[3].map.as_ref().expect("map");
+        assert_eq!(second.uri.as_str(), "https://radio.example/other/init2.mp4");
+    }
+
+    #[test]
+    fn a_map_without_a_uri_is_malformed() {
+        let text =
+            "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MAP:BYTERANGE=\"10@0\"\n#EXTINF:4,\na.m4s\n";
+        assert_eq!(
+            parse(text, &base()),
+            Err(HlsError::Malformed("map without a URI"))
+        );
+    }
+
+    #[test]
+    fn the_key_in_effect_at_a_map_is_kept_with_it() {
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n\
+                    #EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"\n\
+                    #EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4,\na.m4s\n";
+        let segment = &media(text).segments[0];
+
+        let map_key = segment.map.as_ref().and_then(|map| map.key.clone());
+        assert_eq!(map_key, segment.key);
+        assert!(map_key.is_some());
+    }
+
+    #[test]
+    fn byte_ranges_are_read_and_chain_when_the_offset_is_omitted() {
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n\
+                    #EXT-X-MAP:URI=\"main.mp4\",BYTERANGE=\"720@0\"\n\
+                    #EXT-X-BYTERANGE:1000@720\n#EXTINF:4,\nmain.mp4\n\
+                    #EXT-X-BYTERANGE:500\n#EXTINF:4,\nmain.mp4\n\
+                    #EXTINF:4,\nwhole.m4s\n";
+        let segments = media(text).segments;
+
+        let range = |index: usize| segments[index].range;
+        assert_eq!(
+            range(0),
+            Some(ByteRange {
+                offset: 720,
+                length: 1000
+            })
+        );
+        assert_eq!(
+            range(1),
+            Some(ByteRange {
+                offset: 1720,
+                length: 500
+            })
+        );
+        assert_eq!(range(2), None);
+        assert_eq!(
+            segments[0].map.as_ref().and_then(|map| map.range),
+            Some(ByteRange {
+                offset: 0,
+                length: 720
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_byte_ranges_are_malformed() {
+        for range in [
+            "abc",
+            "0",
+            "10@x",
+            "-5@0",
+            "18446744073709551615@18446744073709551615",
+        ] {
+            let text = format!(
+                "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-BYTERANGE:{range}\n#EXTINF:4,\na.ts\n"
+            );
+            assert_eq!(
+                parse(&text, &base()),
+                Err(HlsError::Malformed("invalid byte range")),
+                "{range}"
+            );
+        }
     }
 
     #[test]
     fn error_text_says_not_supported_where_retrying_is_pointless() {
         for error in [
             HlsError::Encrypted,
-            HlsError::Fmp4,
             HlsError::VideoOnly,
             HlsError::NoAudioVariant,
             HlsError::UnsupportedCodec("ac-3".to_string()),
@@ -727,7 +867,8 @@ mod tests {
         assert_eq!(classify_codecs("mp4a.40.29"), CodecClass::HeAac);
         assert_eq!(classify_codecs("avc1.4d401f,mp4a.40.2"), CodecClass::Video);
         assert_eq!(classify_codecs("ec-3"), CodecClass::Other);
-        assert_eq!(classify_codecs("opus"), CodecClass::Other);
+        assert_eq!(classify_codecs("opus"), CodecClass::Opus);
+        assert_eq!(classify_codecs("mp4a.ad"), CodecClass::Opus);
     }
 
     mod property_tests {
