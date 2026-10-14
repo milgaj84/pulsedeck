@@ -366,11 +366,12 @@ fn parse_key(attributes: &str, base: &Url) -> Result<KeyTag, HlsError> {
         KeyMethod::SampleAes => "SAMPLE-AES key without a URI",
     }))?;
     let iv = attr(&attrs, "IV").map(parse_iv).transpose()?;
-    Ok(KeyTag::Usable(SegmentKey {
-        method,
-        uri: resolve(base, uri)?,
-        iv,
-    }))
+    let uri = resolve(base, uri)?;
+    // FairPlay keys are named `skd://...`; there is nothing to download.
+    if uri.scheme() == "skd" {
+        return Ok(KeyTag::Drm);
+    }
+    Ok(KeyTag::Usable(SegmentKey { method, uri, iv }))
 }
 
 /// The key a group of adjacent key tags asks segments to be decrypted with.
@@ -663,6 +664,18 @@ mod tests {
             "METHOD=SAMPLE-AES-CTR,URI=\"data:text/plain;base64,AAAA\",KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"",
         ] {
             assert_eq!(parse(&with_key(attrs), &base()), Err(HlsError::Drm), "{attrs}");
+        }
+    }
+
+    #[test]
+    fn a_fairplay_key_uri_is_drm_even_without_a_key_format() {
+        for method in ["SAMPLE-AES", "AES-128"] {
+            let attrs = format!("METHOD={method},URI=\"skd://key-id\"");
+            assert_eq!(
+                parse(&with_key(&attrs), &base()),
+                Err(HlsError::Drm),
+                "{method}"
+            );
         }
     }
 

@@ -17,6 +17,9 @@ use symphonia::core::probe::Hint;
 use super::codecs::codec_registry;
 use super::pcm_source::{FrameBackend, SignalInfo};
 
+/// The most output gain applied to an Opus stream, in either direction: 24 dB
+/// (as Q7.8, the format of the `OpusHead` field).
+const MAX_OPUS_GAIN_Q78: i16 = 24 * 256;
 /// Consecutive undecodable packets tolerated before giving up on the stream.
 const MAX_DECODE_ERRORS: u32 = 3;
 
@@ -122,7 +125,8 @@ fn opus_output_gain(params: &CodecParameters) -> f32 {
     let Some(&[low, high]) = head.get(16..18) else {
         return 1.0;
     };
-    let q78 = i16::from_le_bytes([low, high]);
+    // The field allows +-128 dB; a hostile stream could ask for full-scale noise.
+    let q78 = i16::from_le_bytes([low, high]).clamp(-MAX_OPUS_GAIN_Q78, MAX_OPUS_GAIN_Q78);
     10_f32.powf(f32::from(q78) / (20.0 * 256.0))
 }
 
@@ -371,6 +375,18 @@ mod tests {
         assert_eq!(plain.len(), louder.len());
         assert!((peak(&louder) / peak(&plain) - factor).abs() < 0.01 * factor);
         assert!((peak(&quieter) / peak(&plain) - 1.0 / factor).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_extreme_output_gain_is_limited() {
+        let (_, _, plain) = ours(OPUS, None);
+        let (_, _, loud) = ours(&opus_with_gain(i16::MAX), None);
+        let (_, _, quiet) = ours(&opus_with_gain(i16::MIN), None);
+
+        // +127 dB and -128 dB become +24 dB and -24 dB.
+        let factor = 10_f32.powf(24.0 / 20.0);
+        assert!((peak(&loud) / peak(&plain) - factor).abs() < 0.01 * factor);
+        assert!((peak(&quiet) / peak(&plain) - 1.0 / factor).abs() < 0.01);
     }
 
     #[test]

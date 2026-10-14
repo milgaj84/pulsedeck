@@ -27,8 +27,12 @@ const BAD_BOX: HlsError = HlsError::Malformed("invalid MP4 box");
 
 /// More samples than this in one `trun` is not a real audio fragment.
 const MAX_SAMPLES_PER_RUN: u32 = 100_000;
+/// ...nor in one whole segment, however many runs it is split into.
+const MAX_SAMPLES_PER_SEGMENT: usize = 100_000;
 /// The largest frame an ADTS header can describe (13-bit length field).
 const MAX_ADTS_FRAME: usize = 0x1FFF;
+/// The longest packet an Ogg page can hold (255 lacing values of up to 255).
+const MAX_OGG_PACKET: usize = 255 * 255 - 1;
 /// Opus always counts time in 48 kHz units in Ogg.
 const OPUS_RATE: u64 = 48_000;
 /// An Opus frame is 20 ms unless the fragment says otherwise.
@@ -548,6 +552,12 @@ fn parse_aac_config(config: &[u8]) -> Result<Codec, HlsError> {
             "AAC with a program config element".to_string(),
         ));
     }
+    // An ADTS header has three bits for the channel configuration.
+    if channel_config > 7 {
+        return Err(HlsError::UnsupportedCodec(format!(
+            "AAC with channel configuration {channel_config}"
+        )));
+    }
     Ok(Codec::Aac {
         profile: (object_type - 1) as u8,
         frequency_index: frequency_index as u8,
@@ -636,7 +646,17 @@ fn parse_tfhd(payload: &[u8]) -> Option<TrackFragmentHeader> {
 
 /// All samples of our track in `segment`, in order.
 fn collect_samples<'a>(init: &Fmp4Init, segment: &'a [u8]) -> Result<Vec<Sample<'a>>, HlsError> {
-    let mut samples = Vec::new();
+    // Hostile data can describe far more samples, or far more bytes, than the
+    // segment holds (empty samples, runs that overlap): cap both across the
+    // whole segment so a tiny segment cannot claim gigabytes of work.
+    let mut collected = Collected {
+        segment,
+        budget: Budget {
+            samples: MAX_SAMPLES_PER_SEGMENT,
+            bytes: segment.len(),
+        },
+        samples: Vec::new(),
+    };
     for moof in parse_boxes(segment)?.iter().filter(|b| &b.kind == b"moof") {
         for traf in parse_boxes(moof.payload)?
             .iter()
@@ -658,28 +678,20 @@ fn collect_samples<'a>(init: &Fmp4Init, segment: &'a [u8]) -> Result<Vec<Sample<
                 _ => moof.start,
             };
             let mut cursor = base;
-            let first_in_fragment = samples.len();
+            let first_in_fragment = collected.samples.len();
             for trun in traf_boxes.iter().filter(|b| &b.kind == b"trun") {
-                cursor = read_run(
-                    init,
-                    &tfhd,
-                    trun.payload,
-                    segment,
-                    base,
-                    cursor,
-                    &mut samples,
-                )?;
+                cursor = read_run(init, &tfhd, trun.payload, base, cursor, &mut collected)?;
             }
             if let Some(encryption) = &init.encryption {
                 attach_protection(
                     encryption,
                     find(&traf_boxes, b"senc").map(|senc| senc.payload),
-                    &mut samples[first_in_fragment..],
+                    &mut collected.samples[first_in_fragment..],
                 )?;
             }
         }
     }
-    Ok(samples)
+    Ok(collected.samples)
 }
 
 /// Give each sample of a fragment its IV and subsamples, from the `senc` box
@@ -698,7 +710,11 @@ fn attach_protection(
         if count > MAX_SAMPLES_PER_RUN {
             return Err(HlsError::Malformed("implausible sample count"));
         }
-        for _ in 0..count {
+        // Entries past the last sample would be ignored anyway.
+        let wanted = usize::try_from(count)
+            .unwrap_or(usize::MAX)
+            .min(samples.len());
+        for _ in 0..wanted {
             let iv = match encryption.iv_size {
                 0 => encryption.constant_iv.ok_or(BAD)?,
                 size => pad_iv(reader.take(usize::from(size)).ok_or(BAD)?).ok_or(BAD)?,
@@ -731,15 +747,27 @@ fn attach_protection(
     Ok(())
 }
 
+/// What is left of a segment's sample and byte allowance.
+struct Budget {
+    samples: usize,
+    bytes: usize,
+}
+
+/// The samples found so far in a segment, and what it still may contain.
+struct Collected<'a> {
+    segment: &'a [u8],
+    budget: Budget,
+    samples: Vec<Sample<'a>>,
+}
+
 /// Read one `trun`; returns where its sample data ends.
 fn read_run<'a>(
     init: &Fmp4Init,
     tfhd: &TrackFragmentHeader,
     payload: &[u8],
-    segment: &'a [u8],
     base: usize,
     cursor: usize,
-    samples: &mut Vec<Sample<'a>>,
+    collected: &mut Collected<'a>,
 ) -> Result<usize, HlsError> {
     let mut reader = Reader::new(payload);
     let (_, flags) = version_flags(&mut reader).ok_or(TRUNCATED)?;
@@ -766,6 +794,11 @@ fn read_run<'a>(
     };
 
     for _ in 0..count {
+        collected.budget.samples = collected
+            .budget
+            .samples
+            .checked_sub(1)
+            .ok_or(HlsError::Malformed("implausible sample count"))?;
         let duration = if flags & 0x100 != 0 {
             Some(reader.u32().ok_or(TRUNCATED)?)
         } else {
@@ -785,12 +818,16 @@ fn read_run<'a>(
             reader.u32().ok_or(TRUNCATED)?; // composition time offset
         }
 
-        let end = usize::try_from(size)
-            .ok()
-            .and_then(|size| pos.checked_add(size))
-            .ok_or(BAD_BOX)?;
-        let data = segment.get(pos..end).ok_or(TRUNCATED)?;
-        samples.push(Sample {
+        let size = usize::try_from(size).map_err(|_| BAD_BOX)?;
+        // Together the samples cannot be larger than the segment they sit in.
+        collected.budget.bytes = collected
+            .budget
+            .bytes
+            .checked_sub(size)
+            .ok_or(HlsError::Malformed("samples larger than the segment"))?;
+        let end = pos.checked_add(size).ok_or(BAD_BOX)?;
+        let data = collected.segment.get(pos..end).ok_or(TRUNCATED)?;
+        collected.samples.push(Sample {
             data,
             duration,
             protection: None,
@@ -995,7 +1032,7 @@ impl Fmp4Demuxer {
                 frequency_index,
                 channel_config,
             } => {
-                for payload in &payloads {
+                for payload in payloads.iter().filter(|payload| !payload.is_empty()) {
                     let frame_len = payload.len() + 7;
                     if frame_len > MAX_ADTS_FRAME {
                         return Err(HlsError::Malformed("AAC frame too large"));
@@ -1020,6 +1057,13 @@ impl Fmp4Demuxer {
                     self.opus.start(head, out);
                 }
                 for (sample, payload) in samples.iter().zip(&payloads) {
+                    // An empty sample carries no audio (and is no Opus packet).
+                    if payload.is_empty() {
+                        continue;
+                    }
+                    if payload.len() > MAX_OGG_PACKET {
+                        return Err(HlsError::Malformed("Opus packet too large"));
+                    }
                     let samples_48k = sample.duration.map_or(DEFAULT_OPUS_SAMPLES, |duration| {
                         u64::from(duration) * OPUS_RATE / u64::from(init.timescale)
                     });
@@ -2018,6 +2062,150 @@ mod tests {
         truncated.truncate(len - 5);
         let bad = encrypted_fragment(&[32], Some(truncated), &data);
         assert!(demux(&init, &bad, Some(&key())).is_err());
+    }
+
+    // --- Hostile input: budgets --------------------------------------------
+
+    fn runs_segment(runs: &[Vec<u8>], data: &[u8], default_size: Option<u32>) -> Vec<u8> {
+        let mut traf = tfhd(1, default_size);
+        for run in runs {
+            traf.extend_from_slice(run);
+        }
+        let mut segment = mp4_box(b"moof", &mp4_box(b"traf", &traf));
+        segment.extend(mp4_box(b"mdat", data));
+        segment
+    }
+
+    #[test]
+    fn a_tiny_segment_cannot_claim_endless_empty_samples() {
+        // default size 0 and a run of 100,000 samples with no fields: each is
+        // empty and costs a sample slot, so a second run exhausts the budget.
+        let run = |count: u32| {
+            let mut payload = count.to_be_bytes().to_vec();
+            payload.extend_from_slice(&0i32.to_be_bytes());
+            full_box(b"trun", 0, 0x1, &payload)
+        };
+        let one_run = runs_segment(&[run(100_000)], b"", Some(0));
+        let init = init_for(Codec::Mp3);
+        assert!(demux(&init, &one_run, None).unwrap().is_empty());
+
+        let two_runs = runs_segment(&[run(100_000), run(100_000)], b"", Some(0));
+        assert_eq!(
+            demux(&init, &two_runs, None),
+            Err(HlsError::Malformed("implausible sample count"))
+        );
+        // The same total spread over many small runs is refused too.
+        let many: Vec<Vec<u8>> = (0..30).map(|_| run(5_000)).collect();
+        assert!(demux(&init, &runs_segment(&many, b"", Some(0)), None).is_err());
+    }
+
+    #[test]
+    fn runs_that_overlap_cannot_read_the_same_bytes_again_and_again() {
+        // Twenty runs that each point at the same 1 KB of a 2 KB payload.
+        let data = vec![0x42u8; 2048];
+        let run = |offset: i32| trun(Some(offset), &[(None, Some(1024))]);
+        let offset = data_offset_of(1, None, &run(0));
+        let runs: Vec<Vec<u8>> = (0..20).map(|_| run(offset)).collect();
+
+        let result = demux(
+            &init_for(Codec::Mp3),
+            &runs_segment(&runs, &data, None),
+            None,
+        );
+
+        assert_eq!(
+            result,
+            Err(HlsError::Malformed("samples larger than the segment"))
+        );
+        // Two runs that really fit are fine.
+        let two: Vec<Vec<u8>> = (0..2).map(|_| run(offset)).collect();
+        let out = demux(
+            &init_for(Codec::Mp3),
+            &runs_segment(&two, &data, None),
+            None,
+        )
+        .unwrap();
+        assert_eq!(out.len(), 2048);
+    }
+
+    #[test]
+    fn many_samples_within_the_budget_are_fine() {
+        // 10,000 tiny samples in one run.
+        let sizes = vec![(None, Some(2)); 10_000];
+        let run = |offset| trun(Some(offset), &sizes);
+        let offset = data_offset_of(1, None, &run(0));
+        let data = vec![7u8; 20_000];
+
+        let out = demux(
+            &init_for(Codec::Mp3),
+            &runs_segment(&[run(offset)], &data, None),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(out.len(), 20_000);
+    }
+
+    #[test]
+    fn an_empty_sample_between_encrypted_ones_keeps_the_ivs_aligned() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 16, None))).unwrap();
+        let (a, b) = (sample(48, 1), sample(32, 2));
+        let (iv_a, iv_b) = ([0x11u8; 16], [0x22u8; 16]);
+        let mut data = cbcs_encrypt(&a, &[(0, 48)], &iv_a, (0, 0));
+        data.extend(cbcs_encrypt(&b, &[(0, 32)], &iv_b, (0, 0)));
+        let senc = senc(
+            false,
+            &[
+                (iv_a.to_vec(), vec![]),
+                (vec![0x99; 16], vec![]), // for the empty sample
+                (iv_b.to_vec(), vec![]),
+            ],
+        );
+        let fragment = encrypted_fragment(&[48, 0, 32], Some(senc), &data);
+
+        let out = demux(&init, &fragment, Some(&key())).unwrap();
+
+        assert_eq!(out, [a, b].concat());
+    }
+
+    #[test]
+    fn senc_entries_past_the_last_sample_are_ignored_cheaply() {
+        let init =
+            Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 0, Some(&[3; 16])))).unwrap();
+        let plain = sample(32, 5);
+        let data = cbcs_encrypt(&plain, &[(0, 32)], &[3; 16], (0, 0));
+        // A senc that claims 100,000 entries for a one-sample fragment.
+        let mut payload = 100_000u32.to_be_bytes().to_vec();
+        payload.extend_from_slice(&[0; 4]);
+        let claims = full_box(b"senc", 0, 0, &payload);
+        let fragment = encrypted_fragment(&[32], Some(claims), &data);
+
+        assert_eq!(demux(&init, &fragment, Some(&key())).unwrap(), plain);
+    }
+
+    #[test]
+    fn oversized_opus_packets_are_refused_instead_of_corrupting_the_ogg_page() {
+        let init = Fmp4Init::parse(OPUS_INIT).unwrap();
+        let size = (MAX_OGG_PACKET + 1) as u32;
+        let run = |offset| trun(Some(offset), &[(None, Some(size))]);
+        let offset = data_offset_of(1, None, &run(0));
+        let data = vec![0u8; size as usize];
+
+        let result = demux(&init, &runs_segment(&[run(offset)], &data, None), None);
+
+        assert_eq!(result, Err(HlsError::Malformed("Opus packet too large")));
+    }
+
+    #[test]
+    fn aac_channel_configurations_an_adts_header_cannot_express_are_refused() {
+        // AAC-LC, 44.1 kHz, channel configuration 8: 00010 0100 1000 000.
+        let entry = audio_entry(b"mp4a", &esds(0x40, &[0x12, 0x40]));
+
+        let error = Fmp4Init::parse(&init_segment(b"soun", &entry, None)).unwrap_err();
+
+        assert!(
+            matches!(error, HlsError::UnsupportedCodec(ref c) if c.contains("channel configuration 8"))
+        );
     }
 
     // --- Opus in Ogg --------------------------------------------------------

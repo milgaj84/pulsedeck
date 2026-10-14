@@ -22,7 +22,7 @@ const SYNC: [u8; 2] = [0x0B, 0x77];
 const READ_CHUNK: usize = 8 * 1024;
 /// How much of the start of a stream to look through for syncframes.
 const DETECT_WINDOW: usize = 16 * 1024;
-/// Give up on a stream that has produced no frame after this many bytes.
+/// Give up on a stream that has produced no frame for this many bytes.
 const MAX_GARBAGE: usize = 256 * 1024;
 /// Consecutive undecodable access units tolerated before the stream is dropped.
 const MAX_DECODE_ERRORS: u32 = 50;
@@ -108,24 +108,33 @@ pub(super) fn frame_info(data: &[u8]) -> Option<FrameInfo> {
 }
 
 /// Splits a byte stream into validated syncframes, skipping anything between.
+///
+/// Consumed bytes are skipped with a cursor rather than removed from the front
+/// of the buffer, so feeding in megabytes at once stays linear.
 #[derive(Debug, Default)]
 pub(super) struct Framer {
     buf: Vec<u8>,
-    /// Bytes thrown away while looking for a frame.
+    /// Start of what has not been used yet.
+    pos: usize,
+    /// Bytes thrown away since the last frame was found.
     discarded: usize,
 }
 
 impl Framer {
     pub(super) fn push(&mut self, data: &[u8]) {
+        // What is left is less than a frame (everything complete was taken).
+        self.buf.drain(..self.pos);
+        self.pos = 0;
         self.buf.extend_from_slice(data);
     }
 
+    /// Bytes thrown away while looking for the next frame.
     pub(super) fn discarded(&self) -> usize {
         self.discarded
     }
 
     fn discard(&mut self, count: usize) {
-        self.buf.drain(..count);
+        self.pos += count;
         self.discarded += count;
     }
 
@@ -135,31 +144,35 @@ impl Framer {
     /// means more data is needed.
     pub(super) fn next_frame(&mut self, at_end: bool) -> Option<(FrameInfo, Vec<u8>)> {
         loop {
-            let Some(start) = self.buf.windows(2).position(|pair| pair == SYNC) else {
+            let data = &self.buf[self.pos..];
+            let Some(start) = data.windows(2).position(|pair| pair == SYNC) else {
                 // Keep a trailing 0x0B: the 0x77 may be in the next chunk.
-                let keep = usize::from(self.buf.last() == Some(&SYNC[0]));
-                self.discard(self.buf.len() - keep);
+                let keep = usize::from(data.last() == Some(&SYNC[0]));
+                self.discard(data.len() - keep);
                 return None;
             };
             self.discard(start);
 
-            if self.buf.len() < 6 {
+            let data = &self.buf[self.pos..];
+            if data.len() < 6 {
                 return None;
             }
-            let Some(info) = frame_info(&self.buf) else {
+            let Some(info) = frame_info(data) else {
                 self.discard(1);
                 continue;
             };
             let needed = if at_end { info.len } else { info.len + 2 };
-            if self.buf.len() < needed {
+            if data.len() < needed {
                 return None;
             }
-            if self.buf.len() >= info.len + 2 && self.buf[info.len..info.len + 2] != SYNC {
+            if data.len() >= info.len + 2 && data[info.len..info.len + 2] != SYNC {
                 // Not a real frame boundary.
                 self.discard(1);
                 continue;
             }
-            let frame: Vec<u8> = self.buf.drain(..info.len).collect();
+            let frame = data[..info.len].to_vec();
+            self.pos += info.len;
+            self.discarded = 0;
             return Some((info, frame));
         }
     }
@@ -231,7 +244,6 @@ pub(super) struct Ac3Backend {
     framer: Framer,
     assembler: Assembler,
     ended: bool,
-    produced_a_frame: bool,
     decoder: Option<(Dolby, Box<dyn Decoder>)>,
     errors: u32,
 }
@@ -243,7 +255,6 @@ impl Ac3Backend {
             framer: Framer::default(),
             assembler: Assembler::default(),
             ended: false,
-            produced_a_frame: false,
             decoder: None,
             errors: 0,
         }
@@ -253,7 +264,6 @@ impl Ac3Backend {
     fn next_unit(&mut self) -> Result<Option<AccessUnit>, String> {
         loop {
             if let Some((info, frame)) = self.framer.next_frame(self.ended) {
-                self.produced_a_frame = true;
                 if let Some(unit) = self.assembler.push(info, &frame) {
                     return Ok(Some(unit));
                 }
@@ -262,7 +272,9 @@ impl Ac3Backend {
             if self.ended {
                 return Ok(self.assembler.finish());
             }
-            if !self.produced_a_frame && self.framer.discarded() > MAX_GARBAGE {
+            // A stream with no frame for this long, at the start or after it has
+            // turned to junk, is not AC-3 (any more).
+            if self.framer.discarded() > MAX_GARBAGE {
                 return Err("no AC-3 frames found in the stream".to_string());
             }
             let mut chunk = [0u8; READ_CHUNK];
@@ -660,6 +672,73 @@ mod tests {
 
         let enough_garbage = PcmSource::new(Ac3Backend::new(Cursor::new(vec![0x55; 600_000])));
         assert!(enough_garbage.is_err());
+    }
+
+    #[test]
+    fn a_stream_that_turns_to_junk_ends_instead_of_reading_forever() {
+        // Real frames, then an endless supply of junk (capped so that a missing
+        // limit shows up as a failed assertion, not a hang).
+        struct Junk {
+            start: Cursor<Vec<u8>>,
+            junk_read: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl Read for Junk {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let read = self.start.read(buf)?;
+                if read > 0 {
+                    return Ok(read);
+                }
+                let so_far = self.junk_read.load(std::sync::atomic::Ordering::SeqCst);
+                if so_far >= 20 * 1024 * 1024 {
+                    return Ok(0);
+                }
+                buf.fill(0x55);
+                self.junk_read
+                    .fetch_add(buf.len(), std::sync::atomic::Ordering::SeqCst);
+                Ok(buf.len())
+            }
+        }
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let source = PcmSource::new(Ac3Backend::new(Junk {
+            start: Cursor::new(AC3_STEREO.to_vec()),
+            junk_read: std::sync::Arc::clone(&counter),
+        }))
+        .unwrap();
+
+        let samples: Vec<f32> = source.collect();
+
+        assert!(samples.len() > 60_000, "the real part still plays");
+        let junk = counter.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(junk < 1024 * 1024, "kept reading {junk} bytes of junk");
+    }
+
+    #[test]
+    fn framing_large_inputs_stays_linear() {
+        // These took minutes with a framer that removed from the front of its buffer.
+        let started = std::time::Instant::now();
+        // 4 MiB of false syncwords with an invalid header.
+        let junk: Vec<u8> = [0x0B, 0x77, 0x00, 0x00, 0x00, 0xA0]
+            .iter()
+            .copied()
+            .cycle()
+            .take(4 * 1024 * 1024)
+            .collect();
+        let mut framer = Framer::default();
+        framer.push(&junk);
+        assert!(framer.next_frame(true).is_none());
+        // 8 MiB of real frames pushed in one go.
+        let mut framer = Framer::default();
+        framer.push(&AC3_STEREO[..256].repeat(32 * 1024));
+        let mut frames = 0;
+        while framer.next_frame(true).is_some() {
+            frames += 1;
+        }
+        assert_eq!(frames, 32 * 1024);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

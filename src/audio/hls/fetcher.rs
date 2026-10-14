@@ -26,6 +26,9 @@ const MAX_INIT_BYTES: usize = 1024 * 1024;
 const MAX_KEY_BYTES: usize = 64;
 /// Distinct init sections remembered at once.
 const MAX_CACHED_INITS: usize = 4;
+/// How far into a resource a range may start when the server ignores `Range`
+/// and everything before it has to be read and thrown away.
+const MAX_RANGE_SKIP: u64 = 64 * 1024 * 1024;
 /// Distinct keys remembered at once (streams rotate keys occasionally).
 const MAX_CACHED_KEYS: usize = 8;
 
@@ -48,10 +51,51 @@ pub(crate) trait HlsHttp: Send + 'static {
         range: ByteRange,
         max_bytes: usize,
     ) -> Result<Vec<u8>, FetchError> {
+        if range.offset > MAX_RANGE_SKIP {
+            return Err(FetchError(
+                "byte range too far into the resource".to_string(),
+            ));
+        }
+        // Within the limit above, so this fits in a usize.
         let offset = usize::try_from(range.offset).unwrap_or(usize::MAX);
         let body = self.get(url, offset.saturating_add(max_bytes))?;
         cut_range(&body, range, max_bytes)
     }
+}
+
+/// `range` of what `reader` yields, without keeping the part before it: the
+/// start is read and thrown away, so memory stays within `max_bytes` however
+/// far in the range begins.
+fn take_range(
+    mut reader: impl Read,
+    range: ByteRange,
+    max_bytes: usize,
+) -> Result<Vec<u8>, FetchError> {
+    let outside = || FetchError("byte range outside the response".to_string());
+    if range.offset > MAX_RANGE_SKIP {
+        return Err(FetchError(
+            "byte range too far into a server that ignores ranges".to_string(),
+        ));
+    }
+    let length = usize::try_from(range.length).map_err(|_| outside())?;
+    if length > max_bytes {
+        return Err(FetchError(format!(
+            "byte range larger than {max_bytes} bytes"
+        )));
+    }
+    let skipped = std::io::copy(
+        &mut reader.by_ref().take(range.offset),
+        &mut std::io::sink(),
+    )
+    .map_err(|error| FetchError(error.to_string()))?;
+    if skipped != range.offset {
+        return Err(outside());
+    }
+    let body = read_capped(reader.take(range.length), max_bytes)?;
+    if body.len() != length {
+        return Err(outside());
+    }
+    Ok(body)
 }
 
 /// `range` of `body`, if it is all there and no longer than `max_bytes`.
@@ -104,9 +148,7 @@ impl HlsHttp for reqwest::blocking::Client {
             return read_capped(response, max_bytes);
         }
         // The server ignored the Range header and sent the whole resource.
-        let offset = usize::try_from(range.offset).unwrap_or(usize::MAX);
-        let body = read_capped(response, offset.saturating_add(max_bytes))?;
-        cut_range(&body, range, max_bytes)
+        take_range(response, range, max_bytes)
     }
 }
 
@@ -114,7 +156,7 @@ impl HlsHttp for reqwest::blocking::Client {
 pub(crate) fn read_capped(reader: impl Read, max_bytes: usize) -> Result<Vec<u8>, FetchError> {
     let mut body = Vec::new();
     reader
-        .take(max_bytes as u64 + 1)
+        .take((max_bytes as u64).saturating_add(1))
         .read_to_end(&mut body)
         .map_err(|error| FetchError(error.to_string()))?;
     if body.len() > max_bytes {
@@ -802,12 +844,57 @@ mod tests {
         assert_eq!(fetch("/no-ranges", 100).unwrap(), body[100..120].to_vec());
         // The size limit applies to the range, not the file...
         assert!(fetch("/ranges", 10).is_err());
-        // ...but a server that ignores ranges cannot be trusted with a bigger file.
-        assert_eq!(
-            fetch("/no-ranges", 50),
-            Err(FetchError("response larger than 150 bytes".to_string()))
-        );
+        // A server that ignores ranges is read up to the range and no further, so
+        // the size of the file does not matter, only of the range.
+        assert_eq!(fetch("/no-ranges", 50).unwrap(), body[100..120].to_vec());
+        assert!(fetch("/no-ranges", 10).is_err());
+        // ...and it cannot be made to skip an absurd distance.
+        let far = ByteRange {
+            offset: 1 << 40,
+            length: 20,
+        };
+        for path in ["/ranges", "/no-ranges"] {
+            let url = Url::parse(&server.url(path)).unwrap();
+            assert!(
+                HlsHttp::get_range(&client, &url, far, 100).is_err(),
+                "{path}"
+            );
+        }
         assert_eq!(fetch("/gone", 100), Err(FetchError("HTTP 404".to_string())));
+    }
+
+    #[test]
+    fn take_range_skips_the_start_without_keeping_it() {
+        let body: Vec<u8> = (0..100).collect();
+        let range = |offset, length| ByteRange { offset, length };
+
+        let taken = take_range(&body[..], range(10, 5), 100).unwrap();
+        assert_eq!(taken, vec![10, 11, 12, 13, 14]);
+        assert_eq!(take_range(&body[..], range(0, 100), 100).unwrap(), body);
+        // Shorter than the range says, or the range starts past the end.
+        assert!(take_range(&body[..], range(95, 10), 100).is_err());
+        assert!(take_range(&body[..], range(200, 1), 100).is_err());
+        // Longer than allowed, or starting absurdly far in.
+        assert!(take_range(&body[..], range(0, 50), 10).is_err());
+        assert!(take_range(&body[..], range(MAX_RANGE_SKIP + 1, 1), 10).is_err());
+        assert!(take_range(&body[..], range(u64::MAX, 1), 10).is_err());
+    }
+
+    #[test]
+    fn the_default_range_fetch_refuses_an_absurd_offset_too() {
+        let http = FakeHttp::default();
+        http.fixed("/f", vec![0; 10]);
+        let absurd = ByteRange {
+            offset: u64::MAX - 5,
+            length: 4,
+        };
+
+        assert!(HlsHttp::get_range(&http, &url("/f"), absurd, 100).is_err());
+    }
+
+    #[test]
+    fn read_capped_does_not_overflow_on_an_unlimited_cap() {
+        assert_eq!(read_capped(&b"abc"[..], usize::MAX).unwrap(), b"abc");
     }
 
     #[test]
