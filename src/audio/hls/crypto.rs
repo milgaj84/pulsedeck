@@ -1,12 +1,21 @@
-//! AES-128 segment decryption for HLS (`#EXT-X-KEY:METHOD=AES-128`).
+//! Decryption for HLS: AES-128 segments and SAMPLE-AES audio.
 //!
-//! The whole segment is encrypted with AES-128 in CBC mode and PKCS#7
-//! padding. The cipher itself comes from the RustCrypto crates; this module
-//! only adds the HLS rules around it (IV derivation, input checks).
+//! `METHOD=AES-128`: the whole segment is encrypted with AES-128 in CBC mode
+//! and PKCS#7 padding.
+//!
+//! `METHOD=SAMPLE-AES`: only the audio samples are encrypted, in the same
+//! cipher without padding, and the rest of the segment is in the clear.
+//!
+//! The cipher itself comes from the RustCrypto crates; this module only adds
+//! the HLS rules around it (IV derivation, which bytes are protected, input
+//! checks).
 
 use super::playlist::HlsError;
 use aes::Aes128;
-use cbc::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
+use cbc::cipher::{
+    block_padding::{NoPadding, Pkcs7},
+    BlockModeDecrypt, KeyIvInit,
+};
 
 pub(crate) const KEY_LEN: usize = 16;
 const BLOCK: usize = 16;
@@ -36,6 +45,80 @@ pub(crate) fn decrypt_segment(
     cbc::Decryptor::<Aes128>::new(key.into(), iv.into())
         .decrypt_padded_vec::<Pkcs7>(data)
         .map_err(|_| HlsError::Decrypt("bad padding, so the key or IV is wrong"))
+}
+
+/// The key and IV a SAMPLE-AES segment is protected with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SampleAesKey {
+    pub key: [u8; KEY_LEN],
+    /// The playlist's IV, or the segment's sequence number (see [`segment_iv`]).
+    /// Fragmented MP4 carries its own IVs and ignores this one.
+    pub iv: [u8; 16],
+}
+
+/// Decrypt `region` (a whole number of blocks) in place with AES-128-CBC and no
+/// padding. Returns the IV a following region continues with: the last
+/// ciphertext block. `None` if `region` is not whole blocks or is empty.
+pub(crate) fn cbc_decrypt_blocks(
+    region: &mut [u8],
+    key: &[u8; KEY_LEN],
+    iv: &[u8; 16],
+) -> Option<[u8; 16]> {
+    if region.is_empty() || !region.len().is_multiple_of(BLOCK) {
+        return None;
+    }
+    let last: [u8; 16] = region[region.len() - BLOCK..].try_into().ok()?;
+    cbc::Decryptor::<Aes128>::new(key.into(), iv.into())
+        .decrypt_padded::<NoPadding>(region)
+        .ok()?;
+    Some(last)
+}
+
+/// Decrypt one SAMPLE-AES audio frame in place.
+///
+/// `clear_prefix` is the frame header (7 or 9 bytes of ADTS). After it come 16
+/// more bytes in the clear, then whole 16-byte blocks of ciphertext, then up
+/// to 15 bytes in the clear. The IV starts over for every frame. A frame too
+/// short to hold a block after the clear part is not encrypted at all.
+pub(crate) fn decrypt_sample_aes_frame(frame: &mut [u8], clear_prefix: usize, key: &SampleAesKey) {
+    let Some(protected) = frame.get_mut(clear_prefix + BLOCK..) else {
+        return;
+    };
+    let whole = protected.len() / BLOCK * BLOCK;
+    if whole > 0 {
+        cbc_decrypt_blocks(&mut protected[..whole], &key.key, &key.iv);
+    }
+}
+
+/// The inverse of [`cbc_decrypt_blocks`], for building test data: encrypt
+/// `region` (whole blocks) in place and return the last ciphertext block.
+#[cfg(test)]
+pub(crate) fn cbc_encrypt_blocks(
+    region: &mut [u8],
+    key: &[u8; KEY_LEN],
+    iv: &[u8; 16],
+) -> Option<[u8; 16]> {
+    use cbc::cipher::BlockModeEncrypt;
+    if region.is_empty() || !region.len().is_multiple_of(BLOCK) {
+        return None;
+    }
+    let len = region.len();
+    cbc::Encryptor::<Aes128>::new(key.into(), iv.into())
+        .encrypt_padded::<NoPadding>(region, len)
+        .ok()?;
+    region[len - BLOCK..].try_into().ok()
+}
+
+/// The inverse of [`decrypt_sample_aes_frame`], for building test data.
+#[cfg(test)]
+pub(crate) fn encrypt_sample_aes_frame(frame: &mut [u8], clear_prefix: usize, key: &SampleAesKey) {
+    let Some(protected) = frame.get_mut(clear_prefix + BLOCK..) else {
+        return;
+    };
+    let whole = protected.len() / BLOCK * BLOCK;
+    if whole > 0 {
+        cbc_encrypt_blocks(&mut protected[..whole], &key.key, &key.iv);
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +246,164 @@ mod tests {
             ) {
                 let _ = decrypt_segment(&data, &key, &iv);
             }
+        }
+    }
+
+    // --- SAMPLE-AES ----------------------------------------------------------
+
+    const SAMPLE_IV: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD,
+        0xEF,
+    ];
+    const ADTS_HEADER: [u8; 7] = [0xFF, 0xF1, 0x50, 0x40, 0x0C, 0x9F, 0xFC];
+
+    fn sample_key() -> SampleAesKey {
+        SampleAesKey {
+            key: KEY,
+            iv: SAMPLE_IV,
+        }
+    }
+
+    // Made with `openssl enc -aes-128-cbc -nopad -K 000102..0f -iv 0123..cdef`
+    // from plaintext bytes 0x30.. (48 bytes) and 0x80.. (32 bytes).
+    const PLAIN_48: &str = "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f";
+    const CIPHER_48: &str = "22fc24243ec806acf3f8ec043a6b3600495534fed8a811f68cb8411799a864d5c5fa73020ab69d0a3525e7086cdd2117";
+    const PLAIN_32: &str = "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f";
+    const CIPHER_32: &str = "102d6c9603f0d047e1883352be88fdcc3d32b68363a8fad0b4afa2e92a374193";
+
+    /// header + 16 clear bytes + `protected` + `tail`.
+    fn frame(header: &[u8], protected: &[u8], tail: &[u8]) -> Vec<u8> {
+        let mut frame = header.to_vec();
+        frame.extend_from_slice(&[0xEE; 16]);
+        frame.extend_from_slice(protected);
+        frame.extend_from_slice(tail);
+        frame
+    }
+
+    #[test]
+    fn decrypts_an_openssl_encrypted_sample_aes_frame() {
+        let tail = [1, 2, 3, 4, 5];
+        let mut encrypted = frame(&ADTS_HEADER, &hex(CIPHER_48), &tail);
+        let expected = frame(&ADTS_HEADER, &hex(PLAIN_48), &tail);
+
+        decrypt_sample_aes_frame(&mut encrypted, ADTS_HEADER.len(), &sample_key());
+
+        assert_eq!(encrypted, expected);
+    }
+
+    #[test]
+    fn the_iv_starts_over_for_every_frame() {
+        // Two frames carrying the same ciphertext decrypt to the same plaintext:
+        // the second does not continue the first one's chain.
+        let key = sample_key();
+        let mut first = frame(&ADTS_HEADER, &hex(CIPHER_32), &[]);
+        let mut second = first.clone();
+
+        decrypt_sample_aes_frame(&mut first, 7, &key);
+        decrypt_sample_aes_frame(&mut second, 7, &key);
+
+        assert_eq!(first, second);
+        assert_eq!(&first[7 + 16..], hex(PLAIN_32));
+    }
+
+    #[test]
+    fn a_nine_byte_header_moves_the_protected_part() {
+        let header = [0xFF, 0xF0, 0x50, 0x40, 0x0C, 0x9F, 0xFC, 0xAA, 0xBB];
+        let mut encrypted = frame(&header, &hex(CIPHER_32), &[]);
+
+        decrypt_sample_aes_frame(&mut encrypted, header.len(), &sample_key());
+
+        assert_eq!(encrypted, frame(&header, &hex(PLAIN_32), &[]));
+    }
+
+    #[test]
+    fn frames_too_short_for_a_block_after_the_clear_part_are_untouched() {
+        for protected in [0usize, 1, 15] {
+            let original = frame(&ADTS_HEADER, &vec![0x5A; protected], &[]);
+            let mut copy = original.clone();
+
+            decrypt_sample_aes_frame(&mut copy, 7, &sample_key());
+
+            assert_eq!(copy, original, "{protected} bytes after the clear part");
+        }
+        // Even shorter than the clear part itself.
+        let mut tiny = ADTS_HEADER.to_vec();
+        decrypt_sample_aes_frame(&mut tiny, 7, &sample_key());
+        assert_eq!(tiny, ADTS_HEADER);
+    }
+
+    #[test]
+    fn a_partial_last_block_stays_in_the_clear() {
+        // 16 + 4 protected-region bytes: one block is decrypted, 4 bytes stay.
+        let mut cipher = hex(CIPHER_32)[..16].to_vec();
+        cipher.extend_from_slice(&[9, 9, 9, 9]);
+        let mut encrypted = frame(&ADTS_HEADER, &cipher, &[]);
+
+        decrypt_sample_aes_frame(&mut encrypted, 7, &sample_key());
+
+        let mut expected_protected = hex(PLAIN_32)[..16].to_vec();
+        expected_protected.extend_from_slice(&[9, 9, 9, 9]);
+        assert_eq!(encrypted, frame(&ADTS_HEADER, &expected_protected, &[]));
+    }
+
+    #[test]
+    fn cbc_blocks_report_the_chain_value_and_refuse_bad_lengths() {
+        let cipher = hex(CIPHER_48);
+        let mut region = cipher.clone();
+
+        let next = cbc_decrypt_blocks(&mut region, &KEY, &SAMPLE_IV).unwrap();
+
+        assert_eq!(region, hex(PLAIN_48));
+        // The chain value is the last ciphertext block, which a following region continues from.
+        assert_eq!(next.to_vec(), cipher[32..].to_vec());
+        assert_eq!(cbc_decrypt_blocks(&mut [], &KEY, &SAMPLE_IV), None);
+        assert_eq!(cbc_decrypt_blocks(&mut [0; 17], &KEY, &SAMPLE_IV), None);
+    }
+
+    #[test]
+    fn the_encryptor_used_by_other_tests_agrees_with_openssl() {
+        let mut region = hex(PLAIN_48);
+
+        cbc_encrypt_blocks(&mut region, &KEY, &SAMPLE_IV).unwrap();
+
+        assert_eq!(region, hex(CIPHER_48));
+    }
+
+    #[test]
+    fn a_wrong_key_produces_garbage_not_a_panic() {
+        let mut encrypted = frame(&ADTS_HEADER, &hex(CIPHER_48), &[]);
+        let wrong = SampleAesKey {
+            key: [0xFF; 16],
+            iv: SAMPLE_IV,
+        };
+
+        decrypt_sample_aes_frame(&mut encrypted, 7, &wrong);
+
+        assert_ne!(&encrypted[7 + 16..], hex(PLAIN_48));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn sample_aes_round_trips_for_any_frame(
+            header_len in proptest::sample::select(vec![7usize, 9]),
+            body in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..300),
+            key in proptest::prelude::any::<[u8; 16]>(),
+            iv in proptest::prelude::any::<[u8; 16]>(),
+        ) {
+            let key = SampleAesKey { key, iv };
+            let mut original = vec![0xFF; header_len];
+            original.extend_from_slice(&body);
+            let mut frame = original.clone();
+
+            encrypt_sample_aes_frame(&mut frame, header_len, &key);
+            // The header and the 16 bytes after it are never touched.
+            proptest::prop_assert_eq!(
+                &frame[..(header_len + 16).min(frame.len())],
+                &original[..(header_len + 16).min(original.len())]
+            );
+            decrypt_sample_aes_frame(&mut frame, header_len, &key);
+
+            proptest::prop_assert_eq!(frame, original);
         }
     }
 }

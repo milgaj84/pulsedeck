@@ -5,8 +5,9 @@
 /// decoding (driven directly, see `audio::symphonia_backend`), which supports MP3, AAC, OGG/Vorbis,
 /// FLAC, WAV and Opus (decoded with libopus). HLS playlists are played by the HLS fetcher
 /// (`audio::hls`) for audio-only AAC/MP3/Opus streams in MPEG-TS, packed audio
-/// or fragmented MP4, including AES-128 encrypted ones; SAMPLE-AES/DRM and
-/// video-only variants are rejected at runtime with a clear error. Windows
+/// or fragmented MP4, including AES-128 and SAMPLE-AES encrypted ones (with a
+/// plain key); DRM-protected and video-only variants are rejected at runtime
+/// with a clear error. Windows
 /// Media (WMA/ASF) has no Symphonia decoder and is `Unsupported`. Missing or
 /// unrecognized codec metadata is `Unknown`, which allows a playback attempt
 /// because Radio Browser entries are often incomplete.
@@ -67,7 +68,7 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
             CodecCapability {
                 normalized_codec: "HLS",
                 capability: PlaybackCapability::Supported,
-                reason: "HLS audio (AAC/MP3/Opus, AES-128 supported) is played from live segments; SAMPLE-AES/DRM and video-only streams are not supported",
+                reason: "HLS audio (AAC/MP3/Opus, AES-128 and SAMPLE-AES supported) is played from live segments; DRM-protected and video-only streams are not supported",
             }
         }
         "WMA" | "ASF" | "AUDIO/X-MS-WMA" | "AUDIO/X-MS-ASF" => CodecCapability {

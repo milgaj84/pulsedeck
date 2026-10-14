@@ -1,9 +1,11 @@
 //! The HLS fetcher thread: downloads playlists and segments and hands audio
 //! bytes to [`HlsSource`](super::source::HlsSource) through a bounded channel.
 
-use super::crypto;
+use super::crypto::{self, SampleAesKey};
 use super::fmp4::Fmp4Init;
-use super::playlist::{self, ByteRange, HlsError, MediaPlaylist, Playlist, Segment, SegmentKey};
+use super::playlist::{
+    self, ByteRange, HlsError, KeyMethod, MediaPlaylist, Playlist, Segment, SegmentKey,
+};
 use super::source::HlsChunk;
 use super::ts::AudioExtractor;
 use reqwest::Url;
@@ -144,6 +146,14 @@ impl fmt::Display for SegmentError {
     }
 }
 
+/// A downloaded segment, ready for the extractor.
+struct Fetched {
+    /// Decrypted already for AES-128; still encrypted for SAMPLE-AES.
+    bytes: Vec<u8>,
+    /// The key to decrypt the audio samples with, for SAMPLE-AES.
+    sample_aes: Option<SampleAesKey>,
+}
+
 type KeyCache = HashMap<Url, [u8; crypto::KEY_LEN]>;
 type InitCache = HashMap<(Url, Option<ByteRange>), Arc<Fmp4Init>>;
 
@@ -282,17 +292,20 @@ impl<H: HlsHttp> Fetcher<H> {
                     extractor.reset();
                 }
 
-                let fetched = self.fetch_segment(segment, &mut keys).and_then(|bytes| {
+                let fetched = self.fetch_segment(segment, &mut keys).and_then(|fetched| {
                     let init = self.init_for(segment, &mut keys, &mut inits)?;
-                    Ok((bytes, init))
+                    Ok((fetched, init))
                 });
                 match fetched {
-                    Ok((bytes, init)) => {
+                    Ok((fetched, init)) => {
                         segment_failures = 0;
                         let mut audio = Vec::new();
-                        if let Err(error) =
-                            extractor.push_segment_with_init(&bytes, init.as_deref(), &mut audio)
-                        {
+                        extractor.set_sample_aes(fetched.sample_aes);
+                        if let Err(error) = extractor.push_segment_with_init(
+                            &fetched.bytes,
+                            init.as_deref(),
+                            &mut audio,
+                        ) {
                             self.fail(error.to_string());
                             return;
                         }
@@ -394,19 +407,33 @@ impl<H: HlsHttp> Fetcher<H> {
         Ok(key)
     }
 
-    /// Download a segment and, if it is AES-128 encrypted, decrypt it.
+    /// Download a segment and, if it is AES-128 encrypted, decrypt it. A
+    /// SAMPLE-AES segment is left as it is: only its audio samples are
+    /// encrypted, which the extractor undoes.
     fn fetch_segment(
         &self,
         segment: &Segment,
         keys: &mut KeyCache,
-    ) -> Result<Vec<u8>, SegmentError> {
+    ) -> Result<Fetched, SegmentError> {
         let bytes = self.get_section(&segment.uri, segment.range, MAX_SEGMENT_BYTES)?;
         let Some(key_info) = &segment.key else {
-            return Ok(bytes);
+            return Ok(Fetched {
+                bytes,
+                sample_aes: None,
+            });
         };
         let key = self.key_for(key_info, keys)?;
         let iv = crypto::segment_iv(key_info.iv, segment.seq);
-        crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)
+        match key_info.method {
+            KeyMethod::Aes128 => Ok(Fetched {
+                bytes: crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)?,
+                sample_aes: None,
+            }),
+            KeyMethod::SampleAes => Ok(Fetched {
+                bytes,
+                sample_aes: Some(SampleAesKey { key, iv }),
+            }),
+        }
     }
 
     /// The parsed init section of a fragmented MP4 segment, downloaded once.
@@ -425,7 +452,8 @@ impl<H: HlsHttp> Fetcher<H> {
         }
 
         let mut bytes = self.get_section(&map.uri, map.range, MAX_INIT_BYTES)?;
-        if let Some(key_info) = &map.key {
+        // Only AES-128 encrypts the init section; with SAMPLE-AES it is in the clear.
+        if let Some(key_info) = map.key.iter().find(|key| key.method == KeyMethod::Aes128) {
             let key = self.key_for(key_info, keys)?;
             let iv = crypto::segment_iv(key_info.iv, segment.seq);
             bytes = crypto::decrypt_segment(&bytes, &key, &iv).map_err(SegmentError::Decrypt)?;
@@ -451,7 +479,7 @@ impl<H: HlsHttp> Fetcher<H> {
                             self.fail("HLS: playlist changed into a master playlist");
                             return None;
                         }
-                        Err(error @ HlsError::Encrypted) => {
+                        Err(error @ (HlsError::Drm | HlsError::UnsupportedEncryption(_))) => {
                             self.fail(error.to_string());
                             return None;
                         }
@@ -627,7 +655,7 @@ mod tests {
         let mut demuxer = super::super::fmp4::Fmp4Demuxer::default();
         let mut audio = Vec::new();
         for segment in FMP4_SEGMENTS {
-            demuxer.push(&init, segment, &mut audio).unwrap();
+            demuxer.push(&init, segment, None, &mut audio).unwrap();
         }
         audio
     }
@@ -992,12 +1020,12 @@ mod tests {
     }
 
     #[test]
-    fn a_refresh_that_turns_encrypted_fails_clearly() {
+    fn a_refresh_that_turns_drm_protected_fails_clearly() {
         let http = FakeHttp::default();
         http.fixed("/seg0.ts", segment(20));
         http.fixed(
             "/live.m3u8",
-            b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k\"\n#EXTINF:1,\n/seg1.ts\n"
+            b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n#EXTINF:1,\n/seg1.ts\n"
                 .to_vec(),
         );
         let active = Arc::new(AtomicU64::new(1));
@@ -1006,10 +1034,7 @@ mod tests {
         let (_, terminal) = drain(&rx);
         join(handle);
 
-        assert_eq!(
-            terminal,
-            Some(HlsChunk::Fail(HlsError::Encrypted.to_string()))
-        );
+        assert_eq!(terminal, Some(HlsChunk::Fail(HlsError::Drm.to_string())));
     }
 
     #[test]

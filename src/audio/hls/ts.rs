@@ -1,7 +1,8 @@
 //! Audio extraction from HLS segments. Pure: bytes in, bytes out.
 //!
 //! Supported segment formats:
-//! - MPEG-TS carrying ADTS AAC (stream type 0x0F) or MPEG audio (0x03/0x04)
+//! - MPEG-TS carrying ADTS AAC (stream type 0x0F, or 0xCF for SAMPLE-AES) or
+//!   MPEG audio (0x03/0x04)
 //! - "packed audio": raw ADTS AAC or raw MP3, each segment prefixed by an ID3 tag
 //! - fragmented MP4 (see [`super::fmp4`]), which needs its init segment
 //!
@@ -9,6 +10,7 @@
 //! a 7-byte header and rejects multi-frame ADTS, so every ADTS frame is
 //! rewritten into that canonical form (MPEG-2 id bit cleared, CRC removed).
 
+use super::crypto::{self, SampleAesKey};
 use super::fmp4::{Fmp4Demuxer, Fmp4Init};
 use super::id3;
 use super::playlist::HlsError;
@@ -91,13 +93,20 @@ pub(crate) fn classify_segment(bytes: &[u8]) -> SegmentFormat {
     }
 }
 
-/// Rewrites ADTS frames into the canonical form Symphonia accepts.
+/// Rewrites ADTS frames into the canonical form Symphonia accepts, decrypting
+/// SAMPLE-AES frames on the way.
 #[derive(Debug, Default)]
 pub(crate) struct AdtsNormalizer {
     carry: Vec<u8>,
+    /// Set while the segments being read are SAMPLE-AES protected.
+    key: Option<SampleAesKey>,
 }
 
 impl AdtsNormalizer {
+    pub(crate) fn set_key(&mut self, key: Option<SampleAesKey>) {
+        self.key = key;
+    }
+
     pub(crate) fn push(&mut self, data: &[u8], out: &mut Vec<u8>) -> Result<(), HlsError> {
         let mut buf = std::mem::take(&mut self.carry);
         buf.extend_from_slice(data);
@@ -135,7 +144,15 @@ impl AdtsNormalizer {
                 (((new_len & 7) as u8) << 5) | (header[5] & 0x1F),
                 header[6],
             ]);
-            out.extend_from_slice(&buf[pos + header_len..pos + frame_len]);
+            match &self.key {
+                None => out.extend_from_slice(&buf[pos + header_len..pos + frame_len]),
+                Some(key) => {
+                    // The header and the first 16 bytes after it are in the clear.
+                    let mut frame = buf[pos..pos + frame_len].to_vec();
+                    crypto::decrypt_sample_aes_frame(&mut frame, header_len, key);
+                    out.extend_from_slice(&frame[header_len..]);
+                }
+            }
             pos += frame_len;
         }
 
@@ -209,6 +226,10 @@ impl TsDemuxer {
     /// Forget stream state (after a discontinuity); keep nothing from before.
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    fn set_sample_aes(&mut self, key: Option<SampleAesKey>) {
+        self.adts.set_key(key);
     }
 
     /// Feed bytes (not necessarily aligned to packets) and append extracted
@@ -379,7 +400,9 @@ impl TsDemuxer {
             pos += 5 + es_info;
 
             match stream_type {
-                0x0F if found.is_none() => found = Some((pid, EsKind::Adts)),
+                // 0xCF is AAC protected with SAMPLE-AES. Whether to decrypt follows
+                // from the playlist's key, not from the stream type.
+                0x0F | 0xCF if found.is_none() => found = Some((pid, EsKind::Adts)),
                 0x03 | 0x04 if found.is_none() => found = Some((pid, EsKind::MpegAudio)),
                 0x15 if meta.is_none() => meta = Some(pid),
                 0x01 | 0x02 | 0x10 | 0x1B | 0x24 => video = true,
@@ -464,6 +487,7 @@ pub(crate) struct AudioExtractor {
     ts: TsDemuxer,
     adts: AdtsNormalizer,
     fmp4: Fmp4Demuxer,
+    sample_aes: Option<SampleAesKey>,
     kind: Option<EsKind>,
     titles: Vec<String>,
     last_title: Option<String>,
@@ -481,6 +505,14 @@ impl AudioExtractor {
         self.ts.reset();
         self.adts.reset();
         self.fmp4.reset();
+    }
+
+    /// Set (or clear) the SAMPLE-AES key for the segments that follow. Call it
+    /// before every segment, since keys can change from one to the next.
+    pub(crate) fn set_sample_aes(&mut self, key: Option<SampleAesKey>) {
+        self.sample_aes = key;
+        self.adts.set_key(key);
+        self.ts.set_sample_aes(key);
     }
 
     /// "Now playing" titles that changed since the last call, in order.
@@ -537,11 +569,19 @@ impl AudioExtractor {
             }
             SegmentFormat::Fmp4 => {
                 let init = init.ok_or(HlsError::Malformed("fMP4 segment without #EXT-X-MAP"))?;
-                self.fmp4.push(init, segment, out)?;
+                self.fmp4
+                    .push(init, segment, self.sample_aes.as_ref(), out)?;
                 Some(init.kind())
             }
             SegmentFormat::Unknown => return Err(HlsError::Malformed("unrecognised segment data")),
         };
+
+        if self.sample_aes.is_some() && kind == Some(EsKind::MpegAudio) {
+            // Apple's SAMPLE-AES format covers AAC, AC-3 and E-AC-3, not MP3.
+            return Err(HlsError::UnsupportedEncryption(
+                "SAMPLE-AES MP3".to_string(),
+            ));
+        }
 
         match (self.kind, kind) {
             (Some(known), Some(now)) if known != now => Err(mixed_codecs(known, now)),
@@ -578,6 +618,177 @@ mod tests {
         (usize::from(bytes[3] & 3) << 11)
             | (usize::from(bytes[4]) << 3)
             | usize::from(bytes[5] >> 5)
+    }
+
+    // --- SAMPLE-AES ---------------------------------------------------------
+
+    const CLEAR_AAC: &[u8] = include_bytes!("testdata/sample_aes/clear.aac");
+    const SAMPLE_AES_KEY: &[u8; 16] = include_bytes!("testdata/sample_aes/key.bin");
+    const SAMPLE_AES_IV: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD,
+        0xEF,
+    ];
+    /// Real SAMPLE-AES TS and packed audio from Shaka Packager (see the README
+    /// next to the fixtures).
+    const SHAKA_TS: [&[u8]; 5] = [
+        include_bytes!("testdata/sample_aes/ts/a_1.ts"),
+        include_bytes!("testdata/sample_aes/ts/a_2.ts"),
+        include_bytes!("testdata/sample_aes/ts/a_3.ts"),
+        include_bytes!("testdata/sample_aes/ts/a_4.ts"),
+        include_bytes!("testdata/sample_aes/ts/a_5.ts"),
+    ];
+    const SHAKA_PACKED: [&[u8]; 5] = [
+        include_bytes!("testdata/sample_aes/packed/a_1.aac"),
+        include_bytes!("testdata/sample_aes/packed/a_2.aac"),
+        include_bytes!("testdata/sample_aes/packed/a_3.aac"),
+        include_bytes!("testdata/sample_aes/packed/a_4.aac"),
+        include_bytes!("testdata/sample_aes/packed/a_5.aac"),
+    ];
+
+    fn shaka_key() -> SampleAesKey {
+        SampleAesKey {
+            key: *SAMPLE_AES_KEY,
+            iv: SAMPLE_AES_IV,
+        }
+    }
+
+    fn extract_with(segments: &[&[u8]], key: Option<SampleAesKey>) -> Vec<u8> {
+        let mut extractor = AudioExtractor::default();
+        let mut out = Vec::new();
+        for segment in segments {
+            extractor.set_sample_aes(key);
+            extractor.push_segment(segment, &mut out).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn sample_aes_mpeg_ts_from_shaka_decrypts_to_the_original_audio() {
+        let audio = extract_with(&SHAKA_TS, Some(shaka_key()));
+
+        let expected = adts_payloads(CLEAR_AAC);
+        assert!(expected.len() > 100);
+        assert_eq!(adts_payloads(&audio), expected);
+    }
+
+    #[test]
+    fn sample_aes_packed_audio_from_shaka_decrypts_to_the_original_audio() {
+        let audio = extract_with(&SHAKA_PACKED, Some(shaka_key()));
+
+        assert_eq!(adts_payloads(&audio), adts_payloads(CLEAR_AAC));
+    }
+
+    #[test]
+    fn without_the_key_sample_aes_audio_stays_scrambled() {
+        let scrambled = adts_payloads(&extract_with(&SHAKA_PACKED, None));
+        let clear = adts_payloads(CLEAR_AAC);
+
+        assert_eq!(scrambled.len(), clear.len());
+        assert_ne!(scrambled, clear);
+        // The part in the clear (the first 16 bytes of every frame) is still right.
+        for (scrambled, clear) in scrambled.iter().zip(&clear) {
+            let clear_part = clear.len().min(16);
+            assert_eq!(&scrambled[..clear_part], &clear[..clear_part]);
+        }
+    }
+
+    #[test]
+    fn a_wrong_key_gives_scrambled_audio_but_no_error() {
+        let wrong = SampleAesKey {
+            key: [0x55; 16],
+            iv: SAMPLE_AES_IV,
+        };
+
+        let audio = extract_with(&SHAKA_PACKED, Some(wrong));
+
+        assert_ne!(adts_payloads(&audio), adts_payloads(CLEAR_AAC));
+    }
+
+    #[test]
+    fn the_wrong_iv_scrambles_the_audio_too() {
+        let wrong = SampleAesKey {
+            key: *SAMPLE_AES_KEY,
+            iv: [0; 16],
+        };
+
+        let audio = extract_with(&SHAKA_PACKED, Some(wrong));
+
+        assert_ne!(adts_payloads(&audio), adts_payloads(CLEAR_AAC));
+    }
+
+    #[test]
+    fn stream_type_0xcf_is_aac_and_a_key_decides_about_decryption() {
+        let frames = frames(4, 80);
+        let clear = ts_segment(0x0F, &frames);
+        let marked = ts_segment(0xCF, &frames);
+
+        let mut from_cf = Vec::new();
+        let mut extractor = AudioExtractor::default();
+        extractor.push_segment(&marked, &mut from_cf).unwrap();
+
+        assert_eq!(extractor.kind(), Some(EsKind::Adts));
+        assert_eq!(from_cf, extract_with(&[clear.as_slice()], None));
+        assert_eq!(adts_payloads(&from_cf).len(), 4);
+    }
+
+    #[test]
+    fn frames_with_a_crc_are_decrypted_using_the_longer_header() {
+        // Encrypt 3 frames with 9-byte headers, then read them back.
+        let key = shaka_key();
+        let plain: Vec<Vec<u8>> = (0..3)
+            .map(|i| adts_frame(70 + i * 9, false, true))
+            .collect();
+        let mut stream = Vec::new();
+        for frame in &plain {
+            let mut encrypted = frame.clone();
+            crypto::encrypt_sample_aes_frame(&mut encrypted, 9, &key);
+            assert_ne!(&encrypted, frame);
+            stream.extend_from_slice(&encrypted);
+        }
+        let mut packed = id3_tag(10);
+        packed.extend_from_slice(&stream);
+
+        let audio = extract_with(&[packed.as_slice()], Some(key));
+
+        assert_eq!(adts_payloads(&audio), adts_payloads(&plain.concat()));
+    }
+
+    #[test]
+    fn the_key_can_change_from_one_segment_to_the_next() {
+        // An encrypted segment followed by a clear one, as a playlist that turns
+        // encryption off with METHOD=NONE.
+        let key = shaka_key();
+        let mut extractor = AudioExtractor::default();
+        let mut out = Vec::new();
+        extractor.set_sample_aes(Some(key));
+        extractor.push_segment(SHAKA_PACKED[0], &mut out).unwrap();
+        let encrypted_part = out.len();
+        let clear_frames: Vec<u8> = frames(3, 60).concat();
+        extractor.set_sample_aes(None);
+        extractor.push_segment(&clear_frames, &mut out).unwrap();
+
+        let decrypted = adts_payloads(&out[..encrypted_part]);
+        assert_eq!(decrypted, adts_payloads(CLEAR_AAC)[..decrypted.len()]);
+        assert_eq!(
+            adts_payloads(&out[encrypted_part..]),
+            adts_payloads(&clear_frames)
+        );
+    }
+
+    #[test]
+    fn sample_aes_mp3_is_refused_because_the_format_does_not_cover_it() {
+        let mut extractor = AudioExtractor::default();
+        extractor.set_sample_aes(Some(shaka_key()));
+
+        let error = extractor
+            .push_segment(&mp3_frame(100), &mut Vec::new())
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            HlsError::UnsupportedEncryption("SAMPLE-AES MP3".to_string())
+        );
+        assert!(error.to_string().contains("not supported"));
     }
 
     #[test]

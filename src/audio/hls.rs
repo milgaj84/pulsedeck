@@ -670,15 +670,95 @@ mod tests {
         assert_eq!(paths.len(), 3);
     }
 
+    const SAMPLE_AES_KEY: &[u8] = include_bytes!("hls/testdata/sample_aes/key.bin");
+    const SAMPLE_AES_KEY_TAG: &str = "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"key.bin\",IV=0x0123456789abcdef0123456789abcdef,KEYFORMAT=\"identity\"\n";
+    const SHAKA_TS: [&[u8]; 5] = [
+        include_bytes!("hls/testdata/sample_aes/ts/a_1.ts"),
+        include_bytes!("hls/testdata/sample_aes/ts/a_2.ts"),
+        include_bytes!("hls/testdata/sample_aes/ts/a_3.ts"),
+        include_bytes!("hls/testdata/sample_aes/ts/a_4.ts"),
+        include_bytes!("hls/testdata/sample_aes/ts/a_5.ts"),
+    ];
+    const SHAKA_PACKED: [&[u8]; 5] = [
+        include_bytes!("hls/testdata/sample_aes/packed/a_1.aac"),
+        include_bytes!("hls/testdata/sample_aes/packed/a_2.aac"),
+        include_bytes!("hls/testdata/sample_aes/packed/a_3.aac"),
+        include_bytes!("hls/testdata/sample_aes/packed/a_4.aac"),
+        include_bytes!("hls/testdata/sample_aes/packed/a_5.aac"),
+    ];
+
+    /// A server for a SAMPLE-AES playlist; `key` is what `/key.bin` serves.
+    fn sample_aes_server(ext: &str, segments: &[&[u8]], key: Option<&[u8]>) -> TestServer {
+        let playlist = media_playlist(segments.len(), ext, SAMPLE_AES_KEY_TAG);
+        let mut routes = vec![("/live.m3u8".to_string(), Response::ok(MPEGURL, playlist))];
+        if let Some(key) = key {
+            routes.push((
+                "/key.bin".to_string(),
+                Response::ok("application/octet-stream", key.to_vec()),
+            ));
+        }
+        for (index, segment) in segments.iter().enumerate() {
+            routes.push((
+                format!("/seg{index}.{ext}"),
+                Response::ok("video/mp2t", segment.to_vec()),
+            ));
+        }
+        let (paths, responses): (Vec<String>, Vec<Response>) = routes.into_iter().unzip();
+        server_with(paths.iter().map(String::as_str).zip(responses).collect())
+    }
+
     #[test]
-    fn sample_aes_playlist_fails_as_not_supported_before_downloading_anything() {
-        let playlist = media_playlist(2, "ts", "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k.key\"\n");
+    fn sample_aes_mpeg_ts_stream_connects_and_decodes() {
+        let server = sample_aes_server("ts", &SHAKA_TS, Some(SAMPLE_AES_KEY));
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_connected_as(&run, "HLS AAC");
+        assert_eq!(run._server.hits("/key.bin"), 1);
+    }
+
+    #[test]
+    fn sample_aes_packed_audio_stream_connects_and_decodes() {
+        let server = sample_aes_server("aac", &SHAKA_PACKED, Some(SAMPLE_AES_KEY));
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_connected_as(&run, "HLS AAC");
+    }
+
+    #[test]
+    fn sample_aes_without_a_reachable_key_fails_clearly() {
+        let server = sample_aes_server("ts", &SHAKA_TS, None);
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_failed_with(&run, "encryption key unavailable");
+    }
+
+    #[test]
+    fn drm_playlist_fails_as_not_supported_before_downloading_anything() {
+        let playlist = media_playlist(
+            2,
+            "ts",
+            "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n",
+        );
         let server = server_with(vec![("/live.m3u8", Response::ok(MPEGURL, playlist))]);
 
         let run = run_against(server, "/live.m3u8", 4096);
 
-        assert_failed_with(&run, "encrypted streams are not supported");
+        assert_failed_with(&run, "DRM-protected streams");
+        assert_failed_with(&run, "not supported");
         assert_eq!(run._server.hits("/seg0.ts"), 0);
+    }
+
+    #[test]
+    fn an_unknown_encryption_method_fails_as_not_supported() {
+        let playlist = media_playlist(2, "ts", "#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"k.key\"\n");
+        let server = server_with(vec![("/live.m3u8", Response::ok(MPEGURL, playlist))]);
+
+        let run = run_against(server, "/live.m3u8", 4096);
+
+        assert_failed_with(&run, "SAMPLE-AES-CTR encryption is not supported");
     }
 
     const FMP4_AAC_INIT: &[u8] = include_bytes!("hls/testdata/fmp4/aac/init.mp4");

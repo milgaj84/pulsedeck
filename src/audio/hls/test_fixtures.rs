@@ -24,6 +24,28 @@ pub(crate) fn adts_frame(payload_len: usize, mpeg2: bool, crc: bool) -> Vec<u8> 
 }
 
 /// An MPEG-1 Layer III frame header followed by a patterned payload.
+/// The payload of every ADTS frame in `stream` (a header of 7 bytes, or 9 with
+/// a CRC), so streams written with different headers can be compared.
+pub(crate) fn adts_payloads(stream: &[u8]) -> Vec<Vec<u8>> {
+    let mut payloads = Vec::new();
+    let mut pos = 0;
+    while pos + 7 <= stream.len() {
+        assert_eq!(stream[pos], 0xFF, "lost ADTS sync at {pos}");
+        let header_len = if stream[pos + 1] & 1 == 1 { 7 } else { 9 };
+        let frame_len = (usize::from(stream[pos + 3] & 3) << 11)
+            | (usize::from(stream[pos + 4]) << 3)
+            | usize::from(stream[pos + 5] >> 5);
+        let end = pos + frame_len;
+        assert!(
+            end <= stream.len() && frame_len >= header_len,
+            "bad frame at {pos}"
+        );
+        payloads.push(stream[pos + header_len..end].to_vec());
+        pos = end;
+    }
+    payloads
+}
+
 pub(crate) fn mp3_frame(payload_len: usize) -> Vec<u8> {
     let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
     frame.extend((0..payload_len).map(|i| (i % 200) as u8));

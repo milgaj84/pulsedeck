@@ -10,11 +10,16 @@
 //! - MP3: the samples as they are
 //! - Opus: an Ogg Opus stream (one packet per page)
 //!
+//! Samples protected with `cbcs` (HLS SAMPLE-AES for fMP4) are decrypted
+//! first, using the IVs and subsample ranges the fragment carries.
+//!
 //! Every length and offset in the data is untrusted, so all reads are bounds
 //! checked and malformed input is an error, never a panic.
 
+use super::crypto::{self, SampleAesKey};
 use super::playlist::HlsError;
 use super::ts::EsKind;
+use std::borrow::Cow;
 
 const TRUNCATED: HlsError = HlsError::Malformed("truncated MP4 data");
 const BAD_BOX: HlsError = HlsError::Malformed("invalid MP4 box");
@@ -164,6 +169,18 @@ struct TrackDefaults {
     size: Option<u32>,
 }
 
+/// How the samples of an encrypted track are protected (from `tenc`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Encryption {
+    /// Pattern encryption: this many 16-byte blocks encrypted, then
+    /// `skip_blocks` in the clear. Both 0 means every block is encrypted.
+    crypt_blocks: u8,
+    skip_blocks: u8,
+    /// Bytes of IV each sample carries in `senc`; 0 means [`Self::constant_iv`].
+    iv_size: u8,
+    constant_iv: Option<[u8; 16]>,
+}
+
 /// What an init segment says about its audio track.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Fmp4Init {
@@ -171,6 +188,8 @@ pub(crate) struct Fmp4Init {
     timescale: u32,
     codec: Codec,
     defaults: TrackDefaults,
+    /// Set when the samples are `cbcs` encrypted.
+    encryption: Option<Encryption>,
 }
 
 impl Fmp4Init {
@@ -223,11 +242,13 @@ impl Fmp4Init {
             .first()
             .ok_or(HlsError::Malformed("track without a sample entry"))?;
 
+        let (codec, encryption) = parse_sample_entry(entry)?;
         Ok(Self {
             track_id,
             timescale,
-            codec: parse_sample_entry(entry)?,
+            codec,
             defaults: track_defaults(&moov_boxes, track_id),
+            encryption,
         })
     }
 }
@@ -281,7 +302,7 @@ fn track_defaults(moov: &[Mp4Box<'_>], track_id: u32) -> TrackDefaults {
     TrackDefaults::default()
 }
 
-fn parse_sample_entry(entry: &Mp4Box<'_>) -> Result<Codec, HlsError> {
+fn parse_sample_entry(entry: &Mp4Box<'_>) -> Result<(Codec, Option<Encryption>), HlsError> {
     // Audio sample entries: 6 reserved bytes, a data reference index, then
     // version, channel count, sample size and rate: 28 bytes before the
     // child boxes.
@@ -292,11 +313,22 @@ fn parse_sample_entry(entry: &Mp4Box<'_>) -> Result<Codec, HlsError> {
             .ok_or(TRUNCATED)
             .and_then(parse_boxes)
     };
-    match &entry.kind {
+    if &entry.kind == b"enca" {
+        // An encrypted entry keeps the original codec's boxes beside `sinf`,
+        // which names the original format and the protection scheme.
+        let children = children()?;
+        let sinf = find(&children, b"sinf").ok_or(HlsError::Malformed("enca without sinf"))?;
+        let (original, encryption) = parse_sinf(sinf.payload)?;
+        return Ok((codec_from_entry(&original, &children)?, encryption));
+    }
+    Ok((codec_from_entry(&entry.kind, &children()?)?, None))
+}
+
+fn codec_from_entry(kind: &[u8; 4], children: &[Mp4Box<'_>]) -> Result<Codec, HlsError> {
+    match kind {
         b"mp4a" => {
-            let children = children()?;
             let esds =
-                find(&children, b"esds").ok_or(HlsError::Malformed("mp4a entry without esds"))?;
+                find(children, b"esds").ok_or(HlsError::Malformed("mp4a entry without esds"))?;
             let (object_type, config) = parse_esds(esds.payload)?;
             match object_type {
                 0x40 => parse_aac_config(&config),
@@ -307,9 +339,8 @@ fn parse_sample_entry(entry: &Mp4Box<'_>) -> Result<Codec, HlsError> {
             }
         }
         b"Opus" => {
-            let children = children()?;
             let dops =
-                find(&children, b"dOps").ok_or(HlsError::Malformed("Opus entry without dOps"))?;
+                find(children, b"dOps").ok_or(HlsError::Malformed("Opus entry without dOps"))?;
             Ok(Codec::Opus {
                 head: opus_head(dops.payload)?,
             })
@@ -318,6 +349,74 @@ fn parse_sample_entry(entry: &Mp4Box<'_>) -> Result<Codec, HlsError> {
             String::from_utf8_lossy(other).trim().to_string(),
         )),
     }
+}
+
+/// The original format and protection of an `enca` entry. Only `cbcs`, the
+/// scheme HLS SAMPLE-AES uses in fMP4, can be decrypted.
+fn parse_sinf(sinf: &[u8]) -> Result<([u8; 4], Option<Encryption>), HlsError> {
+    const BAD: HlsError = HlsError::Malformed("invalid sinf");
+    let boxes = parse_boxes(sinf)?;
+    let original: [u8; 4] = find(&boxes, b"frma")
+        .ok_or(BAD)?
+        .payload
+        .get(..4)
+        .ok_or(BAD)?
+        .try_into()
+        .map_err(|_| BAD)?;
+
+    let schm = find(&boxes, b"schm").ok_or(BAD)?;
+    let mut reader = Reader::new(schm.payload);
+    version_flags(&mut reader).ok_or(BAD)?;
+    let scheme = reader.take(4).ok_or(BAD)?;
+    if scheme != b"cbcs" {
+        return Err(HlsError::UnsupportedEncryption(format!(
+            "MP4 {} protection",
+            String::from_utf8_lossy(scheme)
+        )));
+    }
+
+    let schi = find(&boxes, b"schi").ok_or(BAD)?;
+    let schi_boxes = parse_boxes(schi.payload)?;
+    let tenc = find(&schi_boxes, b"tenc").ok_or(BAD)?;
+    Ok((original, parse_tenc(tenc.payload).ok_or(BAD)?))
+}
+
+/// `None` inside means the track is not actually protected.
+fn parse_tenc(tenc: &[u8]) -> Option<Option<Encryption>> {
+    let mut reader = Reader::new(tenc);
+    let (version, _) = version_flags(&mut reader)?;
+    reader.u8()?; // reserved
+    let pattern = reader.u8()?; // reserved in version 0
+    let (crypt_blocks, skip_blocks) = if version == 0 {
+        (0, 0)
+    } else {
+        (pattern >> 4, pattern & 0x0F)
+    };
+    let protected = reader.u8()? != 0;
+    let iv_size = reader.u8()?;
+    reader.skip(16)?; // key id
+    let constant_iv = if protected && iv_size == 0 {
+        let size = usize::from(reader.u8()?);
+        Some(pad_iv(reader.take(size)?)?)
+    } else {
+        None
+    };
+    Some(protected.then_some(Encryption {
+        crypt_blocks,
+        skip_blocks,
+        iv_size,
+        constant_iv,
+    }))
+}
+
+/// An 8- or 16-byte IV as a 16-byte one (an 8-byte IV is zero padded).
+fn pad_iv(bytes: &[u8]) -> Option<[u8; 16]> {
+    if bytes.len() != 8 && bytes.len() != 16 {
+        return None;
+    }
+    let mut iv = [0u8; 16];
+    iv[..bytes.len()].copy_from_slice(bytes);
+    Some(iv)
 }
 
 /// One MPEG-4 descriptor: its tag, body, and what follows it.
@@ -482,6 +581,17 @@ struct Sample<'a> {
     data: &'a [u8],
     /// In track timescale units, when the fragment says.
     duration: Option<u32>,
+    /// How this sample is protected, when the track is encrypted.
+    protection: Option<SampleProtection>,
+}
+
+/// The IV and clear/protected split of one encrypted sample.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SampleProtection {
+    iv: [u8; 16],
+    /// (bytes in the clear, bytes protected) pairs; empty means the whole sample
+    /// is protected.
+    subsamples: Vec<(u16, u32)>,
 }
 
 #[derive(Default)]
@@ -540,6 +650,7 @@ fn collect_samples<'a>(init: &Fmp4Init, segment: &'a [u8]) -> Result<Vec<Sample<
                 _ => moof.start,
             };
             let mut cursor = base;
+            let first_in_fragment = samples.len();
             for trun in traf_boxes.iter().filter(|b| &b.kind == b"trun") {
                 cursor = read_run(
                     init,
@@ -551,9 +662,65 @@ fn collect_samples<'a>(init: &Fmp4Init, segment: &'a [u8]) -> Result<Vec<Sample<
                     &mut samples,
                 )?;
             }
+            if let Some(encryption) = &init.encryption {
+                attach_protection(
+                    encryption,
+                    find(&traf_boxes, b"senc").map(|senc| senc.payload),
+                    &mut samples[first_in_fragment..],
+                )?;
+            }
         }
     }
     Ok(samples)
+}
+
+/// Give each sample of a fragment its IV and subsamples, from the `senc` box
+/// (or the constant IV when the track has no per-sample IVs).
+fn attach_protection(
+    encryption: &Encryption,
+    senc: Option<&[u8]>,
+    samples: &mut [Sample<'_>],
+) -> Result<(), HlsError> {
+    const BAD: HlsError = HlsError::Malformed("invalid senc");
+    let mut entries = Vec::new();
+    if let Some(senc) = senc {
+        let mut reader = Reader::new(senc);
+        let (_, flags) = version_flags(&mut reader).ok_or(BAD)?;
+        let count = reader.u32().ok_or(BAD)?;
+        if count > MAX_SAMPLES_PER_RUN {
+            return Err(HlsError::Malformed("implausible sample count"));
+        }
+        for _ in 0..count {
+            let iv = match encryption.iv_size {
+                0 => encryption.constant_iv.ok_or(BAD)?,
+                size => pad_iv(reader.take(usize::from(size)).ok_or(BAD)?).ok_or(BAD)?,
+            };
+            let mut subsamples = Vec::new();
+            if flags & 0x02 != 0 {
+                for _ in 0..reader.u16().ok_or(BAD)? {
+                    subsamples.push((reader.u16().ok_or(BAD)?, reader.u32().ok_or(BAD)?));
+                }
+            }
+            entries.push(SampleProtection { iv, subsamples });
+        }
+    } else if let Some(iv) = encryption.constant_iv {
+        // No senc: every sample is wholly protected with the constant IV.
+        entries = samples
+            .iter()
+            .map(|_| SampleProtection {
+                iv,
+                subsamples: Vec::new(),
+            })
+            .collect();
+    }
+
+    if entries.len() < samples.len() {
+        return Err(HlsError::Malformed("encrypted samples without IVs"));
+    }
+    for (sample, entry) in samples.iter_mut().zip(entries) {
+        sample.protection = Some(entry);
+    }
+    Ok(())
 }
 
 /// Read one `trun`; returns where its sample data ends.
@@ -615,10 +782,73 @@ fn read_run<'a>(
             .and_then(|size| pos.checked_add(size))
             .ok_or(BAD_BOX)?;
         let data = segment.get(pos..end).ok_or(TRUNCATED)?;
-        samples.push(Sample { data, duration });
+        samples.push(Sample {
+            data,
+            duration,
+            protection: None,
+        });
         pos = end;
     }
     Ok(pos)
+}
+
+// ---------------------------------------------------------------------------
+// Decryption
+// ---------------------------------------------------------------------------
+
+/// Decrypt one `cbcs` sample in place.
+///
+/// Only the protected ranges are encrypted, in whole 16-byte blocks (a partial
+/// last block stays clear). Within a range the CBC chain starts from the
+/// sample's IV; with a pattern it continues across the encrypted blocks and
+/// skips the clear ones.
+fn decrypt_cbcs(
+    data: &mut [u8],
+    protection: &SampleProtection,
+    encryption: &Encryption,
+    key: &[u8; crypto::KEY_LEN],
+) -> Result<(), HlsError> {
+    let ranges: Vec<(usize, usize)> = if protection.subsamples.is_empty() {
+        vec![(0, data.len())]
+    } else {
+        let mut ranges = Vec::new();
+        let mut pos = 0usize;
+        for &(clear, protected) in &protection.subsamples {
+            let start = pos
+                .checked_add(usize::from(clear))
+                .ok_or(HlsError::Malformed("invalid subsample"))?;
+            let end = usize::try_from(protected)
+                .ok()
+                .and_then(|protected| start.checked_add(protected))
+                .filter(|&end| end <= data.len())
+                .ok_or(HlsError::Malformed("subsample outside the sample"))?;
+            ranges.push((start, end));
+            pos = end;
+        }
+        ranges
+    };
+
+    let crypt = usize::from(encryption.crypt_blocks) * 16;
+    let skip = usize::from(encryption.skip_blocks) * 16;
+    for (start, end) in ranges {
+        let range = &mut data[start..end];
+        let mut iv = protection.iv;
+        let mut pos = 0usize;
+        while pos < range.len() {
+            // No pattern: every whole block, in one go.
+            let wanted = if crypt == 0 { range.len() - pos } else { crypt };
+            let whole = wanted.min(range.len() - pos) / 16 * 16;
+            if whole == 0 {
+                break;
+            }
+            match crypto::cbc_decrypt_blocks(&mut range[pos..pos + whole], key, &iv) {
+                Some(next) => iv = next,
+                None => break,
+            }
+            pos += whole + if crypt == 0 { 0 } else { skip };
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -727,17 +957,38 @@ impl Fmp4Demuxer {
         &mut self,
         init: &Fmp4Init,
         segment: &[u8],
+        key: Option<&SampleAesKey>,
         out: &mut Vec<u8>,
     ) -> Result<(), HlsError> {
         let samples = collect_samples(init, segment)?;
+        // The sample bytes to emit: decrypted copies for an encrypted track.
+        let payloads: Vec<Cow<'_, [u8]>> = match &init.encryption {
+            None => samples.iter().map(|s| Cow::Borrowed(s.data)).collect(),
+            Some(encryption) => {
+                let key = key.ok_or(HlsError::Malformed("encrypted samples without a key"))?;
+                samples
+                    .iter()
+                    .map(|sample| {
+                        let protection = sample
+                            .protection
+                            .as_ref()
+                            .ok_or(HlsError::Malformed("encrypted sample without an IV"))?;
+                        let mut data = sample.data.to_vec();
+                        decrypt_cbcs(&mut data, protection, encryption, &key.key)?;
+                        Ok(Cow::Owned(data))
+                    })
+                    .collect::<Result<_, HlsError>>()?
+            }
+        };
+
         match &init.codec {
             Codec::Aac {
                 profile,
                 frequency_index,
                 channel_config,
             } => {
-                for sample in samples {
-                    let frame_len = sample.data.len() + 7;
+                for payload in &payloads {
+                    let frame_len = payload.len() + 7;
                     if frame_len > MAX_ADTS_FRAME {
                         return Err(HlsError::Malformed("AAC frame too large"));
                     }
@@ -747,12 +998,12 @@ impl Fmp4Demuxer {
                         *channel_config,
                         frame_len,
                     ));
-                    out.extend_from_slice(sample.data);
+                    out.extend_from_slice(payload);
                 }
             }
             Codec::Mp3 => {
-                for sample in samples {
-                    out.extend_from_slice(sample.data);
+                for payload in &payloads {
+                    out.extend_from_slice(payload);
                 }
             }
             Codec::Opus { head } => {
@@ -760,11 +1011,11 @@ impl Fmp4Demuxer {
                 if !self.opus.started || self.opus.head != *head {
                     self.opus.start(head, out);
                 }
-                for sample in samples {
+                for (sample, payload) in samples.iter().zip(&payloads) {
                     let samples_48k = sample.duration.map_or(DEFAULT_OPUS_SAMPLES, |duration| {
                         u64::from(duration) * OPUS_RATE / u64::from(init.timescale)
                     });
-                    self.opus.packet(sample.data, samples_48k, out);
+                    self.opus.packet(payload, samples_48k, out);
                 }
             }
         }
@@ -774,6 +1025,7 @@ impl Fmp4Demuxer {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_fixtures::adts_payloads;
     use super::super::ts::AudioExtractor;
     use super::*;
     use crate::audio::pcm_source::FrameBackend;
@@ -889,6 +1141,7 @@ mod tests {
             timescale: 48_000,
             codec,
             defaults: TrackDefaults::default(),
+            encryption: None,
         }
     }
 
@@ -948,9 +1201,13 @@ mod tests {
         (mp4_box(b"moof", &mp4_box(b"traf", &traf)).len() + 8) as i32
     }
 
-    fn demux(init: &Fmp4Init, segment: &[u8]) -> Result<Vec<u8>, HlsError> {
+    fn demux(
+        init: &Fmp4Init,
+        segment: &[u8],
+        key: Option<&SampleAesKey>,
+    ) -> Result<Vec<u8>, HlsError> {
         let mut out = Vec::new();
-        Fmp4Demuxer::default().push(init, segment, &mut out)?;
+        Fmp4Demuxer::default().push(init, segment, key, &mut out)?;
         Ok(out)
     }
 
@@ -1092,7 +1349,7 @@ mod tests {
         let mut demuxer = Fmp4Demuxer::default();
         let mut from_fmp4 = Vec::new();
         for segment in AAC_SEGMENTS {
-            demuxer.push(&init, segment, &mut from_fmp4).unwrap();
+            demuxer.push(&init, segment, None, &mut from_fmp4).unwrap();
         }
         let mut extractor = AudioExtractor::default();
         let mut from_ts = Vec::new();
@@ -1142,7 +1399,7 @@ mod tests {
         let offset = data_offset_of(1, None, &run_for(0));
         let segment = fragment(1, None, &run_for(offset), b"abcde");
 
-        let out = demux(&init_for(Codec::Mp3), &segment).unwrap();
+        let out = demux(&init_for(Codec::Mp3), &segment, None).unwrap();
 
         assert_eq!(out, b"abcde");
     }
@@ -1156,16 +1413,19 @@ mod tests {
         };
 
         let with_tfhd = segment(Some(2), b"aabb");
-        assert_eq!(demux(&init_for(Codec::Mp3), &with_tfhd).unwrap(), b"aabb");
+        assert_eq!(
+            demux(&init_for(Codec::Mp3), &with_tfhd, None).unwrap(),
+            b"aabb"
+        );
 
         let mut init = init_for(Codec::Mp3);
         init.defaults.size = Some(2);
         let with_trex = segment(None, b"ccdd");
-        assert_eq!(demux(&init, &with_trex).unwrap(), b"ccdd");
+        assert_eq!(demux(&init, &with_trex, None).unwrap(), b"ccdd");
 
         let without = segment(None, b"eeff");
         assert_eq!(
-            demux(&init_for(Codec::Mp3), &without),
+            demux(&init_for(Codec::Mp3), &without, None),
             Err(HlsError::Malformed("fragment sample without a size"))
         );
     }
@@ -1186,7 +1446,10 @@ mod tests {
         let mut segment = build(moof_len + 8);
         segment.extend(mp4_box(b"mdat", b"AABBB"));
 
-        assert_eq!(demux(&init_for(Codec::Mp3), &segment).unwrap(), b"AABBB");
+        assert_eq!(
+            demux(&init_for(Codec::Mp3), &segment, None).unwrap(),
+            b"AABBB"
+        );
     }
 
     #[test]
@@ -1199,7 +1462,10 @@ mod tests {
         segment.extend(mp4_box(b"free", b"padding"));
         segment.extend(fragment(1, None, &run(offset), b"33"));
 
-        assert_eq!(demux(&init_for(Codec::Mp3), &segment).unwrap(), b"112233");
+        assert_eq!(
+            demux(&init_for(Codec::Mp3), &segment, None).unwrap(),
+            b"112233"
+        );
     }
 
     #[test]
@@ -1208,7 +1474,9 @@ mod tests {
         let offset = data_offset_of(2, None, &run(0));
         let segment = fragment(2, None, &run(offset), b"xx");
 
-        assert!(demux(&init_for(Codec::Mp3), &segment).unwrap().is_empty());
+        assert!(demux(&init_for(Codec::Mp3), &segment, None)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1223,7 +1491,10 @@ mod tests {
         segment.extend_from_slice(b"mdat");
         segment.extend_from_slice(&(16u64 + 4).to_be_bytes());
         segment.extend_from_slice(b"wxyz");
-        assert_eq!(demux(&init_for(Codec::Mp3), &segment).unwrap(), b"wxyz");
+        assert_eq!(
+            demux(&init_for(Codec::Mp3), &segment, None).unwrap(),
+            b"wxyz"
+        );
 
         // mdat written with size 0: it runs to the end of the segment.
         let offset = data_offset_of(1, None, &run(0));
@@ -1233,7 +1504,10 @@ mod tests {
         segment.extend_from_slice(&0u32.to_be_bytes());
         segment.extend_from_slice(b"mdat");
         segment.extend_from_slice(b"1234");
-        assert_eq!(demux(&init_for(Codec::Mp3), &segment).unwrap(), b"1234");
+        assert_eq!(
+            demux(&init_for(Codec::Mp3), &segment, None).unwrap(),
+            b"1234"
+        );
     }
 
     #[test]
@@ -1244,23 +1518,403 @@ mod tests {
         let good = fragment(1, None, &run(offset), b"12345678");
 
         // Cut off in the middle of the sample data.
-        assert!(demux(&init, &good[..good.len() - 3]).is_err());
+        assert!(demux(&init, &good[..good.len() - 3], None).is_err());
         // A box that claims to be bigger than the data.
         let mut bad = good.clone();
         bad[3] = 0xFF;
-        assert!(demux(&init, &bad).is_err());
+        assert!(demux(&init, &bad, None).is_err());
         // A data offset pointing far outside the segment.
         let outside = fragment(1, None, &run(i32::MAX), b"12345678");
-        assert!(demux(&init, &outside).is_err());
+        assert!(demux(&init, &outside, None).is_err());
         let before = fragment(1, None, &run(i32::MIN), b"12345678");
-        assert!(demux(&init, &before).is_err());
+        assert!(demux(&init, &before, None).is_err());
         // An absurd sample count.
         let mut payload = 1_000_000u32.to_be_bytes().to_vec();
         payload.extend_from_slice(&[0; 8]);
         let mut traf = tfhd(1, Some(1));
         traf.extend(full_box(b"trun", 0, 0, &payload));
         let huge = mp4_box(b"moof", &mp4_box(b"traf", &traf));
-        assert!(demux(&init, &huge).is_err());
+        assert!(demux(&init, &huge, None).is_err());
+    }
+
+    // --- cbcs (HLS SAMPLE-AES in fMP4) -------------------------------------
+
+    const CBCS_INIT: &[u8] = include_bytes!("testdata/sample_aes/cbcs/init.mp4");
+    const CBCS_SEGMENTS: [&[u8]; 5] = [
+        include_bytes!("testdata/sample_aes/cbcs/seg_1.m4s"),
+        include_bytes!("testdata/sample_aes/cbcs/seg_2.m4s"),
+        include_bytes!("testdata/sample_aes/cbcs/seg_3.m4s"),
+        include_bytes!("testdata/sample_aes/cbcs/seg_4.m4s"),
+        include_bytes!("testdata/sample_aes/cbcs/seg_5.m4s"),
+    ];
+    const CLEAR_AAC: &[u8] = include_bytes!("testdata/sample_aes/clear.aac");
+
+    fn shaka_key() -> SampleAesKey {
+        SampleAesKey {
+            key: *include_bytes!("testdata/sample_aes/key.bin"),
+            iv: [0; 16],
+        }
+    }
+
+    fn demux_all(init: &Fmp4Init, segments: &[&[u8]], key: Option<&SampleAesKey>) -> Vec<u8> {
+        let mut demuxer = Fmp4Demuxer::default();
+        let mut out = Vec::new();
+        for segment in segments {
+            demuxer.push(init, segment, key, &mut out).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn cbcs_init_from_shaka_describes_the_protection() {
+        let init = Fmp4Init::parse(CBCS_INIT).unwrap();
+
+        // The codec is the original one inside the `enca` entry.
+        assert_eq!(init.kind(), EsKind::Adts);
+        // Audio uses no pattern (every block) and one constant IV for all samples.
+        assert_eq!(
+            init.encryption,
+            Some(Encryption {
+                crypt_blocks: 0,
+                skip_blocks: 0,
+                iv_size: 0,
+                constant_iv: Some([
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89,
+                    0xAB, 0xCD, 0xEF
+                ]),
+            })
+        );
+    }
+
+    #[test]
+    fn cbcs_fmp4_from_shaka_decrypts_to_the_original_audio() {
+        let init = Fmp4Init::parse(CBCS_INIT).unwrap();
+
+        let audio = demux_all(&init, &CBCS_SEGMENTS, Some(&shaka_key()));
+
+        let expected = adts_payloads(CLEAR_AAC);
+        assert!(expected.len() > 100);
+        assert_eq!(adts_payloads(&audio), expected);
+    }
+
+    #[test]
+    fn encrypted_samples_need_a_key() {
+        let init = Fmp4Init::parse(CBCS_INIT).unwrap();
+        let mut out = Vec::new();
+
+        let error = Fmp4Demuxer::default()
+            .push(&init, CBCS_SEGMENTS[0], None, &mut out)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            HlsError::Malformed("encrypted samples without a key")
+        );
+    }
+
+    #[test]
+    fn a_wrong_key_gives_scrambled_audio_but_no_error() {
+        let init = Fmp4Init::parse(CBCS_INIT).unwrap();
+        let wrong = SampleAesKey {
+            key: [0x42; 16],
+            iv: [0; 16],
+        };
+
+        let audio = demux_all(&init, &CBCS_SEGMENTS, Some(&wrong));
+
+        assert_ne!(adts_payloads(&audio), adts_payloads(CLEAR_AAC));
+    }
+
+    #[test]
+    fn a_clear_track_ignores_a_key() {
+        let init = Fmp4Init::parse(AAC_INIT).unwrap();
+        let key = shaka_key();
+
+        let with_key = demux_all(&init, &AAC_SEGMENTS, Some(&key));
+
+        assert_eq!(with_key, demux_all(&init, &AAC_SEGMENTS, None));
+    }
+
+    // Hand-made cbcs data, encrypted by an encryptor written separately from the
+    // decryptor, to cover the variants the real fixture does not.
+
+    const KEY: [u8; 16] = [7; 16];
+
+    fn tenc(version: u8, crypt: u8, skip: u8, iv_size: u8, constant_iv: Option<&[u8]>) -> Vec<u8> {
+        let mut payload = vec![0, if version == 0 { 0 } else { (crypt << 4) | skip }];
+        payload.push(1); // default_isProtected
+        payload.push(iv_size);
+        payload.extend_from_slice(&[0xAB; 16]); // key id
+        if let Some(iv) = constant_iv {
+            payload.push(iv.len() as u8);
+            payload.extend_from_slice(iv);
+        }
+        full_box(b"tenc", version, 0, &payload)
+    }
+
+    /// An `enca` entry that wraps MP3-in-MP4, so the output is the raw samples.
+    fn encrypted_init(scheme: &[u8; 4], tenc: &[u8]) -> Vec<u8> {
+        let mut sinf = mp4_box(b"frma", b"mp4a");
+        let mut schm = scheme.to_vec();
+        schm.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        sinf.extend(full_box(b"schm", 0, 0, &schm));
+        sinf.extend(mp4_box(b"schi", tenc));
+        let mut children = esds(0x6B, &[]);
+        children.extend(mp4_box(b"sinf", &sinf));
+        init_segment(b"soun", &audio_entry(b"enca", &children), None)
+    }
+
+    /// Encrypt `data` as cbcs: the protected ranges, in whole blocks, with an
+    /// optional crypt:skip pattern; the chain restarts at each range.
+    fn cbcs_encrypt(
+        data: &[u8],
+        ranges: &[(usize, usize)],
+        iv: &[u8; 16],
+        pattern: (usize, usize),
+    ) -> Vec<u8> {
+        let mut out = data.to_vec();
+        for &(start, end) in ranges {
+            let mut chain = *iv;
+            let mut pos = start;
+            while pos < end {
+                let wanted = if pattern.0 == 0 {
+                    end - pos
+                } else {
+                    pattern.0 * 16
+                };
+                let whole = wanted.min(end - pos) / 16 * 16;
+                if whole == 0 {
+                    break;
+                }
+                chain =
+                    crypto::cbc_encrypt_blocks(&mut out[pos..pos + whole], &KEY, &chain).unwrap();
+                pos += whole + if pattern.0 == 0 { 0 } else { pattern.1 * 16 };
+            }
+        }
+        out
+    }
+
+    /// One `senc` entry: the sample's IV and its (clear, protected) subsamples.
+    type SencEntry = (Vec<u8>, Vec<(u16, u32)>);
+
+    fn senc(subsample_entries: bool, entries: &[SencEntry]) -> Vec<u8> {
+        let mut payload = (entries.len() as u32).to_be_bytes().to_vec();
+        for (iv, subsamples) in entries {
+            payload.extend_from_slice(iv);
+            if subsample_entries {
+                payload.extend_from_slice(&(subsamples.len() as u16).to_be_bytes());
+                for (clear, protected) in subsamples {
+                    payload.extend_from_slice(&clear.to_be_bytes());
+                    payload.extend_from_slice(&protected.to_be_bytes());
+                }
+            }
+        }
+        full_box(b"senc", 0, if subsample_entries { 2 } else { 0 }, &payload)
+    }
+
+    /// A fragment of one run of `sizes` bytes with an optional `senc`.
+    fn encrypted_fragment(sizes: &[u32], senc: Option<Vec<u8>>, data: &[u8]) -> Vec<u8> {
+        let samples: Vec<_> = sizes.iter().map(|&s| (None, Some(s))).collect();
+        let build = |offset: i32| {
+            let mut traf = tfhd(1, None);
+            traf.extend(trun(Some(offset), &samples));
+            if let Some(senc) = &senc {
+                traf.extend_from_slice(senc);
+            }
+            mp4_box(b"moof", &mp4_box(b"traf", &traf))
+        };
+        let moof_len = build(0).len() as i32;
+        let mut fragment = build(moof_len + 8);
+        fragment.extend(mp4_box(b"mdat", data));
+        fragment
+    }
+
+    fn key() -> SampleAesKey {
+        SampleAesKey {
+            key: KEY,
+            iv: [0; 16],
+        }
+    }
+
+    fn sample(len: usize, seed: u8) -> Vec<u8> {
+        (0..len).map(|i| seed.wrapping_add((i * 7) as u8)).collect()
+    }
+
+    #[test]
+    fn whole_sample_encryption_with_per_sample_ivs() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 16, None))).unwrap();
+        let (a, b) = (sample(100, 1), sample(37, 9));
+        let (iv_a, iv_b) = ([0x11u8; 16], [0x22u8; 16]);
+        let mut data = cbcs_encrypt(&a, &[(0, a.len())], &iv_a, (0, 0));
+        data.extend(cbcs_encrypt(&b, &[(0, b.len())], &iv_b, (0, 0)));
+        let fragment = encrypted_fragment(
+            &[100, 37],
+            Some(senc(
+                false,
+                &[(iv_a.to_vec(), vec![]), (iv_b.to_vec(), vec![])],
+            )),
+            &data,
+        );
+
+        let out = demux(&init, &fragment, Some(&key())).unwrap();
+
+        assert_eq!(out, [a.clone(), b].concat());
+        // The partial last block (100 % 16 = 4 bytes) was never encrypted.
+        assert_eq!(&data[96..100], &a[96..100]);
+    }
+
+    #[test]
+    fn eight_byte_ivs_are_zero_padded() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 8, None))).unwrap();
+        let plain = sample(64, 3);
+        let mut iv = [0u8; 16];
+        iv[..8].copy_from_slice(&[9, 8, 7, 6, 5, 4, 3, 2]);
+        let data = cbcs_encrypt(&plain, &[(0, 64)], &iv, (0, 0));
+        let fragment = encrypted_fragment(
+            &[64],
+            Some(senc(false, &[(vec![9, 8, 7, 6, 5, 4, 3, 2], vec![])])),
+            &data,
+        );
+
+        assert_eq!(demux(&init, &fragment, Some(&key())).unwrap(), plain);
+    }
+
+    #[test]
+    fn a_constant_iv_serves_every_sample_with_or_without_senc() {
+        let constant = [0x5Au8; 16];
+        let init =
+            Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 0, Some(&constant)))).unwrap();
+        let (a, b) = (sample(48, 4), sample(80, 5));
+        let mut data = cbcs_encrypt(&a, &[(0, 48)], &constant, (0, 0));
+        data.extend(cbcs_encrypt(&b, &[(0, 80)], &constant, (0, 0)));
+
+        let without_senc = encrypted_fragment(&[48, 80], None, &data);
+        assert_eq!(
+            demux(&init, &without_senc, Some(&key())).unwrap(),
+            [a.clone(), b.clone()].concat()
+        );
+
+        // A senc with no per-sample IVs (iv size 0) works the same.
+        let with_senc = encrypted_fragment(
+            &[48, 80],
+            Some(senc(false, &[(vec![], vec![]), (vec![], vec![])])),
+            &data,
+        );
+        assert_eq!(
+            demux(&init, &with_senc, Some(&key())).unwrap(),
+            [a, b].concat()
+        );
+    }
+
+    #[test]
+    fn subsamples_leave_their_clear_parts_alone() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 16, None))).unwrap();
+        // 10 clear bytes, 48 protected, 5 clear, 32 protected, 3 clear.
+        let plain = sample(10 + 48 + 5 + 32 + 3, 6);
+        let iv = [0x33u8; 16];
+        let ranges = [(10, 58), (63, 95)];
+        let data = cbcs_encrypt(&plain, &ranges, &iv, (0, 0));
+        let fragment = encrypted_fragment(
+            &[98],
+            Some(senc(true, &[(iv.to_vec(), vec![(10, 48), (5, 32)])])),
+            &data,
+        );
+
+        assert_eq!(demux(&init, &fragment, Some(&key())).unwrap(), plain);
+        // The clear parts really were not encrypted.
+        assert_eq!(&data[..10], &plain[..10]);
+        assert_eq!(&data[58..63], &plain[58..63]);
+    }
+
+    #[test]
+    fn pattern_encryption_encrypts_the_crypt_blocks_and_skips_the_rest() {
+        // 1:9, as video uses it: one block encrypted, nine left alone, repeating.
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 1, 9, 16, None))).unwrap();
+        let plain = sample(16 * 25 + 7, 2);
+        let iv = [0x44u8; 16];
+        let data = cbcs_encrypt(&plain, &[(0, plain.len())], &iv, (1, 9));
+        let fragment = encrypted_fragment(
+            &[plain.len() as u32],
+            Some(senc(false, &[(iv.to_vec(), vec![])])),
+            &data,
+        );
+
+        assert_eq!(demux(&init, &fragment, Some(&key())).unwrap(), plain);
+        // Blocks 1..=9 are in the clear in the encrypted data too.
+        assert_eq!(&data[16..160], &plain[16..160]);
+        assert_ne!(&data[..16], &plain[..16]);
+    }
+
+    #[test]
+    fn samples_shorter_than_a_block_are_not_encrypted() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 16, None))).unwrap();
+        let tiny = sample(9, 8);
+        let fragment =
+            encrypted_fragment(&[9], Some(senc(false, &[(vec![0x55; 16], vec![])])), &tiny);
+
+        assert_eq!(demux(&init, &fragment, Some(&key())).unwrap(), tiny);
+    }
+
+    #[test]
+    fn other_protection_schemes_are_named_and_not_supported() {
+        for scheme in [b"cenc", b"cens", b"cbc1"] {
+            let error =
+                Fmp4Init::parse(&encrypted_init(scheme, &tenc(1, 0, 0, 16, None))).unwrap_err();
+
+            let HlsError::UnsupportedEncryption(name) = &error else {
+                panic!("expected UnsupportedEncryption, got {error:?}");
+            };
+            assert!(
+                name.contains(std::str::from_utf8(scheme).unwrap()),
+                "{name}"
+            );
+            assert!(error.to_string().contains("not supported"));
+        }
+    }
+
+    #[test]
+    fn a_track_marked_unprotected_is_read_as_clear() {
+        let mut tenc_clear = tenc(1, 0, 0, 16, None);
+        tenc_clear[8 + 4 + 2] = 0; // default_isProtected = 0
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc_clear)).unwrap();
+        let plain = sample(40, 1);
+        let fragment = encrypted_fragment(&[40], None, &plain);
+
+        assert!(init.encryption.is_none());
+        assert_eq!(demux(&init, &fragment, None).unwrap(), plain);
+    }
+
+    #[test]
+    fn missing_or_damaged_ivs_and_subsamples_are_errors() {
+        let init = Fmp4Init::parse(&encrypted_init(b"cbcs", &tenc(1, 0, 0, 16, None))).unwrap();
+        let data = sample(32, 1);
+
+        // No senc at all, and no constant IV.
+        let none = encrypted_fragment(&[32], None, &data);
+        assert!(demux(&init, &none, Some(&key())).is_err());
+
+        // senc with fewer entries than samples.
+        let short = encrypted_fragment(
+            &[16, 16],
+            Some(senc(false, &[(vec![1; 16], vec![])])),
+            &data,
+        );
+        assert!(demux(&init, &short, Some(&key())).is_err());
+
+        // A subsample range reaching past the sample.
+        let outside = encrypted_fragment(
+            &[32],
+            Some(senc(true, &[(vec![1; 16], vec![(0, 99)])])),
+            &data,
+        );
+        assert!(demux(&init, &outside, Some(&key())).is_err());
+
+        // A truncated senc.
+        let mut truncated = senc(false, &[(vec![1; 16], vec![])]);
+        let len = truncated.len();
+        truncated.truncate(len - 5);
+        let bad = encrypted_fragment(&[32], Some(truncated), &data);
+        assert!(demux(&init, &bad, Some(&key())).is_err());
     }
 
     // --- Opus in Ogg --------------------------------------------------------
@@ -1341,15 +1995,17 @@ mod tests {
         let init = Fmp4Init::parse(OPUS_INIT).unwrap();
         let mut demuxer = Fmp4Demuxer::default();
         let mut first = Vec::new();
-        demuxer.push(&init, OPUS_SEGMENTS[0], &mut first).unwrap();
+        demuxer
+            .push(&init, OPUS_SEGMENTS[0], None, &mut first)
+            .unwrap();
         let mut same_stream = Vec::new();
         demuxer
-            .push(&init, OPUS_SEGMENTS[1], &mut same_stream)
+            .push(&init, OPUS_SEGMENTS[1], None, &mut same_stream)
             .unwrap();
         demuxer.reset();
         let mut after_reset = Vec::new();
         demuxer
-            .push(&init, OPUS_SEGMENTS[2], &mut after_reset)
+            .push(&init, OPUS_SEGMENTS[2], None, &mut after_reset)
             .unwrap();
 
         let first = pages(&first);
@@ -1371,7 +2027,7 @@ mod tests {
         let mut demuxer = Fmp4Demuxer::default();
         let mut ogg = Vec::new();
         for segment in OPUS_SEGMENTS {
-            demuxer.push(&init, segment, &mut ogg).unwrap();
+            demuxer.push(&init, segment, None, &mut ogg).unwrap();
         }
 
         let mut backend =
@@ -1408,7 +2064,7 @@ mod tests {
         #[test]
         fn demuxing_never_panics_on_arbitrary_bytes(bytes in proptest::collection::vec(any::<u8>(), 0..2048)) {
             let mut out = Vec::new();
-            let _ = Fmp4Demuxer::default().push(&init_for(Codec::Mp3), &bytes, &mut out);
+            let _ = Fmp4Demuxer::default().push(&init_for(Codec::Mp3), &bytes, None, &mut out);
         }
 
         #[test]
@@ -1425,7 +2081,7 @@ mod tests {
             }
             segment.truncate(cut % (segment.len() + 1));
             let mut out = Vec::new();
-            let _ = Fmp4Demuxer::default().push(&init, &segment, &mut out);
+            let _ = Fmp4Demuxer::default().push(&init, &segment, None, &mut out);
         }
 
         #[test]

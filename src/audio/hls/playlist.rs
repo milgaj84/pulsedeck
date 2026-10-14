@@ -12,8 +12,10 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HlsError {
-    /// Encryption other than plain AES-128 (SAMPLE-AES, DRM key formats, ...).
-    Encrypted,
+    /// Protected by DRM (FairPlay, Widevine, PlayReady): no plain key exists.
+    Drm,
+    /// An encryption method PulseDeck cannot undo (SAMPLE-AES-CTR, ...).
+    UnsupportedEncryption(String),
     /// A segment could not be decrypted (wrong key or IV, damaged data).
     Decrypt(&'static str),
     VideoOnly,
@@ -26,10 +28,13 @@ pub(crate) enum HlsError {
 impl fmt::Display for HlsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Encrypted => write!(
+            Self::Drm => write!(
                 f,
-                "HLS: SAMPLE-AES and DRM encrypted streams are not supported"
+                "HLS: DRM-protected streams (FairPlay, Widevine, PlayReady) are not supported"
             ),
+            Self::UnsupportedEncryption(method) => {
+                write!(f, "HLS: {method} encryption is not supported")
+            }
             Self::Decrypt(why) => write!(f, "HLS: could not decrypt a segment ({why})"),
             Self::VideoOnly => write!(f, "HLS: video-only streams are not supported"),
             Self::UnsupportedCodec(codec) => {
@@ -63,9 +68,19 @@ pub(crate) struct Master {
     pub renditions: Vec<Rendition>,
 }
 
-/// The AES-128 key a segment is encrypted with.
+/// How a segment is encrypted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyMethod {
+    /// The whole segment is AES-128-CBC encrypted.
+    Aes128,
+    /// Only the audio samples are encrypted (Apple's "SAMPLE-AES").
+    SampleAes,
+}
+
+/// The key a segment is encrypted with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SegmentKey {
+    pub method: KeyMethod,
     pub uri: Url,
     /// Explicit `IV` attribute; otherwise the segment's sequence number is used.
     pub iv: Option<[u8; 16]>,
@@ -97,7 +112,7 @@ pub(crate) struct Segment {
     pub range: Option<ByteRange>,
     /// A discontinuity precedes this segment.
     pub discontinuity: bool,
-    /// Set when the segment is AES-128 encrypted.
+    /// Set when the segment is encrypted.
     pub key: Option<SegmentKey>,
     /// Set for fragmented MP4: the init section the segment is read with.
     pub map: Option<Arc<MapRef>>,
@@ -257,7 +272,10 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
 
     let mut segments = Vec::new();
     let mut discontinuity = false;
-    let mut key: Option<SegmentKey> = None;
+    // Adjacent `EXT-X-KEY` tags form one group (an identity key next to DRM
+    // ones, say); a group applies to every following segment until the next.
+    let mut key_group: Vec<KeyTag> = Vec::new();
+    let mut previous_was_key = false;
     let mut map: Option<Arc<MapRef>> = None;
     let mut pending_range: Option<&str> = None;
     // Where the previous byte range ended, for a range written without an offset.
@@ -267,8 +285,12 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
         if *line == "#EXT-X-DISCONTINUITY" {
             discontinuity = true;
         } else if let Some(value) = line.strip_prefix("#EXT-X-KEY:") {
-            // A key applies to every following segment until the next key tag.
-            key = parse_key(value, base)?;
+            if !previous_was_key {
+                key_group.clear();
+            }
+            key_group.push(parse_key(value, base)?);
+            previous_was_key = true;
+            continue;
         } else if let Some(value) = line.strip_prefix("#EXT-X-MAP:") {
             // A map applies to every following segment until the next map tag.
             let attrs = parse_attributes(value);
@@ -279,7 +301,7 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
             map = Some(Arc::new(MapRef {
                 uri: resolve(base, uri)?,
                 range,
-                key: key.clone(),
+                key: effective_key(&key_group)?,
             }));
         } else if let Some(value) = line.strip_prefix("#EXT-X-BYTERANGE:") {
             pending_range = Some(value);
@@ -296,10 +318,11 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
                 uri: resolve(base, line)?,
                 range,
                 discontinuity: std::mem::take(&mut discontinuity),
-                key: key.clone(),
+                key: effective_key(&key_group)?,
                 map: map.clone(),
             });
         }
+        previous_was_key = false;
     }
 
     Ok(MediaPlaylist {
@@ -309,27 +332,66 @@ fn parse_media(lines: &[&str], base: &Url) -> Result<MediaPlaylist, HlsError> {
     })
 }
 
-/// Parse the attributes of an `#EXT-X-KEY` tag. `None` means "not encrypted".
-fn parse_key(attributes: &str, base: &Url) -> Result<Option<SegmentKey>, HlsError> {
+/// One `#EXT-X-KEY` tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KeyTag {
+    /// `METHOD=NONE`.
+    None,
+    /// A key PulseDeck can use: AES-128 or SAMPLE-AES with the plain
+    /// "identity" key format.
+    Usable(SegmentKey),
+    /// A DRM key format (FairPlay, Widevine, PlayReady, ...).
+    Drm,
+    /// A method PulseDeck cannot undo.
+    Unsupported(String),
+}
+
+fn parse_key(attributes: &str, base: &Url) -> Result<KeyTag, HlsError> {
     let attrs = parse_attributes(attributes);
-    match attr(&attrs, "METHOD") {
-        Some("NONE") => Ok(None),
-        Some("AES-128") => {
-            // Only the plain "identity" key format; FairPlay and friends are DRM.
-            if attr(&attrs, "KEYFORMAT").is_some_and(|format| format != "identity") {
-                return Err(HlsError::Encrypted);
-            }
-            let uri =
-                attr(&attrs, "URI").ok_or(HlsError::Malformed("AES-128 key without a URI"))?;
-            let iv = attr(&attrs, "IV").map(parse_iv).transpose()?;
-            Ok(Some(SegmentKey {
-                uri: resolve(base, uri)?,
-                iv,
-            }))
-        }
-        Some(_) => Err(HlsError::Encrypted),
-        None => Err(HlsError::Malformed("key without a METHOD")),
+    let method = attr(&attrs, "METHOD").ok_or(HlsError::Malformed("key without a METHOD"))?;
+    if method == "NONE" {
+        return Ok(KeyTag::None);
     }
+    // Only the plain "identity" key format; anything else is DRM.
+    if attr(&attrs, "KEYFORMAT").is_some_and(|format| format != "identity") {
+        return Ok(KeyTag::Drm);
+    }
+    let method = match method {
+        "AES-128" => KeyMethod::Aes128,
+        "SAMPLE-AES" => KeyMethod::SampleAes,
+        other => return Ok(KeyTag::Unsupported(other.to_string())),
+    };
+    let uri = attr(&attrs, "URI").ok_or(HlsError::Malformed(match method {
+        KeyMethod::Aes128 => "AES-128 key without a URI",
+        KeyMethod::SampleAes => "SAMPLE-AES key without a URI",
+    }))?;
+    let iv = attr(&attrs, "IV").map(parse_iv).transpose()?;
+    Ok(KeyTag::Usable(SegmentKey {
+        method,
+        uri: resolve(base, uri)?,
+        iv,
+    }))
+}
+
+/// The key a group of adjacent key tags asks segments to be decrypted with.
+/// A usable key wins over DRM alternatives listed beside it.
+fn effective_key(group: &[KeyTag]) -> Result<Option<SegmentKey>, HlsError> {
+    if let Some(key) = group.iter().find_map(|tag| match tag {
+        KeyTag::Usable(key) => Some(key.clone()),
+        _ => None,
+    }) {
+        return Ok(Some(key));
+    }
+    if group.contains(&KeyTag::Drm) {
+        return Err(HlsError::Drm);
+    }
+    if let Some(KeyTag::Unsupported(method)) = group
+        .iter()
+        .find(|tag| matches!(tag, KeyTag::Unsupported(_)))
+    {
+        return Err(HlsError::UnsupportedEncryption(method.clone()));
+    }
+    Ok(None)
 }
 
 /// `IV=0x...`: up to 32 hex digits, left-padded with zeros to 128 bits.
@@ -565,24 +627,98 @@ mod tests {
         .is_err());
     }
 
-    #[test]
-    fn sample_aes_and_drm_key_formats_are_rejected() {
-        let with_key = |attrs: &str| {
-            format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:{attrs}\n#EXTINF:4,\na.ts\n")
-        };
+    fn with_key(attrs: &str) -> String {
+        format!("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-KEY:{attrs}\n#EXTINF:4,\na.ts\n")
+    }
 
+    #[test]
+    fn sample_aes_with_the_identity_key_format_is_accepted() {
         for attrs in [
-            "METHOD=SAMPLE-AES,URI=\"k\"",
-            "METHOD=SAMPLE-AES-CTR,URI=\"k\"",
-            "METHOD=AES-128,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"",
-            "METHOD=SOMETHING-NEW,URI=\"k\"",
+            "METHOD=SAMPLE-AES,URI=\"k.bin\"",
+            "METHOD=SAMPLE-AES,URI=\"k.bin\",KEYFORMAT=\"identity\",IV=0x0123",
         ] {
+            let segment = media(&with_key(attrs)).segments.remove(0);
+
+            let key = segment.key.expect("a key");
+            assert_eq!(key.method, KeyMethod::SampleAes, "{attrs}");
+            assert_eq!(key.uri.as_str(), "https://radio.example/live/k.bin");
+        }
+        let aes = media(&with_key("METHOD=AES-128,URI=\"k.bin\""))
+            .segments
+            .remove(0);
+        assert_eq!(aes.key.map(|key| key.method), Some(KeyMethod::Aes128));
+    }
+
+    #[test]
+    fn drm_key_formats_are_rejected_as_drm() {
+        for attrs in [
+            "METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"",
+            "METHOD=AES-128,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"",
+            "METHOD=SAMPLE-AES-CTR,URI=\"data:text/plain;base64,AAAA\",KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"",
+        ] {
+            assert_eq!(parse(&with_key(attrs), &base()), Err(HlsError::Drm), "{attrs}");
+        }
+    }
+
+    #[test]
+    fn unknown_encryption_methods_are_named() {
+        for method in ["SAMPLE-AES-CTR", "SOMETHING-NEW"] {
+            let attrs = format!("METHOD={method},URI=\"k\"");
             assert_eq!(
-                parse(&with_key(attrs), &base()),
-                Err(HlsError::Encrypted),
-                "{attrs}"
+                parse(&with_key(&attrs), &base()),
+                Err(HlsError::UnsupportedEncryption(method.to_string())),
+                "{method}"
             );
         }
+    }
+
+    #[test]
+    fn a_usable_key_wins_over_drm_alternatives_listed_beside_it() {
+        // Multi-DRM playlists list the plain key next to FairPlay and Widevine.
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k.bin\",KEYFORMAT=\"identity\"\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"x\",KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"\n\
+            #EXTINF:4,\na.ts\n";
+
+        let key = media(text).segments[0]
+            .key
+            .clone()
+            .expect("the identity key");
+
+        assert_eq!(key.uri.as_str(), "https://radio.example/live/k.bin");
+        assert_eq!(key.method, KeyMethod::SampleAes);
+    }
+
+    #[test]
+    fn a_new_group_of_key_tags_replaces_the_old_one() {
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n\
+            #EXT-X-KEY:METHOD=AES-128,URI=\"one.key\"\n#EXTINF:4,\na.ts\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"two.key\"\n#EXTINF:4,\nb.ts\n";
+        let segments = media(text).segments;
+
+        let methods: Vec<_> = segments
+            .iter()
+            .map(|s| s.key.as_ref().map(|k| k.method))
+            .collect();
+        assert_eq!(
+            methods,
+            vec![Some(KeyMethod::Aes128), Some(KeyMethod::SampleAes)]
+        );
+    }
+
+    #[test]
+    fn drm_only_applies_to_the_segments_it_covers() {
+        // A clear stretch before the protected one still plays up to that point.
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n\
+            #EXTINF:4,\nb.ts\n";
+
+        assert_eq!(parse(text, &base()), Err(HlsError::Drm));
+        // With no segment after the tag, nothing is protected yet.
+        let tag_only = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n\
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://k\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n";
+        assert_eq!(media(tag_only).segments.len(), 1);
     }
 
     #[test]
@@ -768,7 +904,8 @@ mod tests {
     #[test]
     fn error_text_says_not_supported_where_retrying_is_pointless() {
         for error in [
-            HlsError::Encrypted,
+            HlsError::Drm,
+            HlsError::UnsupportedEncryption("SAMPLE-AES-CTR".to_string()),
             HlsError::VideoOnly,
             HlsError::NoAudioVariant,
             HlsError::UnsupportedCodec("ac-3".to_string()),

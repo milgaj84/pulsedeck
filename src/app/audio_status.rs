@@ -13,7 +13,7 @@ pub(super) fn last_played_station_position(
     find_station_index_by_url(stations, last_played_url)
 }
 
-/// Failures that retrying can never fix: an HLS stream that is encrypted or
+/// Failures that retrying can never fix: an HLS stream that is DRM-protected or
 /// video-only, audio in a codec PulseDeck cannot decode (Opus with more than
 /// two channels, an unknown fMP4 codec), or a container that crashes the decoder.
 /// Only errors that PulseDeck itself words as "not supported" qualify, so
