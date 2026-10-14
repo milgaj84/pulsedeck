@@ -7,6 +7,8 @@ All notable changes to the PulseDeck project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Chained Ogg streams keep playing across track changes.** Icecast Ogg streams that start a new logical stream for each track (sometimes with a different sample rate) used to stop at the first track change. PulseDeck now drives Symphonia directly instead of through rodio's decoder, follows the change and switches format at the exact frame boundary.
+- **Streamed fragmented MP4 no longer crashes the decoder.** rodio treated the live stream as seekable and asserted "unreachable"; the stream is now read in order and plays.
 - **AltGr characters can be typed in search (Windows).** Windows reports AltGr as Ctrl+Alt, and search dropped any character typed with Ctrl or Alt, so `@`, `{`, `ł`, `đ` and similar could not be typed on German, Polish, Serbian and other layouts. Ctrl+Alt together now types the character; Ctrl or Alt alone still act as shortcuts (Alt+`-`/`+`/`m` for volume and mute).
 
 ### Dependencies

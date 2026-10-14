@@ -2,7 +2,7 @@
 ///
 /// This module answers one question: given a station codec string, what
 /// should playback do? The active decode path uses Symphonia probe-based
-/// decoding (via rodio's `Decoder::new`), which supports MP3, AAC, OGG/Vorbis,
+/// decoding (driven directly, see `audio::symphonia_backend`), which supports MP3, AAC, OGG/Vorbis,
 /// FLAC, and WAV. Opus has no Symphonia decoder and is `Unsupported`. HLS playlists are played by the HLS fetcher
 /// (`audio::hls`) for audio-only AAC/MP3 streams, including AES-128 encrypted
 /// ones; SAMPLE-AES/DRM, fMP4 and

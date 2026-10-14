@@ -1,5 +1,6 @@
 mod capability;
 mod codec;
+mod codecs;
 pub(super) mod decode;
 pub(super) mod engine_loop_v2;
 mod hls;
@@ -7,8 +8,10 @@ mod metadata;
 mod output;
 mod output_manager;
 mod panic_guard;
+mod pcm_source;
 pub(super) mod stream_source;
 mod supervisor;
+mod symphonia_backend;
 #[cfg(test)]
 mod test_http;
 pub(super) mod types;

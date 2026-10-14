@@ -1,13 +1,15 @@
 use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
 use super::panic_guard;
+use super::pcm_source::PcmSource;
 use super::stream_source::StreamSource;
+use super::symphonia_backend::SymphoniaBackend;
 use super::types::{
     ConnectRequest, DecodedSource, EndReason, EngineError, EngineEvent, Generation, StreamFormat,
 };
 use super::visualizer::VisualizerSource;
 
-use rodio::{Decoder, Source};
+use rodio::Source;
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Cursor, Read};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
@@ -21,8 +23,8 @@ const MAX_ICY_METAINT: usize = 16 * 1024 * 1024;
 /// Builds a decoded, visualizer-tapped rodio source from a live byte stream.
 ///
 /// Generic Symphonia probing is the safe default because public radio headers
-/// and URL extensions are often inaccurate. The MP3 fast path is used only when
-/// MP3 frame or ID3 magic bytes were observed in the prebuffer.
+/// and URL extensions are often inaccurate. The MP3 hint is used only when MP3
+/// frame or ID3 magic bytes were observed in the prebuffer.
 pub(super) struct DecodePipeline;
 
 impl DecodePipeline {
@@ -40,21 +42,16 @@ impl DecodePipeline {
         }
 
         let wrapped = ReadWrapper::new(reader);
-        let buf_reader = BufReader::new(wrapped);
         let verified_mp3 = detection.verified_mp3();
+        let extension = verified_mp3.then_some("mp3");
 
         // Third-party decoders can panic on input they cannot handle, so the
         // probe runs inside a guard that turns a panic into an error.
-        let probed = panic_guard::run_quiet(|| {
-            if verified_mp3 {
-                Decoder::new_mp3(buf_reader)
-            } else {
-                Decoder::new(buf_reader)
-            }
-            .map_err(|error| error.to_string())
+        let opened = panic_guard::run_quiet(|| {
+            SymphoniaBackend::open(wrapped, extension).and_then(PcmSource::new)
         });
-        let decoder = match probed {
-            Ok(Ok(decoder)) => decoder,
+        let pcm = match opened {
+            Ok(Ok(pcm)) => pcm,
             Ok(Err(message)) if verified_mp3 => {
                 return Err(EngineError::Decode(format!(
                     "verified MP3 stream could not be decoded: {message}"
@@ -71,10 +68,10 @@ impl DecodePipeline {
 
         let format = StreamFormat {
             codec: detection.hint.label().to_string(),
-            sample_rate: decoder.sample_rate(),
-            channels: decoder.channels(),
+            sample_rate: pcm.sample_rate(),
+            channels: pcm.channels(),
         };
-        let visualizer = VisualizerSource::new(decoder.convert_samples::<f32>(), sample_buffer);
+        let visualizer = VisualizerSource::new(pcm, sample_buffer);
         Ok((Box::new(visualizer), format))
     }
 }
@@ -86,7 +83,7 @@ pub(super) fn decoder_crashed() -> EngineError {
     )
 }
 
-/// Adapts a live reader to rodio's `Read + Seek + Send + Sync` requirement.
+/// Adapts a live reader to Symphonia's `MediaSource` (`Read + Seek + Send + Sync`).
 struct ReadWrapper<R: Read> {
     inner: R,
     pos: u64,
@@ -122,6 +119,18 @@ impl<R: Read> io::Seek for ReadWrapper<R> {
 // SAFETY: ReadWrapper exposes mutation only through `&mut self`; it contains no
 // interior-mutability primitives and is never read concurrently by PulseDeck.
 unsafe impl<R: Read + Send> Sync for ReadWrapper<R> {}
+
+impl<R: Read + Send> symphonia::core::io::MediaSource for ReadWrapper<R> {
+    /// A live stream cannot seek. Saying so lets demuxers read it in order
+    /// (a fragmented MP4 needs this) instead of trying to seek and failing.
+    fn is_seekable(&self) -> bool {
+        false
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
 
 fn guard_active(generation: Generation, active: &Arc<AtomicU64>) -> bool {
     active.load(SeqCst) == generation
@@ -904,12 +913,13 @@ mod tests {
         }
 
         #[test]
-        fn a_fragmented_mp4_stream_is_an_error_not_a_panic() {
-            // rodio asserts "unreachable" on this input; the guard must turn it
-            // into an ordinary error and leave the panic hook active again.
-            let result = build(FRAGMENTED_MP4);
+        fn a_fragmented_mp4_stream_decodes_without_seeking() {
+            // rodio reported this reader as seekable and asserted "unreachable".
+            // The stream is now read in order, like a live one.
+            let (_format, samples) = first_samples(FRAGMENTED_MP4, 4000);
 
-            assert!(matches!(result, Err(EngineError::Decode(_))));
+            assert_eq!(samples.len(), 4000);
+            assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
             assert!(!crate::audio::quiet_panics_on_this_thread());
         }
 
@@ -966,18 +976,17 @@ mod tests {
         }
 
         #[test]
-        fn a_fragmented_mp4_station_fails_without_taking_down_the_worker() {
+        fn a_fragmented_mp4_station_connects_through_the_worker() {
             let server = serve("audio/mp4", FRAGMENTED_MP4);
 
             let events = run_worker_collecting(server.url("/stream"));
 
-            assert!(matches!(
-                events.last(),
-                Some(EngineEvent::Failed {
-                    error: EngineError::Decode(_),
-                    ..
-                })
-            ));
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, EngineEvent::Connected { .. })),
+                "expected a connection"
+            );
         }
     }
 }
