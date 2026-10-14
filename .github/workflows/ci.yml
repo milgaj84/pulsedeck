@@ -41,6 +41,7 @@ jobs:
         run: |
           rustc --version
           cargo --version
+          cmake --version
 
       - name: Format check
         run: cargo fmt --all -- --check

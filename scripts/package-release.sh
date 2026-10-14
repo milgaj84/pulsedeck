@@ -33,7 +33,7 @@ trap 'rm -rf "$stage"' EXIT
 
 mkdir "$stage/$name"
 cp "$binary" "$stage/$name/"
-cp "$root/LICENSE" "$root/README.md" "$stage/$name/"
+cp "$root/LICENSE" "$root/THIRD-PARTY-NOTICES" "$root/README.md" "$stage/$name/"
 
 case "$target" in
   *windows*)

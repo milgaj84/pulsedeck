@@ -103,17 +103,21 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 
 **Prebuilt binaries:** download the archive for your platform from the [latest release](https://github.com/milgaj84/pulsedeck/releases/latest) (Linux x86_64, macOS Intel and Apple Silicon, Windows x86_64), unpack it and run `pulsedeck`. Each archive has a `.sha256` file to verify the download. On Linux the ALSA runtime library (`libasound2`) must be installed.
 
-**From source — you need:** [Rust & Cargo](https://rustup.rs/) (1.89+)
+**From source — you need:** [Rust & Cargo](https://rustup.rs/) (1.89+), plus [CMake](https://cmake.org/) (3.16+) and a C compiler, because the Opus decoder (libopus) is compiled in.
 
 ```bash
-cargo install pulsedeck
+cargo install --locked pulsedeck
 ```
 
 > **Linux users** — install ALSA headers first:
 > ```bash
 > sudo apt-get install libasound2-dev   # Debian/Ubuntu
 > sudo dnf install alsa-lib-devel       # Fedora
+> sudo apt-get install build-essential cmake   # Debian/Ubuntu: C compiler and CMake
+> sudo dnf install gcc gcc-c++ cmake           # Fedora
 > ```
+>
+> **macOS** — `xcode-select --install` and `brew install cmake`. **Windows** — the Visual Studio Build Tools (C++ workload) and CMake (`winget install Kitware.CMake`).
 
 Or build from source:
 ```bash

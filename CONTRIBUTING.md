@@ -5,8 +5,8 @@ Thanks for your interest in helping make PulseDeck better! This document explain
 ## Getting started
 
 1. **Fork** and clone the repo.
-2. Install the [Rust toolchain](https://rustup.rs/) (1.75+).
-3. On Linux, install ALSA headers (see the README).
+2. Install the [Rust toolchain](https://rustup.rs/) (1.89+).
+3. Install CMake and a C compiler (libopus is built from source), and on Linux the ALSA headers (see the README).
 4. Build and run:
    ```bash
    cargo run
