@@ -15,11 +15,25 @@ pub fn serialize_toml(config: &AppConfig, preserved: &toml::Value) -> String {
     toml::to_string_pretty(&table).unwrap_or_default()
 }
 
-fn set_audio_section(table: &mut toml::map::Map<String, toml::Value>, audio: &AudioConfig) {
+/// The named section as a table. A non-table value there (e.g. `ui = "x"`) is
+/// replaced by an empty table instead of panicking.
+fn section_table<'a>(
+    table: &'a mut toml::map::Map<String, toml::Value>,
+    name: &str,
+) -> &'a mut toml::map::Map<String, toml::Value> {
     let section = table
-        .entry("audio")
+        .entry(name)
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    let sec = section.as_table_mut().unwrap();
+    if !section.is_table() {
+        *section = toml::Value::Table(toml::map::Map::new());
+    }
+    section
+        .as_table_mut()
+        .expect("section was just made a table")
+}
+
+fn set_audio_section(table: &mut toml::map::Map<String, toml::Value>, audio: &AudioConfig) {
+    let sec = section_table(table, "audio");
     match &audio.output_device {
         Some(device) => {
             sec.insert("output_device".into(), toml::Value::String(device.clone()));
@@ -35,10 +49,7 @@ fn set_audio_section(table: &mut toml::map::Map<String, toml::Value>, audio: &Au
 }
 
 fn set_ui_section(table: &mut toml::map::Map<String, toml::Value>, ui: &UiConfig) {
-    let section = table
-        .entry("ui")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    let sec = section.as_table_mut().unwrap();
+    let sec = section_table(table, "ui");
     sec.insert("theme".into(), toml::Value::String(ui.theme.clone()));
     sec.insert(
         "notifications_enabled".into(),
@@ -58,10 +69,7 @@ fn set_playback_section(
     table: &mut toml::map::Map<String, toml::Value>,
     playback: &PlaybackConfig,
 ) {
-    let section = table
-        .entry("playback")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    let sec = section.as_table_mut().unwrap();
+    let sec = section_table(table, "playback");
     sec.insert(
         "autoplay_last".into(),
         toml::Value::Boolean(playback.autoplay_last),
@@ -98,10 +106,7 @@ fn set_keybindings_section(
     table: &mut toml::map::Map<String, toml::Value>,
     kb: &KeybindingsConfig,
 ) {
-    let section = table
-        .entry("keybindings")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    let sec = section.as_table_mut().unwrap();
+    let sec = section_table(table, "keybindings");
     match &kb.path {
         Some(path) => {
             sec.insert("path".into(), toml::Value::String(path.clone()));
@@ -116,10 +121,7 @@ fn set_discover_section(
     table: &mut toml::map::Map<String, toml::Value>,
     discover: &DiscoverConfig,
 ) {
-    let section = table
-        .entry("discover")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-    let sec = section.as_table_mut().unwrap();
+    let sec = section_table(table, "discover");
     sec.insert(
         "genre_weight".into(),
         toml::Value::Integer(discover.genre_weight as i64),
@@ -521,5 +523,19 @@ stream_metadata_enabled = true
 
         let result = parse_toml(&output).unwrap();
         assert_eq!(result.config.ui.sort_mode, "alphabetical");
+    }
+
+    #[test]
+    fn test_serialize_toml_replaces_non_table_sections_instead_of_panicking() {
+        let preserved: toml::Value = toml::from_str(
+            "audio = 1\nui = \"catppuccin\"\nplayback = []\nkeybindings = true\ndiscover = 2.5\n",
+        )
+        .unwrap();
+        let config = AppConfig::default();
+
+        let output = serialize_toml(&config, &preserved);
+        let result = parse_toml(&output).unwrap();
+
+        assert_eq!(result.config, config);
     }
 }

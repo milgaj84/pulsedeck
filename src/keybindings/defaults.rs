@@ -18,7 +18,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 /// Normal mode defaults extracted from `map_normal` in event.rs.
 pub fn normal_mode_defaults() -> Vec<KeyBinding> {
     let mode = InputMode::Normal;
-    vec![
+    let mut bindings = vec![
         // Quit
         bind(KeySpec::Char('q'), vec![], Action::Quit, mode.clone()),
         bind(
@@ -250,7 +250,24 @@ pub fn normal_mode_defaults() -> Vec<KeyBinding> {
             Action::CycleSortMode,
             mode.clone(),
         ),
-    ]
+    ];
+    // Station preset slots: Alt+1-5 plays, Ctrl+1-5 assigns.
+    for n in 1..=5u8 {
+        let key = KeySpec::Char(char::from(b'0' + n));
+        bindings.push(bind(
+            key.clone(),
+            vec![Modifier::Alt],
+            Action::PlaySlot(n),
+            mode.clone(),
+        ));
+        bindings.push(bind(
+            key,
+            vec![Modifier::Ctrl],
+            Action::AssignSlot(n),
+            mode.clone(),
+        ));
+    }
+    bindings
 }
 
 /// Search mode defaults extracted from `map_search` in event.rs.
@@ -563,18 +580,6 @@ pub fn library_filter_defaults() -> Vec<KeyBinding> {
         ),
         bind(
             KeySpec::Named(NamedKey::Down),
-            vec![],
-            Action::NextStation,
-            mode.clone(),
-        ),
-        bind(
-            KeySpec::Char('k'),
-            vec![],
-            Action::PrevStation,
-            mode.clone(),
-        ),
-        bind(
-            KeySpec::Char('j'),
             vec![],
             Action::NextStation,
             mode.clone(),

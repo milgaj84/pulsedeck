@@ -138,6 +138,7 @@ PulseDeck is keyboard-driven. Press `h` anytime for the full reference.
 | `j`/`k` or `↑`/`↓` | Navigate |
 | `+`/`-` | Volume |
 | `m` | Mute |
+| `S` | Cycle library sort mode |
 | `b` | Cycle layout |
 | `v` | Cycle visualizer |
 | `q` | Quit |

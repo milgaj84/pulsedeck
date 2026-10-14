@@ -228,7 +228,10 @@ fn footer_line(app: &UiModel<'_>) -> Line<'static> {
         ),
         InputMode::Normal => normal_mode_footer(app),
         InputMode::SleepTimer => normal_mode_footer(app),
-        InputMode::LibraryFilter => normal_mode_footer(app),
+        InputMode::LibraryFilter => hint_line(
+            &[("↑↓", "Move"), ("Enter", "Play"), ("Esc", "Back")],
+            Some("filtering library"),
+        ),
     }
 }
 
@@ -275,7 +278,7 @@ fn normal_mode_footer(app: &UiModel<'_>) -> Line<'static> {
         | PlaybackState::Connecting
         | PlaybackState::FadingOut { .. } => hint_line(
             &[
-                ("Space", "Pause/Stop"),
+                ("Space", "Pause"),
                 ("s", "Stop"),
                 ("+/-", "Volume"),
                 ("v", "Visualizer"),
@@ -444,5 +447,25 @@ mod tests {
         assert!(text.contains("Tab"), "{text}");
         assert!(text.contains("Audition"), "{text}");
         assert!(!text.contains("Space"), "{text}");
+    }
+
+    #[test]
+    fn library_filter_footer_shows_filter_keys_not_normal_mode_keys() {
+        let mut app = App::new(Library::in_memory(vec![]));
+        app.ui.input_mode = crate::app::InputMode::LibraryFilter;
+        let model = UiModel::from(&app);
+
+        let text: String = footer_line(&model)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(text.contains("Move"), "{text}");
+        assert!(text.contains("Esc"), "{text}");
+        for normal_only in ["Space", "Visualizer", "Details", "Stop"] {
+            assert!(!text.contains(normal_only), "{text}");
+        }
     }
 }

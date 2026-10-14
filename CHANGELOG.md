@@ -4,6 +4,17 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Preset slot keys work.** Alt+1–5 (play slot) and Ctrl+1–5 (assign the playing station to a slot) were documented but had no default binding, so they did nothing.
+- **Shifted keys work.** Terminals report Shift for uppercase and shifted characters, which stopped `G` (finish a number jump) and `S` (cycle sort mode) from matching, and on Windows also `?`, `:`, `*` and `+`. Bindings for a character now match with or without Shift; a custom binding that names `Shift` explicitly still works. `S` is now listed in the help overlay and the README.
+- **`j` and `k` can be typed in the library filter.** They were bound to move the selection, so filtering for `jazz` searched for `azz`. Use ↑/↓ to move while filtering.
+- **Library-filter footer.** While filtering, the footer no longer advertises Normal-mode keys that now type into the filter; it shows ↑↓ Move, Enter Play, Esc Back. The Space hint now says "Pause" (it never stopped playback).
+- **No panic when saving a config with a malformed section.** If `pulsedeck.toml` had a non-table value for `audio`, `ui`, `playback`, `keybindings` or `discover` (for example `ui = "x"`), the app started but panicked on the next settings or volume save. The bad value is now replaced by a proper section.
+
+---
+
 ## [1.2.1] - 2026-10-14
 
 ### Fixed

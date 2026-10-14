@@ -113,7 +113,19 @@ fn resolve_from_registry(
 ) -> Option<Action> {
     let key_spec = key_code_to_spec(key.code)?;
     let modifiers = key_modifiers_to_vec(key.modifiers);
-    registry.resolve(&key_spec, &modifiers, mode)
+    if let Some(action) = registry.resolve(&key_spec, &modifiers, mode) {
+        return Some(action);
+    }
+    // Terminals report SHIFT for shifted characters ('G', '?', ':'), but the char
+    // already carries the shift, so bindings are written without it.
+    if matches!(key_spec, KeySpec::Char(_)) && modifiers.contains(&Modifier::Shift) {
+        let unshifted: Vec<Modifier> = modifiers
+            .into_iter()
+            .filter(|m| *m != Modifier::Shift)
+            .collect();
+        return registry.resolve(&key_spec, &unshifted, mode);
+    }
+    None
 }
 
 /// Convert crossterm KeyCode to keybinding KeySpec.
@@ -383,9 +395,7 @@ fn map_library_filter(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Up) => Some(Action::PrevStation),
         (_, KeyCode::Down) => Some(Action::NextStation),
 
-        // Printable characters: j/k also navigate, all others are filter input.
-        (_, KeyCode::Char('k')) => Some(Action::PrevStation),
-        (_, KeyCode::Char('j')) => Some(Action::NextStation),
+        // Printable characters (including j/k) are filter input.
         (_, KeyCode::Char(c)) => Some(Action::LibraryFilterInput(c)),
 
         _ => None,
@@ -1014,26 +1024,17 @@ mod tests {
     }
 
     #[test]
-    fn library_filter_mode_j_navigates_next() {
-        assert_eq!(
-            map_key(
-                key(KeyCode::Char('j')),
-                &InputMode::LibraryFilter,
-                &NORMAL_DISPLAY
-            ),
-            Some(Action::NextStation)
-        );
-    }
-    #[test]
-    fn library_filter_mode_k_navigates_prev() {
-        assert_eq!(
-            map_key(
-                key(KeyCode::Char('k')),
-                &InputMode::LibraryFilter,
-                &NORMAL_DISPLAY
-            ),
-            Some(Action::PrevStation)
-        );
+    fn library_filter_mode_j_and_k_are_filter_input() {
+        for c in ['j', 'k'] {
+            assert_eq!(
+                map_key(
+                    key(KeyCode::Char(c)),
+                    &InputMode::LibraryFilter,
+                    &NORMAL_DISPLAY
+                ),
+                Some(Action::LibraryFilterInput(c))
+            );
+        }
     }
     #[test]
     fn library_filter_mode_up_navigates_prev() {
@@ -1405,6 +1406,104 @@ mod registry_integration_tests {
             .collect();
 
         assert_eq!(typed, "radio paradise");
+    }
+
+    /// Resolve through the real registry path, like a key press in the running app.
+    fn press(code: KeyCode, mods: KeyModifiers, mode: &InputMode) -> Option<Action> {
+        map_key_with_registry(
+            KeyEvent::new(code, mods),
+            mode,
+            &DisplayMode::Normal,
+            &KeybindingRegistry::defaults(),
+        )
+    }
+
+    #[test]
+    fn a_library_filter_query_with_j_and_k_can_be_typed_through_the_default_registry() {
+        let typed: String = "jukebox rock"
+            .chars()
+            .filter_map(|c| {
+                match press(
+                    KeyCode::Char(c),
+                    KeyModifiers::NONE,
+                    &InputMode::LibraryFilter,
+                ) {
+                    Some(Action::LibraryFilterInput(c)) => Some(c),
+                    _ => None,
+                }
+            })
+            .collect();
+
+        assert_eq!(typed, "jukebox rock");
+    }
+
+    #[test]
+    fn preset_slot_keys_work_through_the_default_registry() {
+        for n in 1..=5u8 {
+            let c = char::from(b'0' + n);
+            assert_eq!(
+                press(KeyCode::Char(c), KeyModifiers::ALT, &InputMode::Normal),
+                Some(Action::PlaySlot(n))
+            );
+            assert_eq!(
+                press(KeyCode::Char(c), KeyModifiers::CONTROL, &InputMode::Normal),
+                Some(Action::AssignSlot(n))
+            );
+        }
+        // Plain digits still build a number jump.
+        assert_eq!(
+            press(KeyCode::Char('1'), KeyModifiers::NONE, &InputMode::Normal),
+            Some(Action::NumberJumpDigit('1'))
+        );
+    }
+
+    #[test]
+    fn shifted_characters_match_when_the_terminal_reports_shift() {
+        // crossterm reports SHIFT for uppercase letters (and for '?' etc. on Windows).
+        let shift = KeyModifiers::SHIFT;
+        assert_eq!(
+            press(KeyCode::Char('G'), shift, &InputMode::Normal),
+            Some(Action::NumberJumpConfirm)
+        );
+        assert_eq!(
+            press(KeyCode::Char('S'), shift, &InputMode::Normal),
+            Some(Action::CycleSortMode)
+        );
+        assert_eq!(
+            press(KeyCode::Char('?'), shift, &InputMode::Normal),
+            Some(Action::ToggleHelp)
+        );
+        assert_eq!(
+            press(KeyCode::Char(':'), shift, &InputMode::Normal),
+            Some(Action::OpenCommandPalette)
+        );
+        // Without SHIFT (terminals that omit it) they still work.
+        assert_eq!(
+            press(KeyCode::Char('G'), KeyModifiers::NONE, &InputMode::Normal),
+            Some(Action::NumberJumpConfirm)
+        );
+    }
+
+    #[test]
+    fn shift_is_kept_for_bindings_that_ask_for_it() {
+        let mut registry = KeybindingRegistry::defaults();
+        registry.customs.push(binding(
+            KeySpec::Char('x'),
+            vec![Modifier::Shift],
+            Action::Stop,
+            InputMode::Normal,
+        ));
+        let resolve = |mods| {
+            map_key_with_registry(
+                KeyEvent::new(KeyCode::Char('x'), mods),
+                &InputMode::Normal,
+                &DisplayMode::Normal,
+                &registry,
+            )
+        };
+
+        assert_eq!(resolve(KeyModifiers::SHIFT), Some(Action::Stop));
+        assert_ne!(resolve(KeyModifiers::NONE), Some(Action::Stop));
     }
 
     #[test]

@@ -144,6 +144,7 @@ fn library_rows() -> Vec<Row<'static>> {
         shortcut("Up/Down · j/k", "Move selection"),
         shortcut("Tab / Shift+Tab", "Change genre category"),
         shortcut("Ctrl+l", "Library filter (fuzzy search saved stations)"),
+        shortcut("S", "Cycle sort mode"),
         shortcut("*", "Toggle favorite (★ pin to top)"),
         shortcut("{n}G / {n}Enter", "Jump to row number (vim-style)"),
         shortcut("f", "Remove selected station"),
