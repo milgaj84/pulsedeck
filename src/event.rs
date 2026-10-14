@@ -350,8 +350,11 @@ fn map_search(key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// Ctrl or Alt alone marks a shortcut, not text. Ctrl+Alt together is how Windows
+/// reports AltGr, which layouts use to type characters such as `@`, `{` and `đ`.
 fn has_search_escape_modifier(modifiers: KeyModifiers) -> bool {
-    modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    let ctrl_alt = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    modifiers.intersects(ctrl_alt) && !modifiers.contains(ctrl_alt)
 }
 
 #[cfg(test)]
@@ -1481,6 +1484,34 @@ mod registry_integration_tests {
         assert_eq!(
             press(KeyCode::Char('G'), KeyModifiers::NONE, &InputMode::Normal),
             Some(Action::NumberJumpConfirm)
+        );
+    }
+
+    #[test]
+    fn altgr_characters_can_be_typed_in_search() {
+        // Windows reports AltGr as Ctrl+Alt.
+        let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        for c in ['@', '{', 'ł', 'đ'] {
+            assert_eq!(
+                press(KeyCode::Char(c), altgr, &InputMode::Search),
+                Some(Action::SearchInput(c))
+            );
+        }
+    }
+
+    #[test]
+    fn ctrl_or_alt_alone_still_do_not_type_in_search() {
+        for mods in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
+            assert_eq!(press(KeyCode::Char('x'), mods, &InputMode::Search), None);
+            assert_ne!(
+                press(KeyCode::Char('m'), mods, &InputMode::Search),
+                Some(Action::SearchInput('m'))
+            );
+        }
+        // The volume/mute escape keys keep working.
+        assert_eq!(
+            press(KeyCode::Char('-'), KeyModifiers::ALT, &InputMode::Search),
+            Some(Action::VolumeDown)
         );
     }
 

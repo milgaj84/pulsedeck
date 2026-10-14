@@ -4,6 +4,16 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **AltGr characters can be typed in search (Windows).** Windows reports AltGr as Ctrl+Alt, and search dropped any character typed with Ctrl or Alt, so `@`, `{`, `ł`, `đ` and similar could not be typed on German, Polish, Serbian and other layouts. Ctrl+Alt together now types the character; Ctrl or Alt alone still act as shortcuts (Alt+`-`/`+`/`m` for volume and mute).
+
+### Dependencies
+- Bumped `rustls` to 0.23.46 in `Cargo.lock` (RUSTSEC-2026-0346 to 0349). It is not compiled into PulseDeck (TLS comes from the platform via `native-tls`); the bump keeps the audit clean.
+
+---
+
 ## [1.2.2] - 2026-10-14
 
 ### Fixed

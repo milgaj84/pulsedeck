@@ -6,8 +6,8 @@ PulseDeck tracks the latest release. Security updates are backported to the most
 
 | Version | Supported |
 | ------- | --------- |
-| 1.0.x   | ✅ |
-| < 1.0   | ❌ |
+| 1.2.x   | ✅ |
+| < 1.2   | ❌ |
 
 ## Reporting a Vulnerability
 
