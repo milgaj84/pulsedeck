@@ -3,7 +3,7 @@
 /// This module answers one question: given a station codec string, what
 /// should playback do? The active decode path uses Symphonia probe-based
 /// decoding (driven directly, see `audio::symphonia_backend`), which supports MP3, AAC, OGG/Vorbis,
-/// FLAC, and WAV. Opus has no Symphonia decoder and is `Unsupported`. HLS playlists are played by the HLS fetcher
+/// FLAC, WAV and Opus (decoded with libopus). HLS playlists are played by the HLS fetcher
 /// (`audio::hls`) for audio-only AAC/MP3 streams, including AES-128 encrypted
 /// ones; SAMPLE-AES/DRM, fMP4 and
 /// video-only variants are rejected at runtime with a clear error. Windows
@@ -55,8 +55,8 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
         },
         "OPUS" | "AUDIO/OPUS" => CodecCapability {
             normalized_codec: "OPUS",
-            capability: PlaybackCapability::Unsupported,
-            reason: "Opus streams cannot be decoded (Symphonia has no Opus decoder)",
+            capability: PlaybackCapability::Supported,
+            reason: "Opus streams are decoded with libopus (mono and stereo)",
         },
         "FLAC" | "AUDIO/FLAC" => CodecCapability {
             normalized_codec: "FLAC",
@@ -234,17 +234,17 @@ mod tests {
     }
 
     #[test]
-    fn opus_is_unsupported_with_an_honest_reason() {
+    fn opus_is_supported() {
         for codec in ["opus", "OPUS", "audio/opus"] {
             let capability = codec_capability(codec);
             assert_eq!(
                 capability.capability,
-                PlaybackCapability::Unsupported,
+                PlaybackCapability::Supported,
                 "{codec}"
             );
             assert_eq!(capability.normalized_codec, "OPUS");
-            assert!(capability.reason.contains("Opus"));
-            assert!(!is_codec_playback_supported(codec));
+            assert!(capability.reason.contains("libopus"));
+            assert!(is_codec_playback_supported(codec));
         }
     }
 }

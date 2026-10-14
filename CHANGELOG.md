@@ -6,6 +6,9 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Opus stations play.** Opus streams (Ogg Opus, mono and stereo) are decoded with libopus, including chained streams whose channel count changes between tracks, and the stream's output gain is applied. Opus stations are no longer marked unplayable. Opus with more than two channels still reports "not supported". libopus is compiled into PulseDeck, so building from source (`cargo install`) now needs CMake and a C compiler.
+
 ### Fixed
 - **Chained Ogg streams keep playing across track changes.** Icecast Ogg streams that start a new logical stream for each track (sometimes with a different sample rate) used to stop at the first track change. PulseDeck now drives Symphonia directly instead of through rodio's decoder, follows the change and switches format at the exact frame boundary.
 - **Streamed fragmented MP4 no longer crashes the decoder.** rodio treated the live stream as seekable and asserted "unreachable"; the stream is now read in order and plays.

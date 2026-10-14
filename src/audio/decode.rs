@@ -1,4 +1,4 @@
-use super::codec::{detect_codec, CodecDetection, CodecHint};
+use super::codec::{detect_codec, CodecDetection};
 use super::hls;
 use super::panic_guard;
 use super::pcm_source::PcmSource;
@@ -33,14 +33,6 @@ impl DecodePipeline {
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         detection: CodecDetection,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
-        // Symphonia has no Opus decoder, so say so plainly instead of failing
-        // later with a confusing "probe failed".
-        if detection.hint == CodecHint::Opus {
-            return Err(EngineError::Decode(
-                "Opus audio is not supported".to_string(),
-            ));
-        }
-
         let wrapped = ReadWrapper::new(reader);
         let verified_mp3 = detection.verified_mp3();
         let extension = verified_mp3.then_some("mp3");
@@ -867,6 +859,7 @@ mod tests {
 
         const OGG_VORBIS: &[u8] = include_bytes!("testdata/tone.ogg");
         const OPUS: &[u8] = include_bytes!("testdata/tone.opus");
+        const OPUS_SIX_CHANNELS: &[u8] = include_bytes!("testdata/tone_6ch.opus");
         const FLAC: &[u8] = include_bytes!("testdata/tone.flac");
         const FRAGMENTED_MP4: &[u8] = include_bytes!("testdata/tone_frag.mp4");
 
@@ -904,12 +897,22 @@ mod tests {
         }
 
         #[test]
-        fn opus_fails_with_a_clear_not_supported_error() {
-            let Err(EngineError::Decode(message)) = build(OPUS) else {
-                panic!("Opus must be rejected as a decode error");
+        fn opus_decodes_real_audio() {
+            let (format, samples) = first_samples(OPUS, 4000);
+
+            assert_eq!(format.codec, "Opus");
+            assert_eq!(format.sample_rate, 48_000);
+            assert_eq!(samples.len(), 4000);
+            assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
+        }
+
+        #[test]
+        fn six_channel_opus_fails_with_a_clear_not_supported_error() {
+            let Err(EngineError::Decode(message)) = build(OPUS_SIX_CHANNELS) else {
+                panic!("6-channel Opus must be rejected as a decode error");
             };
 
-            assert_eq!(message, "Opus audio is not supported");
+            assert!(message.contains("Opus audio with 6 channels is not supported"));
         }
 
         #[test]
@@ -960,19 +963,17 @@ mod tests {
         }
 
         #[test]
-        fn an_opus_station_fails_with_the_clear_message() {
+        fn an_opus_station_connects_through_the_worker() {
             let server = serve("audio/ogg", OPUS);
 
             let events = run_worker_collecting(server.url("/stream"));
 
-            match events.last() {
-                Some(EngineEvent::Failed { error, .. }) => {
-                    assert!(error
-                        .to_status_string()
-                        .contains("Opus audio is not supported"))
-                }
-                _ => panic!("expected an Opus failure"),
-            }
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, EngineEvent::Connected { .. })),
+                "expected a connection"
+            );
         }
 
         #[test]

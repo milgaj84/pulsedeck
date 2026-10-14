@@ -13,6 +13,7 @@ pub(super) fn codec_registry() -> &'static CodecRegistry {
     REGISTRY.get_or_init(|| {
         let mut registry = CodecRegistry::new();
         symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
         registry
     })
 }
@@ -21,7 +22,7 @@ pub(super) fn codec_registry() -> &'static CodecRegistry {
 mod tests {
     use super::*;
     use symphonia::core::codecs::{
-        CODEC_TYPE_AAC, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_VORBIS,
+        CODEC_TYPE_AAC, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_OPUS, CODEC_TYPE_VORBIS,
     };
 
     #[test]
@@ -32,6 +33,7 @@ mod tests {
             CODEC_TYPE_AAC,
             CODEC_TYPE_VORBIS,
             CODEC_TYPE_FLAC,
+            CODEC_TYPE_OPUS,
         ] {
             assert!(registry.get_codec(codec).is_some(), "missing {codec:?}");
         }
