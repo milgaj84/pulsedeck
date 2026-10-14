@@ -1,3 +1,4 @@
+mod ac3;
 mod capability;
 mod codec;
 mod codecs;

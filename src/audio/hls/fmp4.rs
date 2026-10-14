@@ -9,6 +9,7 @@
 //!   AudioSpecificConfig in the init segment)
 //! - MP3: the samples as they are
 //! - Opus: an Ogg Opus stream (one packet per page)
+//! - AC-3 and E-AC-3: the syncframes as they are
 //!
 //! Samples protected with `cbcs` (HLS SAMPLE-AES for fMP4) are decrypted
 //! first, using the IVs and subsample ranges the fragment carries.
@@ -156,6 +157,8 @@ enum Codec {
         channel_config: u8,
     },
     Mp3,
+    Ac3,
+    Eac3,
     /// A complete `OpusHead` packet.
     Opus {
         head: Vec<u8>,
@@ -198,6 +201,8 @@ impl Fmp4Init {
         match self.codec {
             Codec::Aac { .. } => EsKind::Adts,
             Codec::Mp3 => EsKind::MpegAudio,
+            Codec::Ac3 => EsKind::Ac3,
+            Codec::Eac3 => EsKind::Eac3,
             Codec::Opus { .. } => EsKind::OggOpus,
         }
     }
@@ -345,6 +350,9 @@ fn codec_from_entry(kind: &[u8; 4], children: &[Mp4Box<'_>]) -> Result<Codec, Hl
                 head: opus_head(dops.payload)?,
             })
         }
+        // The `dac3`/`dec3` boxes only repeat what the syncframes say.
+        b"ac-3" => Ok(Codec::Ac3),
+        b"ec-3" => Ok(Codec::Eac3),
         other => Err(HlsError::UnsupportedCodec(
             String::from_utf8_lossy(other).trim().to_string(),
         )),
@@ -1001,7 +1009,7 @@ impl Fmp4Demuxer {
                     out.extend_from_slice(payload);
                 }
             }
-            Codec::Mp3 => {
+            Codec::Mp3 | Codec::Ac3 | Codec::Eac3 => {
                 for payload in &payloads {
                     out.extend_from_slice(payload);
                 }
@@ -1304,12 +1312,12 @@ mod tests {
 
     #[test]
     fn other_codecs_and_video_are_reported_by_name() {
-        let ac3 = audio_entry(b"ac-3", &[]);
-        let error = Fmp4Init::parse(&init_segment(b"soun", &ac3, None)).unwrap_err();
-        assert_eq!(error, HlsError::UnsupportedCodec("ac-3".to_string()));
+        let alac = audio_entry(b"alac", &[]);
+        let error = Fmp4Init::parse(&init_segment(b"soun", &alac, None)).unwrap_err();
+        assert_eq!(error, HlsError::UnsupportedCodec("alac".to_string()));
         assert!(error.to_string().contains("not supported"));
 
-        let error = Fmp4Init::parse(&init_segment(b"vide", &ac3, None)).unwrap_err();
+        let error = Fmp4Init::parse(&init_segment(b"vide", &alac, None)).unwrap_err();
         assert_eq!(error, HlsError::VideoOnly);
     }
 
@@ -1633,6 +1641,101 @@ mod tests {
         let with_key = demux_all(&init, &AAC_SEGMENTS, Some(&key));
 
         assert_eq!(with_key, demux_all(&init, &AAC_SEGMENTS, None));
+    }
+
+    // --- AC-3 and E-AC-3 ----------------------------------------------------
+
+    const TONE_AC3: &[u8] = include_bytes!("../testdata/dolby/tone.ac3");
+    const TONE_EAC3: &[u8] = include_bytes!("../testdata/dolby/tone.eac3");
+
+    /// A Dolby fMP4 fixture: its init and media segment, the stream both must
+    /// produce, and the codec the init must name.
+    type DolbyCase = (&'static [u8], &'static [u8], &'static [u8], Codec);
+
+    fn dolby_clear() -> [DolbyCase; 2] {
+        [
+            (
+                include_bytes!("testdata/dolby/fmp4/ac3/init.mp4"),
+                include_bytes!("testdata/dolby/fmp4/ac3/seg0.m4s"),
+                TONE_AC3,
+                Codec::Ac3,
+            ),
+            (
+                include_bytes!("testdata/dolby/fmp4/eac3/init.mp4"),
+                include_bytes!("testdata/dolby/fmp4/eac3/seg0.m4s"),
+                TONE_EAC3,
+                Codec::Eac3,
+            ),
+        ]
+    }
+
+    #[test]
+    fn dolby_fmp4_from_ffmpeg_comes_out_as_the_original_stream() {
+        for (init, segment, original, codec) in dolby_clear() {
+            let init = Fmp4Init::parse(init).unwrap();
+
+            assert_eq!(init.codec, codec);
+            assert!(init.encryption.is_none());
+            assert_eq!(demux(&init, segment, None).unwrap(), original, "{codec:?}");
+        }
+        assert_eq!(
+            Fmp4Init::parse(dolby_clear()[0].0).unwrap().kind(),
+            EsKind::Ac3
+        );
+        assert_eq!(
+            Fmp4Init::parse(dolby_clear()[1].0).unwrap().kind(),
+            EsKind::Eac3
+        );
+    }
+
+    #[test]
+    fn cbcs_dolby_fmp4_from_shaka_decrypts_to_the_original_stream() {
+        let cases: [DolbyCase; 2] = [
+            (
+                include_bytes!("testdata/dolby/sample_aes/ac3/cbcs_init.mp4"),
+                include_bytes!("testdata/dolby/sample_aes/ac3/cbcs_seg.m4s"),
+                TONE_AC3,
+                Codec::Ac3,
+            ),
+            (
+                include_bytes!("testdata/dolby/sample_aes/eac3/cbcs_init.mp4"),
+                include_bytes!("testdata/dolby/sample_aes/eac3/cbcs_seg.m4s"),
+                TONE_EAC3,
+                Codec::Eac3,
+            ),
+        ];
+        for (init, segment, original, codec) in cases {
+            let init = Fmp4Init::parse(init).unwrap();
+
+            // The codec is the one inside the encrypted entry.
+            assert_eq!(init.codec, codec);
+            assert!(init.encryption.is_some());
+            let audio = demux(&init, segment, Some(&shaka_key())).unwrap();
+            assert_eq!(audio, original, "{codec:?}");
+            // Without the key the samples cannot be read.
+            assert!(demux(&init, segment, None).is_err());
+        }
+    }
+
+    #[test]
+    fn ac3_and_eac3_sample_entries_are_recognised_with_or_without_encryption() {
+        for (kind, codec) in [(b"ac-3", Codec::Ac3), (b"ec-3", Codec::Eac3)] {
+            let plain = init_segment(b"soun", &audio_entry(kind, &[]), None);
+            assert_eq!(Fmp4Init::parse(&plain).unwrap().codec, codec);
+
+            // Inside an enca entry, named by the original format box.
+            let mut sinf = mp4_box(b"frma", kind);
+            let mut schm = b"cbcs".to_vec();
+            schm.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+            sinf.extend(full_box(b"schm", 0, 0, &schm));
+            sinf.extend(mp4_box(b"schi", &tenc(1, 0, 0, 16, None)));
+            let encrypted = init_segment(
+                b"soun",
+                &audio_entry(b"enca", &mp4_box(b"sinf", &sinf)),
+                None,
+            );
+            assert_eq!(Fmp4Init::parse(&encrypted).unwrap().codec, codec);
+        }
     }
 
     // Hand-made cbcs data, encrypted by an encryptor written separately from the

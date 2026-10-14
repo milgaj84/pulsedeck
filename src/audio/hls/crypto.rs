@@ -74,20 +74,31 @@ pub(crate) fn cbc_decrypt_blocks(
     Some(last)
 }
 
-/// Decrypt one SAMPLE-AES audio frame in place.
-///
-/// `clear_prefix` is the frame header (7 or 9 bytes of ADTS). After it come 16
-/// more bytes in the clear, then whole 16-byte blocks of ciphertext, then up
-/// to 15 bytes in the clear. The IV starts over for every frame. A frame too
-/// short to hold a block after the clear part is not encrypted at all.
-pub(crate) fn decrypt_sample_aes_frame(frame: &mut [u8], clear_prefix: usize, key: &SampleAesKey) {
-    let Some(protected) = frame.get_mut(clear_prefix + BLOCK..) else {
-        return;
-    };
+/// Decrypt the protected part of one SAMPLE-AES frame in place: after
+/// `clear_prefix` bytes of header and 16 more in the clear come whole 16-byte
+/// blocks of ciphertext, then up to 15 bytes in the clear. A frame too short to
+/// hold a block after the clear part is not encrypted at all. Returns the last
+/// ciphertext block (what a chained IV continues from), if any block was
+/// decrypted.
+pub(crate) fn decrypt_frame_with_iv(
+    frame: &mut [u8],
+    clear_prefix: usize,
+    key: &[u8; KEY_LEN],
+    iv: &[u8; 16],
+) -> Option<[u8; 16]> {
+    let protected = frame.get_mut(clear_prefix + BLOCK..)?;
     let whole = protected.len() / BLOCK * BLOCK;
-    if whole > 0 {
-        cbc_decrypt_blocks(&mut protected[..whole], &key.key, &key.iv);
+    if whole == 0 {
+        return None;
     }
+    cbc_decrypt_blocks(&mut protected[..whole], key, iv)
+}
+
+/// Decrypt one SAMPLE-AES audio frame in place, with the IV starting over for
+/// every frame. `clear_prefix` is the frame header (7 or 9 bytes of ADTS; none
+/// for AC-3 and E-AC-3).
+pub(crate) fn decrypt_sample_aes_frame(frame: &mut [u8], clear_prefix: usize, key: &SampleAesKey) {
+    decrypt_frame_with_iv(frame, clear_prefix, &key.key, &key.iv);
 }
 
 /// The inverse of [`cbc_decrypt_blocks`], for building test data: encrypt

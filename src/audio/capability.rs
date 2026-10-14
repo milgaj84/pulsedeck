@@ -3,9 +3,10 @@
 /// This module answers one question: given a station codec string, what
 /// should playback do? The active decode path uses Symphonia probe-based
 /// decoding (driven directly, see `audio::symphonia_backend`), which supports MP3, AAC, OGG/Vorbis,
-/// FLAC, WAV and Opus (decoded with libopus). HLS playlists are played by the HLS fetcher
+/// FLAC, WAV, Opus (decoded with libopus) and AC-3/E-AC-3 (decoded in-house). HLS playlists are played by the HLS fetcher
 /// (`audio::hls`) for audio-only AAC/MP3/Opus streams in MPEG-TS, packed audio
-/// or fragmented MP4, including AES-128 and SAMPLE-AES encrypted ones (with a
+/// or fragmented MP4 (including AC-3 and E-AC-3), including AES-128 and
+/// SAMPLE-AES encrypted ones (with a
 /// plain key); DRM-protected and video-only variants are rejected at runtime
 /// with a clear error. Windows
 /// Media (WMA/ASF) has no Symphonia decoder and is `Unsupported`. Missing or
@@ -59,6 +60,16 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
             capability: PlaybackCapability::Supported,
             reason: "Opus streams are decoded with libopus (mono and stereo)",
         },
+        "AC3" | "AC-3" | "AUDIO/AC3" | "AUDIO/VND.DOLBY.DD-RAW" => CodecCapability {
+            normalized_codec: "AC3",
+            capability: PlaybackCapability::Supported,
+            reason: "AC-3 streams are decoded in-house and mixed down to stereo",
+        },
+        "EAC3" | "E-AC-3" | "E-AC3" | "EC-3" | "AUDIO/EAC3" => CodecCapability {
+            normalized_codec: "EAC3",
+            capability: PlaybackCapability::Supported,
+            reason: "E-AC-3 streams are decoded in-house and mixed down to stereo",
+        },
         "FLAC" | "AUDIO/FLAC" => CodecCapability {
             normalized_codec: "FLAC",
             capability: PlaybackCapability::Supported,
@@ -68,7 +79,7 @@ pub fn codec_capability(codec: &str) -> CodecCapability {
             CodecCapability {
                 normalized_codec: "HLS",
                 capability: PlaybackCapability::Supported,
-                reason: "HLS audio (AAC/MP3/Opus, AES-128 and SAMPLE-AES supported) is played from live segments; DRM-protected and video-only streams are not supported",
+                reason: "HLS audio (AAC/MP3/Opus/AC-3/E-AC-3, AES-128 and SAMPLE-AES supported) is played from live segments; DRM-protected and video-only streams are not supported",
             }
         }
         "WMA" | "ASF" | "AUDIO/X-MS-WMA" | "AUDIO/X-MS-ASF" => CodecCapability {
@@ -231,6 +242,28 @@ mod tests {
             "MP3", "AAC", "OGG", "OPUS", "FLAC", "HLS", "WMA", "", "unknown",
         ] {
             assert!(!codec_capability(codec).reason.is_empty());
+        }
+    }
+
+    #[test]
+    fn ac3_and_eac3_are_supported() {
+        for (codec, normalized) in [
+            ("ac3", "AC3"),
+            ("AC-3", "AC3"),
+            ("audio/ac3", "AC3"),
+            ("eac3", "EAC3"),
+            ("E-AC-3", "EAC3"),
+            ("ec-3", "EAC3"),
+            ("audio/eac3", "EAC3"),
+        ] {
+            let capability = codec_capability(codec);
+            assert_eq!(
+                capability.capability,
+                PlaybackCapability::Supported,
+                "{codec}"
+            );
+            assert_eq!(capability.normalized_codec, normalized, "{codec}");
+            assert!(is_codec_playback_supported(codec));
         }
     }
 

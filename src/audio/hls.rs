@@ -761,6 +761,145 @@ mod tests {
         assert_failed_with(&run, "SAMPLE-AES-CTR encryption is not supported");
     }
 
+    fn assert_connected_dolby(run: &Run, codec: &str) {
+        match terminal(run) {
+            EngineEvent::Connected { format, .. } => {
+                assert_eq!(format.codec, codec);
+                assert_eq!(format.sample_rate, 48_000);
+                // Stereo, whatever the stream's own layout.
+                assert_eq!(format.channels, 2);
+            }
+            other => panic!("expected Connected, got {}", describe(other)),
+        }
+    }
+
+    #[test]
+    fn dolby_mpeg_ts_streams_connect_and_decode() {
+        let cases: [(&[u8], &str); 4] = [
+            (
+                include_bytes!("hls/testdata/dolby/ts/atsc_ac3.ts"),
+                "HLS AC-3",
+            ),
+            (
+                include_bytes!("hls/testdata/dolby/ts/atsc_eac3.ts"),
+                "HLS E-AC-3",
+            ),
+            (
+                include_bytes!("hls/testdata/dolby/ts/dvb_ac3.ts"),
+                "HLS AC-3",
+            ),
+            (
+                include_bytes!("hls/testdata/dolby/ts/dvb_eac3.ts"),
+                "HLS E-AC-3",
+            ),
+        ];
+        for (segment, codec) in cases {
+            let server = server_with(vec![
+                (
+                    "/live.m3u8",
+                    Response::ok(MPEGURL, media_playlist(1, "ts", "")),
+                ),
+                ("/seg0.ts", Response::ok("video/mp2t", segment.to_vec())),
+            ]);
+
+            let run = run_against(server, "/live.m3u8", 4096);
+
+            assert_connected_dolby(&run, codec);
+        }
+    }
+
+    #[test]
+    fn sample_aes_dolby_streams_connect_and_decode() {
+        let ts_and_packed: [(&str, &[u8], &str); 4] = [
+            (
+                "ts",
+                include_bytes!("hls/testdata/dolby/sample_aes/ac3/ts.ts"),
+                "HLS AC-3",
+            ),
+            (
+                "ts",
+                include_bytes!("hls/testdata/dolby/sample_aes/eac3/ts.ts"),
+                "HLS E-AC-3",
+            ),
+            (
+                "ac3",
+                include_bytes!("hls/testdata/dolby/sample_aes/ac3/packed.ac3"),
+                "HLS AC-3",
+            ),
+            (
+                "eac3",
+                include_bytes!("hls/testdata/dolby/sample_aes/eac3/packed.eac3"),
+                "HLS E-AC-3",
+            ),
+        ];
+        for (ext, segment, codec) in ts_and_packed {
+            let server = sample_aes_server(ext, &[segment], Some(SAMPLE_AES_KEY));
+
+            let run = run_against(server, "/live.m3u8", 4096);
+
+            assert_connected_dolby(&run, codec);
+        }
+    }
+
+    #[test]
+    fn sample_aes_dolby_in_fmp4_connects_and_decodes() {
+        let cases: [(&[u8], &[u8], &str); 2] = [
+            (
+                include_bytes!("hls/testdata/dolby/sample_aes/ac3/cbcs_init.mp4"),
+                include_bytes!("hls/testdata/dolby/sample_aes/ac3/cbcs_seg.m4s"),
+                "HLS AC-3",
+            ),
+            (
+                include_bytes!("hls/testdata/dolby/sample_aes/eac3/cbcs_init.mp4"),
+                include_bytes!("hls/testdata/dolby/sample_aes/eac3/cbcs_seg.m4s"),
+                "HLS E-AC-3",
+            ),
+        ];
+        for (init, segment, codec) in cases {
+            let tags = format!("#EXT-X-MAP:URI=\"init.mp4\"\n{SAMPLE_AES_KEY_TAG}");
+            let playlist = media_playlist(1, "m4s", &tags);
+            let server = server_with(vec![
+                ("/live.m3u8", Response::ok(MPEGURL, playlist)),
+                (
+                    "/key.bin",
+                    Response::ok("application/octet-stream", SAMPLE_AES_KEY.to_vec()),
+                ),
+                ("/init.mp4", Response::ok("video/mp4", init.to_vec())),
+                (
+                    "/seg0.m4s",
+                    Response::ok("video/iso.segment", segment.to_vec()),
+                ),
+            ]);
+
+            let run = run_against(server, "/live.m3u8", 4096);
+
+            assert_connected_dolby(&run, codec);
+        }
+    }
+
+    #[test]
+    fn a_master_playlist_with_only_dolby_audio_is_followed() {
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"ec-3\"\neac3.m3u8\n";
+        let server = server_with(vec![
+            ("/master.m3u8", Response::ok(MPEGURL, master)),
+            (
+                "/eac3.m3u8",
+                Response::ok(MPEGURL, media_playlist(1, "ts", "")),
+            ),
+            (
+                "/seg0.ts",
+                Response::ok(
+                    "video/mp2t",
+                    include_bytes!("hls/testdata/dolby/ts/atsc_eac3.ts").to_vec(),
+                ),
+            ),
+        ]);
+
+        let run = run_against(server, "/master.m3u8", 4096);
+
+        assert_connected_dolby(&run, "HLS E-AC-3");
+    }
+
     const FMP4_AAC_INIT: &[u8] = include_bytes!("hls/testdata/fmp4/aac/init.mp4");
     const FMP4_AAC_SEGMENTS: [&[u8]; 5] = [
         include_bytes!("hls/testdata/fmp4/aac/seg0.m4s"),
@@ -863,7 +1002,7 @@ mod tests {
     #[test]
     fn segment_with_unsupported_audio_fails_as_not_supported() {
         let mut pat_pmt = pat_packet(PMT_PID);
-        pat_pmt.extend(pmt_packet(PMT_PID, &[(0x81, AUDIO_PID)]));
+        pat_pmt.extend(pmt_packet(PMT_PID, &[(0x11, AUDIO_PID)]));
         let server = server_with(vec![
             (
                 "/live.m3u8",
@@ -874,7 +1013,7 @@ mod tests {
 
         let run = run_against(server, "/live.m3u8", 4096);
 
-        assert_failed_with(&run, "AC-3 audio is not supported");
+        assert_failed_with(&run, "LATM AAC audio is not supported");
     }
 
     #[test]

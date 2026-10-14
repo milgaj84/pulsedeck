@@ -2036,6 +2036,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-ac3"
+version = "0.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efb5f931133bf47e30ed9d809ae1cc6b2c95f5643a73b39fc75fffc0329184be"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-core"
+version = "0.1.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49a13fc8a75d81fb4af6108bd67d080d52213ffa008340212246d543d63f982"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "palette"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2324,6 +2344,8 @@ dependencies = [
  "dirs",
  "libc",
  "notify-rust",
+ "oxideav-ac3",
+ "oxideav-core",
  "proptest",
  "ratatui",
  "reqwest",

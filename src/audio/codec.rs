@@ -4,6 +4,8 @@
 //! magic bytes take priority. ICY metadata is intentionally not considered here:
 //! ICY describes metadata framing, not the underlying audio codec.
 
+use super::ac3::Dolby;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CodecHint {
     Mp3,
@@ -13,6 +15,8 @@ pub(super) enum CodecHint {
     Ogg,
     Flac,
     Wav,
+    Ac3,
+    Eac3,
     Unknown,
 }
 
@@ -26,6 +30,8 @@ impl CodecHint {
             Self::Ogg => "Ogg",
             Self::Flac => "FLAC",
             Self::Wav => "WAV",
+            Self::Ac3 => "AC-3",
+            Self::Eac3 => "E-AC-3",
             Self::Unknown => "Auto-detected",
         }
     }
@@ -126,7 +132,13 @@ fn codec_from_magic(bytes: &[u8]) -> Option<CodecHint> {
         }
     }
 
-    None
+    // AC-3 and E-AC-3 have no fixed header, and a live stream can start in the
+    // middle of a frame, so look for a chain of valid syncframes.
+    match super::ac3::detect(bytes) {
+        Some(Dolby::Ac3) => Some(CodecHint::Ac3),
+        Some(Dolby::Eac3) => Some(CodecHint::Eac3),
+        None => None,
+    }
 }
 
 fn codec_from_content_type(content_type: &str) -> Option<CodecHint> {
@@ -144,6 +156,8 @@ fn codec_from_content_type(content_type: &str) -> Option<CodecHint> {
         "audio/ogg" | "application/ogg" => Some(CodecHint::Ogg),
         "audio/flac" | "audio/x-flac" => Some(CodecHint::Flac),
         "audio/wav" | "audio/wave" | "audio/x-wav" => Some(CodecHint::Wav),
+        "audio/ac3" | "audio/x-ac3" | "audio/vnd.dolby.dd-raw" => Some(CodecHint::Ac3),
+        "audio/eac3" | "audio/x-eac3" => Some(CodecHint::Eac3),
         _ => None,
     }
 }
@@ -168,6 +182,10 @@ fn codec_from_url(url: &str) -> Option<CodecHint> {
         Some(CodecHint::Flac)
     } else if path.ends_with(".wav") || path.ends_with(".wave") {
         Some(CodecHint::Wav)
+    } else if path.ends_with(".ac3") {
+        Some(CodecHint::Ac3)
+    } else if path.ends_with(".eac3") || path.ends_with(".ec3") {
+        Some(CodecHint::Eac3)
     } else {
         None
     }
@@ -201,6 +219,50 @@ mod tests {
                 codec_from_magic(&[0xFF, second, 0x50]),
                 Some(CodecHint::Aac)
             );
+        }
+    }
+
+    #[test]
+    fn ac3_and_eac3_streams_are_detected_by_their_frames() {
+        let ac3 = include_bytes!("testdata/dolby/tone.ac3");
+        let eac3 = include_bytes!("testdata/dolby/tone.eac3");
+
+        assert_eq!(codec_from_magic(ac3), Some(CodecHint::Ac3));
+        assert_eq!(codec_from_magic(eac3), Some(CodecHint::Eac3));
+        // A live stream joined in the middle of a frame.
+        assert_eq!(codec_from_magic(&ac3[100..]), Some(CodecHint::Ac3));
+        let detection = detect_codec(eac3, "application/octet-stream", "https://r.test/x");
+        assert_eq!(detection.hint, CodecHint::Eac3);
+        assert_eq!(detection.source, CodecSource::MagicBytes);
+    }
+
+    #[test]
+    fn dolby_content_types_and_extensions_are_recognised() {
+        for content_type in ["audio/ac3", "audio/x-ac3", "audio/vnd.dolby.dd-raw"] {
+            assert_eq!(codec_from_content_type(content_type), Some(CodecHint::Ac3));
+        }
+        for content_type in ["audio/eac3", "AUDIO/X-EAC3; charset=x"] {
+            assert_eq!(codec_from_content_type(content_type), Some(CodecHint::Eac3));
+        }
+        assert_eq!(
+            codec_from_url("https://r.test/live.ac3"),
+            Some(CodecHint::Ac3)
+        );
+        for url in ["https://r.test/live.eac3?x=1", "https://r.test/LIVE.EC3"] {
+            assert_eq!(codec_from_url(url), Some(CodecHint::Eac3));
+        }
+    }
+
+    #[test]
+    fn other_audio_is_not_mistaken_for_dolby() {
+        for bytes in [
+            &include_bytes!("hls/testdata/tone.mp3")[..],
+            &include_bytes!("hls/testdata/tone.aac")[..],
+            &include_bytes!("testdata/tone.flac")[..],
+            &[0u8; 2048][..],
+        ] {
+            assert_ne!(codec_from_magic(bytes), Some(CodecHint::Ac3));
+            assert_ne!(codec_from_magic(bytes), Some(CodecHint::Eac3));
         }
     }
 

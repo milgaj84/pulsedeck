@@ -3,7 +3,10 @@
 //! Supported segment formats:
 //! - MPEG-TS carrying ADTS AAC (stream type 0x0F, or 0xCF for SAMPLE-AES) or
 //!   MPEG audio (0x03/0x04)
-//! - "packed audio": raw ADTS AAC or raw MP3, each segment prefixed by an ID3 tag
+//! - MPEG-TS carrying AC-3 or E-AC-3 (stream types 0x81/0x87, 0xC1/0xC2 for
+//!   SAMPLE-AES, or private data with the DVB descriptors)
+//! - "packed audio": raw ADTS AAC, raw MP3, AC-3 or E-AC-3, each segment prefixed
+//!   by an ID3 tag
 //! - fragmented MP4 (see [`super::fmp4`]), which needs its init segment
 //!
 //! Symphonia's ADTS reader only accepts the exact sync word `0xFFF1`, assumes
@@ -14,6 +17,7 @@ use super::crypto::{self, SampleAesKey};
 use super::fmp4::{Fmp4Demuxer, Fmp4Init};
 use super::id3;
 use super::playlist::HlsError;
+use crate::audio::ac3::{self, Dolby};
 
 pub(crate) const PACKET_SIZE: usize = 188;
 const PACKET: usize = PACKET_SIZE;
@@ -26,6 +30,10 @@ pub(crate) enum EsKind {
     MpegAudio,
     /// Opus packets wrapped in Ogg (what fMP4 Opus is turned into).
     OggOpus,
+    /// Raw AC-3 syncframes.
+    Ac3,
+    /// Raw E-AC-3 syncframes.
+    Eac3,
 }
 
 impl EsKind {
@@ -34,6 +42,8 @@ impl EsKind {
             Self::Adts => "AAC",
             Self::MpegAudio => "MP3",
             Self::OggOpus => "Opus",
+            Self::Ac3 => Dolby::Ac3.label(),
+            Self::Eac3 => Dolby::Eac3.label(),
         }
     }
 }
@@ -67,6 +77,8 @@ pub(crate) enum SegmentFormat {
     Adts,
     MpegAudio,
     Fmp4,
+    /// Packed AC-3 or E-AC-3.
+    Dolby(Dolby),
     Unknown,
 }
 
@@ -89,7 +101,10 @@ pub(crate) fn classify_segment(bytes: &[u8]) -> SegmentFormat {
     match audio {
         [0xFF, b1, ..] if b1 & 0xF0 == 0xF0 && b1 & 0x06 == 0 => SegmentFormat::Adts,
         [0xFF, b1, ..] if b1 & 0xE0 == 0xE0 && b1 & 0x06 != 0 => SegmentFormat::MpegAudio,
-        _ => SegmentFormat::Unknown,
+        _ => match ac3::frame_info(audio) {
+            Some(info) => SegmentFormat::Dolby(info.kind),
+            None => SegmentFormat::Unknown,
+        },
     }
 }
 
@@ -171,6 +186,72 @@ impl AdtsNormalizer {
     }
 }
 
+/// Passes AC-3 / E-AC-3 syncframes through, decrypting SAMPLE-AES ones.
+///
+/// The first 16 bytes of every syncframe are in the clear, then whole blocks of
+/// ciphertext. For AC-3 the IV starts over at every syncframe. E-AC-3 starts it
+/// over at every independent frame; the dependent frames that follow continue
+/// the chain from the previous frame's last ciphertext block.
+#[derive(Debug, Default)]
+pub(crate) struct DolbyStream {
+    framer: ac3::Framer,
+    key: Option<SampleAesKey>,
+    /// The IV the next dependent frame continues with.
+    chain: Option<[u8; 16]>,
+}
+
+impl DolbyStream {
+    pub(crate) fn set_key(&mut self, key: Option<SampleAesKey>) {
+        self.key = key;
+    }
+
+    pub(crate) fn push(&mut self, data: &[u8], out: &mut Vec<u8>) {
+        let Some(key) = self.key else {
+            // Clear audio needs no framing here: the decoder frames it.
+            out.extend_from_slice(data);
+            return;
+        };
+        self.framer.push(data);
+        while let Some((info, frame)) = self.framer.next_frame(false) {
+            self.decrypt(key, info, frame, out);
+        }
+    }
+
+    /// Emit what is left at the end of a segment: a segment holds whole frames.
+    pub(crate) fn flush(&mut self, out: &mut Vec<u8>) {
+        let Some(key) = self.key else {
+            return;
+        };
+        while let Some((info, frame)) = self.framer.next_frame(true) {
+            self.decrypt(key, info, frame, out);
+        }
+    }
+
+    fn decrypt(
+        &mut self,
+        key: SampleAesKey,
+        info: ac3::FrameInfo,
+        mut frame: Vec<u8>,
+        out: &mut Vec<u8>,
+    ) {
+        let iv = match (info.independent, self.chain) {
+            (false, Some(chain)) => chain,
+            _ => key.iv,
+        };
+        if let Some(last) = crypto::decrypt_frame_with_iv(&mut frame, 0, &key.key, &iv) {
+            self.chain = Some(last);
+        } else if info.independent {
+            self.chain = None;
+        }
+        out.extend_from_slice(&frame);
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.framer = ac3::Framer::default();
+        self.chain = None;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Resolution {
     Waiting,
@@ -188,6 +269,7 @@ pub(crate) struct TsDemuxer {
     pes_valid: bool,
     last_cc: Option<u8>,
     adts: AdtsNormalizer,
+    dolby: DolbyStream,
     /// PID of the ID3 timed-metadata stream (type 0x15), if the program has one.
     meta_pid: Option<u16>,
     meta_pes: Vec<u8>,
@@ -208,6 +290,7 @@ impl Default for TsDemuxer {
             pes_valid: false,
             last_cc: None,
             adts: AdtsNormalizer::default(),
+            dolby: DolbyStream::default(),
             meta_pid: None,
             meta_pes: Vec::new(),
             titles: Vec::new(),
@@ -230,6 +313,7 @@ impl TsDemuxer {
 
     fn set_sample_aes(&mut self, key: Option<SampleAesKey>) {
         self.adts.set_key(key);
+        self.dolby.set_key(key);
     }
 
     /// Feed bytes (not necessarily aligned to packets) and append extracted
@@ -257,7 +341,9 @@ impl TsDemuxer {
     /// Emit the PES still being assembled. Call at the end of each segment.
     pub(crate) fn flush(&mut self, out: &mut Vec<u8>) -> Result<(), HlsError> {
         self.flush_meta();
-        self.flush_pes(out)
+        self.flush_pes(out)?;
+        self.dolby.flush(out);
+        Ok(())
     }
 
     /// "Now playing" titles found in the timed-metadata stream since the last call.
@@ -360,6 +446,10 @@ impl TsDemuxer {
         };
         match self.resolution {
             Resolution::Audio(EsKind::Adts) => self.adts.push(es, out),
+            Resolution::Audio(EsKind::Ac3 | EsKind::Eac3) => {
+                self.dolby.push(es, out);
+                Ok(())
+            }
             Resolution::Audio(EsKind::MpegAudio) => {
                 out.extend_from_slice(es);
                 Ok(())
@@ -397,7 +487,21 @@ impl TsDemuxer {
             let pid = (u16::from(section[pos + 1] & 0x1F) << 8) | u16::from(section[pos + 2]);
             let es_info =
                 (usize::from(section[pos + 3] & 0x0F) << 8) | usize::from(section[pos + 4]);
+            let descriptors = section.get(pos + 5..pos + 5 + es_info).unwrap_or_default();
             pos += 5 + es_info;
+
+            let dolby = match stream_type {
+                // ATSC (and their SAMPLE-AES variants) name the codec in the type.
+                0x81 | 0xC1 => Some(EsKind::Ac3),
+                0x87 | 0xC2 => Some(EsKind::Eac3),
+                // DVB carries it as private data and says so in a descriptor.
+                0x06 => dolby_from_descriptors(descriptors),
+                _ => None,
+            };
+            if let (Some(kind), true) = (dolby, found.is_none()) {
+                found = Some((pid, kind));
+                continue;
+            }
 
             match stream_type {
                 // 0xCF is AAC protected with SAMPLE-AES. Whether to decrypt follows
@@ -407,8 +511,6 @@ impl TsDemuxer {
                 0x15 if meta.is_none() => meta = Some(pid),
                 0x01 | 0x02 | 0x10 | 0x1B | 0x24 => video = true,
                 0x11 => other_audio = Some("LATM AAC"),
-                0x81 => other_audio = Some("AC-3"),
-                0x87 => other_audio = Some("E-AC-3"),
                 _ => {}
             }
         }
@@ -446,6 +548,23 @@ impl TsDemuxer {
             (None, false) => HlsError::NoAudioVariant,
         })
     }
+}
+
+/// AC-3 or E-AC-3 announced by the descriptors of a private-data stream.
+fn dolby_from_descriptors(mut descriptors: &[u8]) -> Option<EsKind> {
+    while let [tag, len, rest @ ..] = descriptors {
+        let body = rest.get(..usize::from(*len))?;
+        match (tag, body) {
+            (0x6A, _) => return Some(EsKind::Ac3),
+            (0x7A, _) => return Some(EsKind::Eac3),
+            // A registration descriptor naming the format.
+            (0x05, [b'A', b'C', b'-', b'3', ..]) => return Some(EsKind::Ac3),
+            (0x05, [b'E', b'A', b'C', b'3', ..]) => return Some(EsKind::Eac3),
+            _ => {}
+        }
+        descriptors = &rest[body.len()..];
+    }
+    None
 }
 
 fn mixed_codecs(from: EsKind, to: EsKind) -> HlsError {
@@ -486,6 +605,7 @@ fn parse_pat(payload: &[u8], pusi: bool) -> Option<u16> {
 pub(crate) struct AudioExtractor {
     ts: TsDemuxer,
     adts: AdtsNormalizer,
+    dolby: DolbyStream,
     fmp4: Fmp4Demuxer,
     sample_aes: Option<SampleAesKey>,
     kind: Option<EsKind>,
@@ -504,6 +624,7 @@ impl AudioExtractor {
     pub(crate) fn reset(&mut self) {
         self.ts.reset();
         self.adts.reset();
+        self.dolby.reset();
         self.fmp4.reset();
     }
 
@@ -512,6 +633,7 @@ impl AudioExtractor {
     pub(crate) fn set_sample_aes(&mut self, key: Option<SampleAesKey>) {
         self.sample_aes = key;
         self.adts.set_key(key);
+        self.dolby.set_key(key);
         self.ts.set_sample_aes(key);
     }
 
@@ -567,6 +689,17 @@ impl AudioExtractor {
                 out.extend_from_slice(strip_id3(segment));
                 Some(EsKind::MpegAudio)
             }
+            SegmentFormat::Dolby(dolby) => {
+                if let Some(title) = id3::parse_leading_tags(segment).display() {
+                    self.note_title(title);
+                }
+                self.dolby.push(strip_id3(segment), out);
+                self.dolby.flush(out);
+                Some(match dolby {
+                    Dolby::Ac3 => EsKind::Ac3,
+                    Dolby::Eac3 => EsKind::Eac3,
+                })
+            }
             SegmentFormat::Fmp4 => {
                 let init = init.ok_or(HlsError::Malformed("fMP4 segment without #EXT-X-MAP"))?;
                 self.fmp4
@@ -618,6 +751,286 @@ mod tests {
         (usize::from(bytes[3] & 3) << 11)
             | (usize::from(bytes[4]) << 3)
             | usize::from(bytes[5] >> 5)
+    }
+
+    // --- AC-3 and E-AC-3 ----------------------------------------------------
+
+    const TONE_AC3: &[u8] = include_bytes!("../testdata/dolby/tone.ac3");
+    const TONE_EAC3: &[u8] = include_bytes!("../testdata/dolby/tone.eac3");
+
+    fn extract_clear(segment: &[u8]) -> (Vec<u8>, Option<EsKind>) {
+        let mut extractor = AudioExtractor::default();
+        let mut out = Vec::new();
+        extractor.push_segment(segment, &mut out).unwrap();
+        (out, extractor.kind())
+    }
+
+    #[test]
+    fn mpeg_ts_dolby_audio_is_extracted_whichever_way_the_stream_announces_it() {
+        let cases: [(&[u8], &[u8], EsKind); 4] = [
+            // ATSC: the stream type names the codec (0x81, 0x87).
+            (
+                include_bytes!("testdata/dolby/ts/atsc_ac3.ts"),
+                TONE_AC3,
+                EsKind::Ac3,
+            ),
+            (
+                include_bytes!("testdata/dolby/ts/atsc_eac3.ts"),
+                TONE_EAC3,
+                EsKind::Eac3,
+            ),
+            // DVB: private data (0x06) plus descriptors.
+            (
+                include_bytes!("testdata/dolby/ts/dvb_ac3.ts"),
+                TONE_AC3,
+                EsKind::Ac3,
+            ),
+            (
+                include_bytes!("testdata/dolby/ts/dvb_eac3.ts"),
+                TONE_EAC3,
+                EsKind::Eac3,
+            ),
+        ];
+        for (segment, original, kind) in cases {
+            let (audio, found) = extract_clear(segment);
+
+            assert_eq!(found, Some(kind));
+            // The audio that comes out is the audio that went in, frame for frame.
+            assert_eq!(audio, original, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn packed_dolby_audio_is_recognised_and_its_id3_tag_removed() {
+        for (original, kind) in [(TONE_AC3, EsKind::Ac3), (TONE_EAC3, EsKind::Eac3)] {
+            let mut segment = id3_tag(20);
+            segment.extend_from_slice(original);
+
+            let (audio, found) = extract_clear(&segment);
+
+            assert_eq!(
+                classify_segment(&segment),
+                SegmentFormat::Dolby(match kind {
+                    EsKind::Ac3 => Dolby::Ac3,
+                    _ => Dolby::Eac3,
+                })
+            );
+            assert_eq!(found, Some(kind));
+            assert_eq!(audio, original);
+        }
+    }
+
+    #[test]
+    fn ac3_and_eac3_cannot_be_mixed_in_one_stream() {
+        let mut extractor = AudioExtractor::default();
+        extractor.push_segment(TONE_AC3, &mut Vec::new()).unwrap();
+
+        let error = extractor
+            .push_segment(TONE_EAC3, &mut Vec::new())
+            .unwrap_err();
+
+        assert_eq!(error, mixed_codecs(EsKind::Ac3, EsKind::Eac3));
+    }
+
+    #[test]
+    fn descriptors_name_ac3_and_eac3_in_private_streams() {
+        let registration = |id: &[u8; 4]| [&[0x05, 0x04][..], id].concat();
+        assert_eq!(dolby_from_descriptors(&[0x6A, 0x00]), Some(EsKind::Ac3));
+        assert_eq!(
+            dolby_from_descriptors(&[0x7A, 0x01, 0x00]),
+            Some(EsKind::Eac3)
+        );
+        assert_eq!(
+            dolby_from_descriptors(&registration(b"AC-3")),
+            Some(EsKind::Ac3)
+        );
+        assert_eq!(
+            dolby_from_descriptors(&registration(b"EAC3")),
+            Some(EsKind::Eac3)
+        );
+        // Found after other descriptors.
+        let mut later = vec![0x0A, 0x04, b'e', b'n', b'g', 0x00];
+        later.extend_from_slice(&[0x6A, 0x00]);
+        assert_eq!(dolby_from_descriptors(&later), Some(EsKind::Ac3));
+        // Not Dolby, empty, and damaged (a length running past the end).
+        assert_eq!(dolby_from_descriptors(&registration(b"HEVC")), None);
+        assert_eq!(dolby_from_descriptors(&[]), None);
+        assert_eq!(dolby_from_descriptors(&[0x6A]), None);
+        assert_eq!(dolby_from_descriptors(&[0x05, 0x20, b'A']), None);
+    }
+
+    #[test]
+    fn stream_types_0xc1_and_0xc2_are_the_sample_aes_variants() {
+        for (stream_type, kind) in [(0xC1, EsKind::Ac3), (0xC2, EsKind::Eac3)] {
+            let mut segment = pat_packet(PMT_PID);
+            segment.extend(pmt_packet(PMT_PID, &[(stream_type, AUDIO_PID)]));
+            let mut demuxer = TsDemuxer::default();
+
+            demuxer.push(&segment, &mut Vec::new()).unwrap();
+
+            assert_eq!(demuxer.kind(), Some(kind), "{stream_type:#x}");
+        }
+    }
+
+    // --- SAMPLE-AES, AC-3 and E-AC-3 -------------------------------------------
+
+    const SA_AC3_TS: &[u8] = include_bytes!("testdata/dolby/sample_aes/ac3/ts.ts");
+    const SA_EAC3_TS: &[u8] = include_bytes!("testdata/dolby/sample_aes/eac3/ts.ts");
+    const SA_AC3_PACKED: &[u8] = include_bytes!("testdata/dolby/sample_aes/ac3/packed.ac3");
+    const SA_EAC3_PACKED: &[u8] = include_bytes!("testdata/dolby/sample_aes/eac3/packed.eac3");
+
+    #[test]
+    fn sample_aes_ac3_and_eac3_from_shaka_decrypt_to_the_original_stream() {
+        let cases: [(&[u8], &[u8]); 4] = [
+            (SA_AC3_TS, TONE_AC3),
+            (SA_AC3_PACKED, TONE_AC3),
+            (SA_EAC3_TS, TONE_EAC3),
+            (SA_EAC3_PACKED, TONE_EAC3),
+        ];
+        for (segment, original) in cases {
+            let audio = extract_with(&[segment], Some(shaka_key()));
+
+            assert_eq!(audio.len(), original.len());
+            assert_eq!(audio, original);
+        }
+    }
+
+    #[test]
+    fn dolby_sample_aes_without_the_key_stays_scrambled() {
+        let scrambled = extract_with(&[SA_AC3_PACKED], None);
+
+        assert_eq!(scrambled.len(), TONE_AC3.len());
+        assert_ne!(scrambled, TONE_AC3);
+        // The first 16 bytes of every syncframe are in the clear.
+        for frame in 0..scrambled.len() / 256 {
+            let at = frame * 256;
+            assert_eq!(scrambled[at..at + 16], TONE_AC3[at..at + 16]);
+        }
+    }
+
+    #[test]
+    fn a_wrong_key_scrambles_dolby_audio_without_an_error() {
+        let wrong = SampleAesKey {
+            key: [9; 16],
+            iv: SAMPLE_AES_IV,
+        };
+
+        let audio = extract_with(&[SA_EAC3_PACKED], Some(wrong));
+
+        assert_eq!(audio.len(), TONE_EAC3.len());
+        assert_ne!(audio, TONE_EAC3);
+    }
+
+    /// An E-AC-3 stream of fake frames: `plan` lists (stream type, substream id,
+    /// length in 16-bit words). Bodies are pseudo-random.
+    fn eac3_stream(plan: &[(u8, u8, usize)]) -> Vec<Vec<u8>> {
+        plan.iter()
+            .enumerate()
+            .map(|(index, &(stream_type, substream, words))| {
+                let frmsiz = words - 1;
+                let mut frame = vec![
+                    0x0B,
+                    0x77,
+                    (stream_type << 6) | (substream << 3) | ((frmsiz >> 8) as u8 & 7),
+                    frmsiz as u8,
+                    0x3F,
+                    16 << 3,
+                ];
+                frame.extend((6..words * 2).map(|i| (i * 31 + index * 7 + 3) as u8));
+                frame
+            })
+            .collect()
+    }
+
+    /// Encrypt like a producer: IV reset at every AC-3 frame and every E-AC-3
+    /// independent frame, chained through the dependent frames after it.
+    fn encrypt_eac3(frames: &[Vec<u8>], key: &SampleAesKey) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut chain: Option<[u8; 16]> = None;
+        for frame in frames {
+            let info = ac3::frame_info(frame).unwrap();
+            let iv = match (info.independent, chain) {
+                (false, Some(chain)) => chain,
+                _ => key.iv,
+            };
+            let mut encrypted = frame.clone();
+            let protected = &mut encrypted[16..];
+            let whole = protected.len() / 16 * 16;
+            if whole > 0 {
+                chain = crypto::cbc_encrypt_blocks(&mut protected[..whole], &key.key, &iv);
+            }
+            out.extend_from_slice(&encrypted);
+        }
+        out
+    }
+
+    #[test]
+    fn eac3_dependent_frames_continue_the_iv_chain_of_their_audio_frame() {
+        let key = shaka_key();
+        // Two audio frames: independent + 2 dependents, and independent + 1 dependent.
+        let frames = eac3_stream(&[(0, 0, 90), (1, 0, 60), (1, 0, 70), (0, 0, 90), (1, 0, 60)]);
+        let original = frames.concat();
+        let encrypted = encrypt_eac3(&frames, &key);
+        assert_ne!(encrypted, original);
+
+        let mut packed = id3_tag(8);
+        packed.extend_from_slice(&encrypted);
+        let audio = extract_with(&[packed.as_slice()], Some(key));
+
+        assert_eq!(audio, original);
+    }
+
+    #[test]
+    fn a_chained_dependent_frame_is_not_decrypted_with_a_reset_iv() {
+        // The same stream decrypted as if every frame reset the IV is wrong for
+        // the dependent frames only.
+        let key = shaka_key();
+        let frames = eac3_stream(&[(0, 0, 90), (1, 0, 60)]);
+        let encrypted = encrypt_eac3(&frames, &key);
+
+        let mut reset_everywhere = encrypted.clone();
+        let split = frames[0].len();
+        crypto::decrypt_sample_aes_frame(&mut reset_everywhere[..split], 0, &key);
+        crypto::decrypt_sample_aes_frame(&mut reset_everywhere[split..], 0, &key);
+
+        assert_eq!(&reset_everywhere[..split], &frames[0][..]);
+        assert_ne!(&reset_everywhere[split..], &frames[1][..]);
+    }
+
+    #[test]
+    fn ac3_frames_each_restart_the_iv() {
+        let key = shaka_key();
+        // Three identical real AC-3 frames. With the IV starting over at every
+        // frame they encrypt to identical bytes, and each decrypts on its own.
+        let frame = TONE_AC3[..256].to_vec();
+        let mut stream = Vec::new();
+        for _ in 0..3 {
+            let mut encrypted = frame.clone();
+            crypto::encrypt_sample_aes_frame(&mut encrypted, 0, &key);
+            assert_ne!(encrypted, frame);
+            stream.extend_from_slice(&encrypted);
+        }
+        assert_eq!(stream[..256], stream[256..512]);
+
+        let audio = extract_with(&[stream.as_slice()], Some(key));
+
+        assert_eq!(audio, frame.repeat(3));
+    }
+
+    #[test]
+    fn dolby_decryption_survives_arbitrary_input() {
+        let mut decryptor = DolbyStream::default();
+        decryptor.set_key(Some(shaka_key()));
+        let mut out = Vec::new();
+        for chunk in [
+            &[0x0B][..],
+            &[0x77, 0, 0],
+            &[0xFF; 300],
+            &SA_AC3_PACKED[..100],
+        ] {
+            decryptor.push(chunk, &mut out);
+        }
+        decryptor.flush(&mut out);
     }
 
     // --- SAMPLE-AES ---------------------------------------------------------
@@ -972,15 +1385,13 @@ mod tests {
 
     #[test]
     fn ts_undecodable_audio_names_the_codec() {
-        for (stream_type, name) in [(0x11, "LATM AAC"), (0x81, "AC-3"), (0x87, "E-AC-3")] {
-            let mut segment = pat_packet(PMT_PID);
-            segment.extend(pmt_packet(PMT_PID, &[(stream_type, AUDIO_PID)]));
+        let mut segment = pat_packet(PMT_PID);
+        segment.extend(pmt_packet(PMT_PID, &[(0x11, AUDIO_PID)]));
 
-            assert_eq!(
-                demux(&segment),
-                Err(HlsError::UnsupportedCodec(name.to_string()))
-            );
-        }
+        assert_eq!(
+            demux(&segment),
+            Err(HlsError::UnsupportedCodec("LATM AAC".to_string()))
+        );
     }
 
     #[test]

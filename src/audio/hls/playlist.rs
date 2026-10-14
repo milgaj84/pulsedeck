@@ -420,8 +420,10 @@ enum CodecClass {
     HeAac,
     /// Opus (in fragmented MP4).
     Opus,
+    /// AC-3 or E-AC-3.
+    Dolby,
     Video,
-    /// Audio we cannot decode (AC-3, E-AC-3, ...).
+    /// Audio we cannot decode.
     Other,
 }
 
@@ -441,6 +443,8 @@ fn classify_codecs(codecs: &str) -> CodecClass {
             CodecClass::Good
         } else if codec == "opus" || codec == "mp4a.ad" {
             CodecClass::Opus
+        } else if ["ac-3", "ec-3", "mp4a.a5", "mp4a.a6"].contains(&codec.as_str()) {
+            CodecClass::Dolby
         } else if codec == "mp4a.40.5" || codec == "mp4a.40.29" {
             CodecClass::HeAac
         } else if codec.starts_with("mp4a.40.") {
@@ -452,6 +456,7 @@ fn classify_codecs(codecs: &str) -> CodecClass {
             (CodecClass::Video, _) | (_, CodecClass::Video) => CodecClass::Video,
             (CodecClass::Other, _) | (_, CodecClass::Other) => CodecClass::Other,
             (CodecClass::Opus, _) | (_, CodecClass::Opus) => CodecClass::Opus,
+            (CodecClass::Dolby, _) | (_, CodecClass::Dolby) => CodecClass::Dolby,
             (CodecClass::HeAac, _) | (_, CodecClass::HeAac) => CodecClass::HeAac,
             _ => CodecClass::Good,
         };
@@ -463,7 +468,7 @@ fn classify_codecs(codecs: &str) -> CodecClass {
 ///
 /// An audio rendition with its own URI wins (default first). Otherwise the
 /// lowest-bandwidth audio-only variant is chosen, preferring AAC-LC/MP3 over
-/// HE-AAC, and both over Opus. A variant without a `CODECS` attribute is accepted as a last resort
+/// HE-AAC, and all of them over Opus and Dolby. A variant without a `CODECS` attribute is accepted as a last resort
 /// and the demuxer decides what it really contains.
 pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
     if let Some(rendition) = master
@@ -496,6 +501,7 @@ pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
     if let Some(uri) = lowest(Some(CodecClass::Good))
         .or_else(|| lowest(Some(CodecClass::HeAac)))
         .or_else(|| lowest(Some(CodecClass::Opus)))
+        .or_else(|| lowest(Some(CodecClass::Dolby)))
         .or_else(|| lowest(None))
     {
         return Ok(uri);
@@ -972,11 +978,28 @@ mod tests {
 
     #[test]
     fn master_with_only_undecodable_audio_names_the_codec() {
-        let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"ac-3\"\na.m3u8\n";
+        let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"alac\"\na.m3u8\n";
         assert_eq!(
             select_variant(&master(text)),
-            Err(HlsError::UnsupportedCodec("ac-3".to_string()))
+            Err(HlsError::UnsupportedCodec("alac".to_string()))
         );
+    }
+
+    #[test]
+    fn dolby_variants_are_chosen_after_the_other_playable_ones() {
+        let text = "#EXTM3U\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"ec-3\"\ndolby.m3u8\n\
+            #EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS=\"mp4a.40.2\"\naac.m3u8\n";
+        assert!(select_variant(&master(text))
+            .unwrap()
+            .as_str()
+            .ends_with("aac.m3u8"));
+
+        let only_dolby = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS=\"ac-3\"\ndolby.m3u8\n";
+        assert!(select_variant(&master(only_dolby))
+            .unwrap()
+            .as_str()
+            .ends_with("dolby.m3u8"));
     }
 
     #[test]
@@ -1003,7 +1026,10 @@ mod tests {
         assert_eq!(classify_codecs("mp4a.40.5"), CodecClass::HeAac);
         assert_eq!(classify_codecs("mp4a.40.29"), CodecClass::HeAac);
         assert_eq!(classify_codecs("avc1.4d401f,mp4a.40.2"), CodecClass::Video);
-        assert_eq!(classify_codecs("ec-3"), CodecClass::Other);
+        assert_eq!(classify_codecs("ec-3"), CodecClass::Dolby);
+        assert_eq!(classify_codecs("ac-3"), CodecClass::Dolby);
+        assert_eq!(classify_codecs("mp4a.a6"), CodecClass::Dolby);
+        assert_eq!(classify_codecs("alac"), CodecClass::Other);
         assert_eq!(classify_codecs("opus"), CodecClass::Opus);
         assert_eq!(classify_codecs("mp4a.ad"), CodecClass::Opus);
     }

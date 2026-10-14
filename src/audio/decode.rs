@@ -1,7 +1,8 @@
-use super::codec::{detect_codec, CodecDetection};
+use super::ac3::Ac3Backend;
+use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
 use super::panic_guard;
-use super::pcm_source::PcmSource;
+use super::pcm_source::{FrameBackend, PcmSource};
 use super::stream_source::StreamSource;
 use super::symphonia_backend::SymphoniaBackend;
 use super::types::{
@@ -33,17 +34,18 @@ impl DecodePipeline {
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         detection: CodecDetection,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
-        let wrapped = ReadWrapper::new(reader);
         let verified_mp3 = detection.verified_mp3();
         let extension = verified_mp3.then_some("mp3");
 
         // Third-party decoders can panic on input they cannot handle, so the
         // probe runs inside a guard that turns a panic into an error.
-        let opened = panic_guard::run_quiet(|| {
-            SymphoniaBackend::open(wrapped, extension).and_then(PcmSource::new)
+        let opened = panic_guard::run_quiet(|| match detection.hint {
+            // Symphonia has no AC-3 decoder; these go to their own backend.
+            CodecHint::Ac3 | CodecHint::Eac3 => open_pcm(Ok(Ac3Backend::new(reader))),
+            _ => open_pcm(SymphoniaBackend::open(ReadWrapper::new(reader), extension)),
         });
-        let pcm = match opened {
-            Ok(Ok(pcm)) => pcm,
+        let (pcm, sample_rate, channels) = match opened {
+            Ok(Ok(opened)) => opened,
             Ok(Err(message)) if verified_mp3 => {
                 return Err(EngineError::Decode(format!(
                     "verified MP3 stream could not be decoded: {message}"
@@ -60,12 +62,22 @@ impl DecodePipeline {
 
         let format = StreamFormat {
             codec: detection.hint.label().to_string(),
-            sample_rate: pcm.sample_rate(),
-            channels: pcm.channels(),
+            sample_rate,
+            channels,
         };
         let visualizer = VisualizerSource::new(pcm, sample_buffer);
         Ok((Box::new(visualizer), format))
     }
+}
+
+/// A decoded stream ready to play, with the format of its first frame.
+type Opened = (Box<dyn Source<Item = f32> + Send>, u32, u16);
+
+/// Decode the first frame of a backend so the stream's format is known.
+fn open_pcm<B: FrameBackend + 'static>(backend: Result<B, String>) -> Result<Opened, String> {
+    let source = PcmSource::new(backend?)?;
+    let (rate, channels) = (source.sample_rate(), source.channels());
+    Ok((Box::new(source), rate, channels))
 }
 
 /// The error for a decoder that panicked while probing a stream.
@@ -860,6 +872,9 @@ mod tests {
         const OGG_VORBIS: &[u8] = include_bytes!("testdata/tone.ogg");
         const OPUS: &[u8] = include_bytes!("testdata/tone.opus");
         const OPUS_SIX_CHANNELS: &[u8] = include_bytes!("testdata/tone_6ch.opus");
+        const AC3: &[u8] = include_bytes!("testdata/dolby/tone.ac3");
+        const EAC3: &[u8] = include_bytes!("testdata/dolby/tone.eac3");
+        const AC3_SURROUND: &[u8] = include_bytes!("testdata/dolby/tone51.ac3");
         const FLAC: &[u8] = include_bytes!("testdata/tone.flac");
         const FRAGMENTED_MP4: &[u8] = include_bytes!("testdata/tone_frag.mp4");
 
@@ -904,6 +919,18 @@ mod tests {
             assert_eq!(format.sample_rate, 48_000);
             assert_eq!(samples.len(), 4000);
             assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
+        }
+
+        #[test]
+        fn ac3_and_eac3_decode_real_audio() {
+            for (bytes, label) in [(AC3, "AC-3"), (EAC3, "E-AC-3"), (AC3_SURROUND, "AC-3")] {
+                let (format, samples) = first_samples(bytes, 4000);
+
+                assert_eq!(format.codec, label);
+                assert_eq!((format.sample_rate, format.channels), (48_000, 2));
+                assert_eq!(samples.len(), 4000);
+                assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
+            }
         }
 
         #[test]
@@ -974,6 +1001,24 @@ mod tests {
                     .any(|event| matches!(event, EngineEvent::Connected { .. })),
                 "expected a connection"
             );
+        }
+
+        #[test]
+        fn an_ac3_station_connects_through_the_worker_whatever_its_content_type() {
+            // Dolby streams are recognised by their frames, so a wrong type is fine.
+            for content_type in ["audio/ac3", "audio/mpeg", "application/octet-stream"] {
+                let server = serve(content_type, AC3);
+
+                let events = run_worker_collecting(server.url("/stream"));
+
+                match events.iter().find_map(|event| match event {
+                    EngineEvent::Connected { format, .. } => Some(format.clone()),
+                    _ => None,
+                }) {
+                    Some(format) => assert_eq!(format.codec, "AC-3", "{content_type}"),
+                    None => panic!("no connection for {content_type}"),
+                }
+            }
         }
 
         #[test]
