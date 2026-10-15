@@ -2,6 +2,16 @@
 
 All notable changes to the PulseDeck project will be documented in this file.
 
+---
+
+## [1.3.2] - 2026-10-15
+
+### Fixed
+- **Streams PulseDeck cannot identify fail in seconds, not minutes.** The format probe may read up to 1 MiB, which on a live stream of 16-32 KB/s kept a station on "Connecting" for a minute or more before any error. Identification is now cut off after 512 KiB or 20 seconds, with the message "no recognisable audio format found in the stream". A large cover-art tag at the start of a stream is still fine.
+- **Junk "now playing" titles no longer show up as songs.** Some stations send bookkeeping instead of a track. iHeart streams wrap the song as `Artist - text="Song" song_spot="M" MediaBaseId=...` (or `title="Song",artist="Artist",url="..."`), and also send station promos, podcast ads and `Spot Block End` markers the same way; others send placeholders such as `_` or `9999999 - 9999999`. These used to appear in the title line, the history and desktop notifications. iHeart titles now read `Artist - Song`, and promos, ad markers and placeholders become "no track". Applies to ICY metadata and HLS timed metadata. Titles that are real, including purely numeric ones like `1999`, are left alone.
+
+---
+
 ## [1.3.1] - 2026-10-15
 
 ### Fixed
