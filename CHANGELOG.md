@@ -8,7 +8,12 @@ All notable changes to the PulseDeck project will be documented in this file.
 - **Many AAC radio stations that never played now do.** About a quarter of popular plain AAC streams (Europe 1, iHeart stations such as KIIS FM, talkSPORT, Times Radio, Q-music, Kisstory, SomaFM's AAC streams and many more) use the MPEG-2 form of the ADTS header, or frames with a CRC. The Symphonia decoder only reads the MPEG-4 form without a CRC, so the probe found nothing and, on a live stream, kept reading: the station sat on "Connecting" forever. This affected every earlier version. PulseDeck now recognises these streams from their first frames and rewrites the headers on the fly (HLS already did this); ordinary AAC streams are left alone. Verified on 12 real stations that did not play before, with track titles.
 
 ### Improved
+- **A stream that fails while playing says why.** If a decoder crashes or gives up after playback has started (a damaged stream, an Ogg track change to a codec that cannot be played, a stream that turns to junk), the player now shows the reason, and stops retrying when it can never work, instead of just going quiet.
+- **Fragmented MP4 stations show "MP4"** as their codec instead of "Auto-detected".
 - The manual real-station test (`PULSEDECK_HLS_URL=<url> cargo test manual_real_hls -- --ignored --nocapture`, which works for any stream, not just HLS) now prints why a connection failed.
+
+### Changed
+- rodio's own built-in decoders (`claxon`, `lewton`, `hound` and the `ogg` crate) are no longer built; PulseDeck has decoded everything through Symphonia since 1.3.0. Seven fewer dependencies.
 
 ---
 

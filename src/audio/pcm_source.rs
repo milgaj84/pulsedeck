@@ -13,7 +13,9 @@ use std::time::Duration;
 
 use rodio::Source;
 
+use super::decode::decoder_crashed;
 use super::panic_guard;
+use super::types::EngineError;
 
 /// Channel count and sample rate of a decoded frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +23,9 @@ pub(super) struct SignalInfo {
     pub(super) channels: u16,
     pub(super) rate: u32,
 }
+
+/// Told, once, why a stream stopped when it did not simply end.
+pub(super) type FailureSink = Box<dyn FnOnce(EngineError) + Send>;
 
 /// A decoder that yields one frame of interleaved `f32` samples at a time.
 pub(super) trait FrameBackend: Send {
@@ -34,6 +39,7 @@ pub(super) struct PcmSource<B: FrameBackend> {
     frame: Vec<f32>,
     pos: usize,
     info: SignalInfo,
+    failure: Option<FailureSink>,
 }
 
 impl<B: FrameBackend> PcmSource<B> {
@@ -48,11 +54,26 @@ impl<B: FrameBackend> PcmSource<B> {
                 channels: 2,
                 rate: 44_100,
             },
+            failure: None,
         };
         match source.refill() {
             Ok(true) => Ok(source),
             Ok(false) => Err("stream ended before any audio could be decoded".to_string()),
             Err(message) => Err(message),
+        }
+    }
+
+    /// Report to `sink`, once, a stream that stops because the decoder failed or
+    /// crashed after it had started playing. Without this the stream would just
+    /// end, and the player could not tell the listener why.
+    pub(super) fn with_failure_sink(mut self, sink: FailureSink) -> Self {
+        self.failure = Some(sink);
+        self
+    }
+
+    fn report(&mut self, error: EngineError) {
+        if let Some(sink) = self.failure.take() {
+            sink(error);
         }
     }
 
@@ -76,10 +97,12 @@ impl<B: FrameBackend> PcmSource<B> {
                 }
                 Ok(Err(message)) => {
                     self.frame.clear();
+                    self.report(EngineError::Decode(message.clone()));
                     return Err(message);
                 }
                 Err(()) => {
                     self.frame.clear();
+                    self.report(decoder_crashed());
                     return Err("decoder panicked".to_string());
                 }
             }
@@ -231,6 +254,47 @@ mod tests {
     fn a_panic_on_the_first_frame_is_a_construction_error() {
         let result = PcmSource::new(scripted(vec![], Then::Panic));
         assert!(result.is_err());
+    }
+
+    fn sink() -> (FailureSink, std::sync::mpsc::Receiver<EngineError>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (Box::new(move |error| tx.send(error).unwrap()), rx)
+    }
+
+    #[test]
+    fn a_decoder_panic_after_playback_started_is_reported_once() {
+        let (sink, reported) = sink();
+        let backend = scripted(vec![(info(2, 44_100), vec![0.1, 0.2])], Then::Panic);
+        let source = PcmSource::new(backend).unwrap().with_failure_sink(sink);
+
+        assert_eq!(source.collect::<Vec<_>>(), vec![0.1, 0.2]);
+
+        let error = reported.try_recv().expect("a failure report");
+        assert!(error.to_status_string().contains("crashed the decoder"));
+        assert!(reported.try_recv().is_err(), "reported twice");
+    }
+
+    #[test]
+    fn a_backend_error_after_playback_started_is_reported_with_its_message() {
+        let (sink, reported) = sink();
+        let backend = scripted(vec![(info(2, 44_100), vec![0.1])], Then::Error);
+        let source = PcmSource::new(backend).unwrap().with_failure_sink(sink);
+
+        let _ = source.collect::<Vec<_>>();
+
+        let error = reported.try_recv().expect("a failure report");
+        assert!(error.to_status_string().contains("bad packet"));
+    }
+
+    #[test]
+    fn a_normal_end_is_not_a_failure() {
+        let (sink, reported) = sink();
+        let backend = scripted(vec![(info(2, 44_100), vec![0.1, 0.2])], Then::End);
+        let source = PcmSource::new(backend).unwrap().with_failure_sink(sink);
+
+        assert_eq!(source.collect::<Vec<_>>(), vec![0.1, 0.2]);
+
+        assert!(reported.try_recv().is_err());
     }
 
     #[test]

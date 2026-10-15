@@ -17,6 +17,8 @@ pub(super) enum CodecHint {
     Wav,
     Ac3,
     Eac3,
+    /// MP4 (ISO base media): AAC and friends in a fragmented or plain MP4.
+    Mp4,
     Unknown,
 }
 
@@ -32,6 +34,7 @@ impl CodecHint {
             Self::Wav => "WAV",
             Self::Ac3 => "AC-3",
             Self::Eac3 => "E-AC-3",
+            Self::Mp4 => "MP4",
             Self::Unknown => "Auto-detected",
         }
     }
@@ -109,6 +112,11 @@ fn codec_from_magic(bytes: &[u8]) -> Option<CodecHint> {
         return Some(CodecHint::Mp3);
     }
 
+    // An MP4 starts with a box: a size, then its type.
+    if matches!(bytes.get(4..8), Some(b"ftyp" | b"styp" | b"moof" | b"moov")) {
+        return Some(CodecHint::Mp4);
+    }
+
     if bytes.len() >= 2 {
         let first = bytes[0];
         let second = bytes[1];
@@ -151,6 +159,7 @@ fn codec_from_content_type(content_type: &str) -> Option<CodecHint> {
         "audio/ogg" | "application/ogg" => Some(CodecHint::Ogg),
         "audio/flac" | "audio/x-flac" => Some(CodecHint::Flac),
         "audio/wav" | "audio/wave" | "audio/x-wav" => Some(CodecHint::Wav),
+        "audio/mp4" | "audio/x-m4a" | "audio/m4a" | "video/mp4" => Some(CodecHint::Mp4),
         "audio/ac3" | "audio/x-ac3" | "audio/vnd.dolby.dd-raw" => Some(CodecHint::Ac3),
         "audio/eac3" | "audio/x-eac3" => Some(CodecHint::Eac3),
         _ => None,
@@ -177,6 +186,8 @@ fn codec_from_url(url: &str) -> Option<CodecHint> {
         Some(CodecHint::Flac)
     } else if path.ends_with(".wav") || path.ends_with(".wave") {
         Some(CodecHint::Wav)
+    } else if path.ends_with(".m4a") || path.ends_with(".mp4") {
+        Some(CodecHint::Mp4)
     } else if path.ends_with(".ac3") {
         Some(CodecHint::Ac3)
     } else if path.ends_with(".eac3") || path.ends_with(".ec3") {
@@ -246,6 +257,23 @@ mod tests {
         // Other codecs are never rewritten.
         let mp3 = include_bytes!("hls/testdata/tone.mp3");
         assert!(!detect_codec(mp3, "audio/mpeg", "https://r.test/x").adts_rewrite);
+    }
+
+    #[test]
+    fn mp4_is_recognised_by_its_boxes_content_type_and_extension() {
+        let fragmented = include_bytes!("testdata/tone_frag.mp4");
+        assert_eq!(codec_from_magic(fragmented), Some(CodecHint::Mp4));
+        assert_eq!(detect_codec(fragmented, "", "").hint, CodecHint::Mp4);
+        assert_eq!(CodecHint::Mp4.label(), "MP4");
+        for content_type in ["audio/mp4", "audio/x-m4a", "video/mp4; codecs=mp4a"] {
+            assert_eq!(codec_from_content_type(content_type), Some(CodecHint::Mp4));
+        }
+        assert_eq!(
+            codec_from_url("https://r.test/live.m4a?x=1"),
+            Some(CodecHint::Mp4)
+        );
+        // An MP3 or AAC stream that merely contains these letters is not MP4.
+        assert_eq!(codec_from_magic(b"ID3\x04ftypmoov"), Some(CodecHint::Mp3));
     }
 
     #[test]

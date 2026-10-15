@@ -3,7 +3,7 @@ use super::adts_stream::AdtsStream;
 use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
 use super::panic_guard;
-use super::pcm_source::{FrameBackend, PcmSource};
+use super::pcm_source::{FailureSink, FrameBackend, PcmSource};
 use super::stream_source::StreamSource;
 use super::symphonia_backend::SymphoniaBackend;
 use super::types::{
@@ -34,6 +34,7 @@ impl DecodePipeline {
         reader: R,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         detection: CodecDetection,
+        failures: Option<FailureSink>,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
         let verified_mp3 = detection.verified_mp3();
         let extension = verified_mp3.then_some("mp3");
@@ -48,8 +49,11 @@ impl DecodePipeline {
         // probe runs inside a guard that turns a panic into an error.
         let opened = panic_guard::run_quiet(|| match detection.hint {
             // Symphonia has no AC-3 decoder; these go to their own backend.
-            CodecHint::Ac3 | CodecHint::Eac3 => open_pcm(Ok(Ac3Backend::new(reader))),
-            _ => open_pcm(SymphoniaBackend::open(ReadWrapper::new(reader), extension)),
+            CodecHint::Ac3 | CodecHint::Eac3 => open_pcm(Ok(Ac3Backend::new(reader)), failures),
+            _ => open_pcm(
+                SymphoniaBackend::open(ReadWrapper::new(reader), extension),
+                failures,
+            ),
         });
         let (pcm, sample_rate, channels) = match opened {
             Ok(Ok(opened)) => opened,
@@ -81,8 +85,14 @@ impl DecodePipeline {
 type Opened = (Box<dyn Source<Item = f32> + Send>, u32, u16);
 
 /// Decode the first frame of a backend so the stream's format is known.
-fn open_pcm<B: FrameBackend + 'static>(backend: Result<B, String>) -> Result<Opened, String> {
-    let source = PcmSource::new(backend?)?;
+fn open_pcm<B: FrameBackend + 'static>(
+    backend: Result<B, String>,
+    failures: Option<FailureSink>,
+) -> Result<Opened, String> {
+    let mut source = PcmSource::new(backend?)?;
+    if let Some(sink) = failures {
+        source = source.with_failure_sink(sink);
+    }
     let (rate, channels) = (source.sample_rate(), source.channels());
     Ok((Box::new(source), rate, channels))
 }
@@ -452,7 +462,11 @@ pub(super) fn run_worker(
     let buffered_stream = BufReader::with_capacity(64 * 1024, stream);
     let chained = Cursor::new(prebuffer).chain(buffered_stream);
 
-    match DecodePipeline::build(chained, sample_buffer, detection) {
+    let failures: FailureSink = {
+        let event_tx = event_tx.clone();
+        Box::new(move |error| send_failure(&event_tx, generation, error))
+    };
+    match DecodePipeline::build(chained, sample_buffer, detection, Some(failures)) {
         Ok((source, format)) => {
             let _ = event_tx.send(EngineEvent::Connected {
                 generation,
@@ -618,6 +632,7 @@ mod tests {
             Cursor::new(bytes),
             sample_buffer,
             detection(CodecHint::Mp3, CodecSource::MagicBytes),
+            None,
         );
 
         assert!(matches!(result, Ok(_) | Err(EngineError::Decode(_))));
@@ -630,6 +645,7 @@ mod tests {
             Cursor::new(vec![0_u8; 32]),
             sample_buffer,
             detection(CodecHint::Mp3, CodecSource::ContentType),
+            None,
         );
 
         match result {
@@ -650,6 +666,7 @@ mod tests {
                 Cursor::new(vec![0_u8; 32]),
                 sample_buffer_clone,
                 detection(CodecHint::Unknown, CodecSource::Unknown),
+                None,
             )
         });
 
@@ -897,6 +914,7 @@ mod tests {
                 Cursor::new(bytes.to_vec()),
                 Arc::new(Mutex::new(VecDeque::new())),
                 detect_codec(bytes, "", ""),
+                None,
             )
         }
 
@@ -1059,6 +1077,33 @@ mod tests {
                     None => panic!("no connection for {content_type}"),
                 }
             }
+        }
+
+        #[test]
+        fn a_stream_that_breaks_after_playing_reports_why() {
+            // Real AC-3 frames, then more junk than the decoder will look through.
+            let mut stream = AC3.to_vec();
+            stream.extend(std::iter::repeat_n(0x55, 400 * 1024));
+            let (tx, rx) = mpsc::channel();
+            let sink: FailureSink = Box::new(move |error| tx.send(error).unwrap());
+            let (source, _) = DecodePipeline::build(
+                Cursor::new(stream),
+                Arc::new(Mutex::new(VecDeque::new())),
+                detect_codec(AC3, "", ""),
+                Some(sink),
+            )
+            .unwrap_or_else(|e| panic!("{}", e.to_status_string()));
+
+            let samples = source.count();
+
+            assert!(samples > 60_000, "the good part plays: {samples}");
+            let error = rx.try_recv().expect("a failure report");
+            assert!(
+                error.to_status_string().contains("no AC-3 frames"),
+                "{}",
+                error.to_status_string()
+            );
+            assert!(rx.try_recv().is_err());
         }
 
         #[test]

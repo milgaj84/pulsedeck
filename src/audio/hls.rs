@@ -22,6 +22,7 @@ use super::codec::detect_codec;
 use super::decode::{
     fill_prebuffer, send_abandoned, send_failure, DecodePipeline, PrebufferFailure,
 };
+use super::pcm_source::FailureSink;
 use super::types::{ConnectRequest, EngineError, EngineEvent, PrebufferConfig};
 use fetcher::{run_fetcher, FetcherConfig, HlsHttp, MAX_PLAYLIST_BYTES};
 use playlist::{HlsError, MediaPlaylist, Playlist};
@@ -239,7 +240,11 @@ pub(super) fn run(ctx: HlsContext<'_>, playlist_url: &str, body: Vec<u8>) {
     let detection = detect_codec(&prebuffer, "", "");
     let chained = Cursor::new(prebuffer).chain(BufReader::with_capacity(64 * 1024, source));
 
-    match DecodePipeline::build(chained, sample_buffer, detection) {
+    let failures: FailureSink = {
+        let event_tx = event_tx.clone();
+        Box::new(move |error| send_failure(&event_tx, generation, error))
+    };
+    match DecodePipeline::build(chained, sample_buffer, detection, Some(failures)) {
         Ok((decoded, mut format)) => {
             format.codec = format!("HLS {}", format.codec);
             let _ = event_tx.send(EngineEvent::Connected {
