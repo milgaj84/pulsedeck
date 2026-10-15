@@ -16,6 +16,8 @@ mod source;
 mod test_fixtures;
 mod ts;
 
+pub(super) use ts::AdtsNormalizer;
+
 use super::codec::detect_codec;
 use super::decode::{
     fill_prebuffer, send_abandoned, send_failure, DecodePipeline, PrebufferFailure,

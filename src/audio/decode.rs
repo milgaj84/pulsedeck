@@ -1,4 +1,5 @@
 use super::ac3::Ac3Backend;
+use super::adts_stream::AdtsStream;
 use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
 use super::panic_guard;
@@ -36,6 +37,12 @@ impl DecodePipeline {
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
         let verified_mp3 = detection.verified_mp3();
         let extension = verified_mp3.then_some("mp3");
+        // Symphonia cannot read MPEG-2 ADTS or CRC-protected AAC as it is.
+        let reader: Box<dyn Read + Send> = if detection.adts_rewrite {
+            Box::new(AdtsStream::new(reader))
+        } else {
+            Box::new(reader)
+        };
 
         // Third-party decoders can panic on input they cannot handle, so the
         // probe runs inside a guard that turns a panic into an error.
@@ -486,7 +493,11 @@ mod tests {
     }
 
     fn detection(hint: CodecHint, source: CodecSource) -> CodecDetection {
-        CodecDetection { hint, source }
+        CodecDetection {
+            hint,
+            source,
+            adts_rewrite: false,
+        }
     }
 
     struct TimeoutReader;
@@ -820,10 +831,13 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            let Some(EngineEvent::Connected { source, format, .. }) = events
+            let terminal = events
                 .into_iter()
-                .rfind(|event| !matches!(event, EngineEvent::Buffering { .. }))
-            else {
+                .rfind(|event| !matches!(event, EngineEvent::Buffering { .. }));
+            let Some(EngineEvent::Connected { source, format, .. }) = terminal else {
+                if let Some(EngineEvent::Failed { error, .. }) = &terminal {
+                    println!("FAILED {}", error.to_status_string());
+                }
                 panic!("did not connect");
             };
             println!(
@@ -934,6 +948,22 @@ mod tests {
         }
 
         #[test]
+        fn mpeg2_and_crc_protected_adts_aac_decode_like_the_plain_form() {
+            use crate::audio::adts_stream::fixtures::{frames, mpeg2, with_crc, AAC};
+            let (plain_format, plain) = first_samples(AAC, 4000);
+            let frames = frames();
+
+            for stream in [mpeg2(&frames), with_crc(&frames)] {
+                let (format, samples) = first_samples(&stream, 4000);
+
+                assert_eq!(format.codec, "AAC");
+                assert_eq!(format.sample_rate, plain_format.sample_rate);
+                // The same audio, sample for sample, once the headers are rewritten.
+                assert_eq!(samples, plain);
+            }
+        }
+
+        #[test]
         fn six_channel_opus_fails_with_a_clear_not_supported_error() {
             let Err(EngineError::Decode(message)) = build(OPUS_SIX_CHANNELS) else {
                 panic!("6-channel Opus must be rejected as a decode error");
@@ -1001,6 +1031,34 @@ mod tests {
                     .any(|event| matches!(event, EngineEvent::Connected { .. })),
                 "expected a connection"
             );
+        }
+
+        #[test]
+        fn an_mpeg2_adts_aac_station_connects_through_the_worker() {
+            use crate::audio::adts_stream::fixtures::{frames, mpeg2, with_crc};
+            let frames = frames();
+            let mpeg2 = mpeg2(&frames);
+            // Whatever the content type, and joined in the middle of a frame.
+            let cases = [
+                (mpeg2.clone(), "audio/aac"),
+                (mpeg2.clone(), "audio/aacp"),
+                (mpeg2[23..].to_vec(), "audio/aac"),
+                (with_crc(&frames), "audio/aac"),
+            ];
+            for (bytes, content_type) in cases {
+                // `serve` wants the body for as long as the server runs.
+                let server = serve(content_type, Box::leak(bytes.into_boxed_slice()));
+
+                let events = run_worker_collecting(server.url("/stream"));
+
+                match events.iter().find_map(|event| match event {
+                    EngineEvent::Connected { format, .. } => Some(format.clone()),
+                    _ => None,
+                }) {
+                    Some(format) => assert_eq!(format.codec, "AAC"),
+                    None => panic!("no connection for {content_type}"),
+                }
+            }
         }
 
         #[test]

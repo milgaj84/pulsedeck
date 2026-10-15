@@ -49,6 +49,9 @@ pub(super) enum CodecSource {
 pub(super) struct CodecDetection {
     pub(super) hint: CodecHint,
     pub(super) source: CodecSource,
+    /// The stream is ADTS AAC in a form Symphonia cannot read (the MPEG-2 header
+    /// or CRC-protected frames) and its frames must be rewritten first.
+    pub(super) adts_rewrite: bool,
 }
 
 impl CodecDetection {
@@ -62,30 +65,22 @@ pub(super) fn detect_codec(
     content_type: &str,
     final_url: &str,
 ) -> CodecDetection {
-    if let Some(hint) = codec_from_magic(prebuffer) {
-        return CodecDetection {
-            hint,
-            source: CodecSource::MagicBytes,
-        };
-    }
-
-    if let Some(hint) = codec_from_content_type(content_type) {
-        return CodecDetection {
-            hint,
-            source: CodecSource::ContentType,
-        };
-    }
-
-    if let Some(hint) = codec_from_url(final_url) {
-        return CodecDetection {
-            hint,
-            source: CodecSource::UrlExtension,
-        };
-    }
-
+    let (hint, source) = if let Some(hint) = codec_from_magic(prebuffer) {
+        (hint, CodecSource::MagicBytes)
+    } else if let Some(hint) = codec_from_content_type(content_type) {
+        (hint, CodecSource::ContentType)
+    } else if let Some(hint) = codec_from_url(final_url) {
+        (hint, CodecSource::UrlExtension)
+    } else {
+        (CodecHint::Unknown, CodecSource::Unknown)
+    };
+    // Whatever called the stream AAC, what matters is the frames in it.
+    let adts_rewrite = matches!(hint, CodecHint::Aac | CodecHint::Unknown)
+        && super::adts_stream::needs_rewrite(prebuffer);
     CodecDetection {
-        hint: CodecHint::Unknown,
-        source: CodecSource::Unknown,
+        hint,
+        source,
+        adts_rewrite,
     }
 }
 
@@ -220,6 +215,37 @@ mod tests {
                 Some(CodecHint::Aac)
             );
         }
+    }
+
+    #[test]
+    fn aac_streams_in_the_forms_symphonia_rejects_are_flagged_for_rewriting() {
+        let canonical = include_bytes!("hls/testdata/tone.aac");
+        let mut mpeg2 = canonical.to_vec();
+        // Every frame header, not just the first, carries the ID bit.
+        let mut pos = 0;
+        while pos + 7 <= mpeg2.len() {
+            mpeg2[pos + 1] |= 0x08;
+            pos += (usize::from(mpeg2[pos + 3] & 3) << 11)
+                | (usize::from(mpeg2[pos + 4]) << 3)
+                | usize::from(mpeg2[pos + 5] >> 5);
+        }
+
+        let plain = detect_codec(canonical, "audio/aac", "https://r.test/x");
+        assert_eq!(plain.hint, CodecHint::Aac);
+        assert!(!plain.adts_rewrite);
+
+        let old = detect_codec(&mpeg2, "audio/aacp", "https://r.test/x");
+        assert_eq!(old.hint, CodecHint::Aac);
+        assert!(old.adts_rewrite);
+
+        // Joined mid-frame, with a content type saying AAC: found by its frames.
+        let joined = detect_codec(&mpeg2[40..], "audio/aac", "https://r.test/x");
+        assert_eq!(joined.hint, CodecHint::Aac);
+        assert!(joined.adts_rewrite);
+
+        // Other codecs are never rewritten.
+        let mp3 = include_bytes!("hls/testdata/tone.mp3");
+        assert!(!detect_codec(mp3, "audio/mpeg", "https://r.test/x").adts_rewrite);
     }
 
     #[test]

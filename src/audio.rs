@@ -1,4 +1,5 @@
 mod ac3;
+mod adts_stream;
 mod capability;
 mod codec;
 mod codecs;
