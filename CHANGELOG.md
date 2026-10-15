@@ -2,7 +2,7 @@
 
 All notable changes to the PulseDeck project will be documented in this file.
 
-## [Unreleased]
+## [1.3.1] - 2026-10-15
 
 ### Fixed
 - **Many AAC radio stations that never played now do.** About a quarter of popular plain AAC streams (Europe 1, iHeart stations such as KIIS FM, talkSPORT, Times Radio, Q-music, Kisstory, SomaFM's AAC streams and many more) use the MPEG-2 form of the ADTS header, or frames with a CRC. The Symphonia decoder only reads the MPEG-4 form without a CRC, so the probe found nothing and, on a live stream, kept reading: the station sat on "Connecting" forever. This affected every earlier version. PulseDeck now recognises these streams from their first frames and rewrites the headers on the fly (HLS already did this); ordinary AAC streams are left alone. Verified on 12 real stations that did not play before, with track titles.
