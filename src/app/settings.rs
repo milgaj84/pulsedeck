@@ -79,6 +79,12 @@ impl App {
             SettingRow::SaveHistory => {
                 Some(SettingSnapshot::Bool(self.config.playback.save_history))
             }
+            SettingRow::LoudnessNormalization => Some(SettingSnapshot::Bool(
+                self.config.audio.loudness_normalization,
+            )),
+            SettingRow::LoudnessTarget => Some(SettingSnapshot::Int(i32::from(
+                self.config.audio.loudness_target_lufs,
+            ))),
         }
     }
 
@@ -127,6 +133,14 @@ impl App {
             (SettingRow::SaveHistory, SettingSnapshot::Bool(value)) => {
                 self.config.playback.save_history = value;
             }
+            (SettingRow::LoudnessNormalization, SettingSnapshot::Bool(value)) => {
+                self.config.audio.loudness_normalization = value;
+                self.sync_loudness();
+            }
+            (SettingRow::LoudnessTarget, SettingSnapshot::Int(value)) => {
+                self.config.audio.loudness_target_lufs = value.clamp(-30, -10) as i8;
+                self.sync_loudness();
+            }
             _ => {}
         }
     }
@@ -155,6 +169,8 @@ impl App {
                 self.config.playback.save_history = value;
                 true
             }
+            Some(SettingRow::LoudnessNormalization) => self.apply_loudness_setting(),
+            Some(SettingRow::LoudnessTarget) => self.apply_loudness_target_setting(forward),
             None => false,
         }
     }
@@ -195,6 +211,38 @@ impl App {
         true
     }
 
+    fn apply_loudness_setting(&mut self) -> bool {
+        let value = !self.config.audio.loudness_normalization;
+        self.config.audio.loudness_normalization = value;
+        self.sync_loudness();
+        self.set_info_notice(format!(
+            "Loudness normalisation: {}",
+            if value { "on" } else { "off" }
+        ));
+        true
+    }
+
+    fn apply_loudness_target_setting(&mut self, forward: bool) -> bool {
+        // "Forward" is louder: the choices run from -23 up to -14.
+        let ascending = {
+            let mut targets = crate::config_toml::LOUDNESS_TARGETS;
+            targets.sort_unstable();
+            targets
+        };
+        let next = step_choice(&ascending, self.config.audio.loudness_target_lufs, forward);
+        self.config.audio.loudness_target_lufs = next;
+        self.sync_loudness();
+        self.set_info_notice(format!("Loudness target: {next} LUFS"));
+        true
+    }
+
+    pub(super) fn toggle_loudness_setting(&mut self) {
+        self.ui.overlays.selected_setting_idx = SettingRow::LoudnessNormalization.index();
+        if self.apply_selected_setting(true) {
+            self.persist_config_change();
+        }
+    }
+
     pub(super) fn cycle_theme_setting(&mut self) {
         self.ui.overlays.selected_setting_idx = SettingRow::Theme.index();
         if self.apply_selected_setting(true) {
@@ -216,6 +264,15 @@ impl App {
             .send(crate::audio::AudioCommand::SetOutputDevice(
                 self.config.audio.output_device.clone(),
             ))
+    }
+
+    pub(super) fn sync_loudness(&self) -> bool {
+        self.playback
+            .audio
+            .send(crate::audio::AudioCommand::SetLoudness {
+                enabled: self.config.audio.loudness_normalization,
+                target_lufs: f32::from(self.config.audio.loudness_target_lufs),
+            })
     }
 
     pub(super) fn sync_stream_metadata(&self) -> bool {
@@ -272,7 +329,7 @@ pub(super) fn step_output_device_preference(
     }
 }
 
-fn step_choice(choices: &[ThemeName], current: ThemeName, forward: bool) -> ThemeName {
+fn step_choice<T: Copy + PartialEq>(choices: &[T], current: T, forward: bool) -> T {
     if choices.is_empty() {
         return current;
     }
@@ -366,6 +423,54 @@ mod tests {
         app.update(Action::StepSettingBackward);
 
         assert_eq!(app.config.ui.theme, "Terminal");
+    }
+
+    #[test]
+    fn settings_toggle_loudness_and_undo() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::LoudnessNormalization.index();
+        assert!(app.config.audio.loudness_normalization);
+
+        app.update(Action::PlaySelected);
+        assert!(!app.config.audio.loudness_normalization);
+
+        app.update(Action::UndoSetting);
+        assert!(app.config.audio.loudness_normalization);
+    }
+
+    #[test]
+    fn the_loudness_target_steps_through_the_offered_levels() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::LoudnessTarget.index();
+        assert_eq!(app.config.audio.loudness_target_lufs, -16);
+
+        app.update(Action::StepSettingForward);
+        assert_eq!(app.config.audio.loudness_target_lufs, -14);
+        app.update(Action::StepSettingForward);
+        assert_eq!(app.config.audio.loudness_target_lufs, -23, "wraps around");
+        app.update(Action::StepSettingBackward);
+        assert_eq!(app.config.audio.loudness_target_lufs, -14);
+        app.update(Action::StepSettingBackward);
+        assert_eq!(app.config.audio.loudness_target_lufs, -16);
+
+        app.update(Action::UndoSetting);
+        assert_eq!(app.config.audio.loudness_target_lufs, -14);
+    }
+
+    #[test]
+    fn a_hand_edited_target_steps_to_a_known_level() {
+        let mut app = test_app();
+        app.ui.overlays.active = ActiveOverlay::Settings;
+        app.ui.overlays.selected_setting_idx = SettingRow::LoudnessTarget.index();
+        app.config.audio.loudness_target_lufs = -20;
+
+        app.update(Action::StepSettingForward);
+
+        assert!(
+            crate::config_toml::LOUDNESS_TARGETS.contains(&app.config.audio.loudness_target_lufs)
+        );
     }
 
     #[test]

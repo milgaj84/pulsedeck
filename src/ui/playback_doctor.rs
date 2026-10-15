@@ -63,6 +63,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
                 .as_ref()
                 .map_or("N/A", |result| result.label()),
         ),
+        row("Loudness", &app.loudness_label),
         row(
             "Song info",
             if app.diagnostics.metadata_enabled {

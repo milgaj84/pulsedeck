@@ -310,6 +310,7 @@ save_history = true
             audio: AudioConfig {
                 output_device: Some("USB".to_string()),
                 default_volume: 65,
+                ..AudioConfig::default()
             },
             ..AppConfig::default()
         };
@@ -330,6 +331,7 @@ save_history = true
             audio: AudioConfig {
                 output_device: Some("DAC".to_string()),
                 default_volume: 30,
+                ..AudioConfig::default()
             },
             ui: UiConfig {
                 theme: "Terminal".to_string(),

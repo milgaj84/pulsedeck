@@ -2,6 +2,7 @@ use super::ac3::Ac3Backend;
 use super::adts_stream::AdtsStream;
 use super::codec::{detect_codec, CodecDetection, CodecHint};
 use super::hls;
+use super::loudness::{LevelControl, Leveller};
 use super::panic_guard;
 use super::pcm_source::{FailureSink, FrameBackend, PcmSource};
 use super::stream_source::StreamSource;
@@ -39,6 +40,7 @@ impl DecodePipeline {
     pub(super) fn build<R: Read + Send + 'static>(
         reader: R,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
+        level: Option<Arc<LevelControl>>,
         detection: CodecDetection,
         failures: Option<FailureSink>,
     ) -> Result<(DecodedSource, StreamFormat), EngineError> {
@@ -58,9 +60,12 @@ impl DecodePipeline {
         let limit = ProbeLimit::new(Arc::clone(&probing), PROBE_MAX_BYTES, PROBE_MAX_TIME);
         let opened = panic_guard::run_quiet(|| match detection.hint {
             // Symphonia has no AC-3 decoder; these go to their own backend.
-            CodecHint::Ac3 | CodecHint::Eac3 => open_pcm(Ok(Ac3Backend::new(reader)), failures),
+            CodecHint::Ac3 | CodecHint::Eac3 => {
+                open_pcm(Ok(Ac3Backend::new(reader)), level, failures)
+            }
             _ => open_pcm(
                 SymphoniaBackend::open(ReadWrapper::new(reader).with_probe_limit(limit), extension),
+                level,
                 failures,
             ),
         });
@@ -97,11 +102,15 @@ type Opened = (Box<dyn Source<Item = f32> + Send>, u32, u16);
 /// Decode the first frame of a backend so the stream's format is known.
 fn open_pcm<B: FrameBackend + 'static>(
     backend: Result<B, String>,
+    level: Option<Arc<LevelControl>>,
     failures: Option<FailureSink>,
 ) -> Result<Opened, String> {
     let mut source = PcmSource::new(backend?)?;
     if let Some(sink) = failures {
         source = source.with_failure_sink(sink);
+    }
+    if let Some(level) = level {
+        source = source.with_processor(Box::new(Leveller::new(level)));
     }
     let (rate, channels) = (source.sample_rate(), source.channels());
     Ok((Box::new(source), rate, channels))
@@ -533,7 +542,8 @@ pub(super) fn run_worker(
         let event_tx = event_tx.clone();
         Box::new(move |error| send_failure(&event_tx, generation, error))
     };
-    match DecodePipeline::build(chained, sample_buffer, detection, Some(failures)) {
+    let level = Some(Arc::clone(&request.options.level));
+    match DecodePipeline::build(chained, sample_buffer, level, detection, Some(failures)) {
         Ok((source, format)) => {
             let _ = event_tx.send(EngineEvent::Connected {
                 generation,
@@ -698,6 +708,7 @@ mod tests {
         let result = DecodePipeline::build(
             Cursor::new(bytes),
             sample_buffer,
+            None,
             detection(CodecHint::Mp3, CodecSource::MagicBytes),
             None,
         );
@@ -711,6 +722,7 @@ mod tests {
         let result = DecodePipeline::build(
             Cursor::new(vec![0_u8; 32]),
             sample_buffer,
+            None,
             detection(CodecHint::Mp3, CodecSource::ContentType),
             None,
         );
@@ -732,6 +744,7 @@ mod tests {
             DecodePipeline::build(
                 Cursor::new(vec![0_u8; 32]),
                 sample_buffer_clone,
+                None,
                 detection(CodecHint::Unknown, CodecSource::Unknown),
                 None,
             )
@@ -792,7 +805,8 @@ mod tests {
         /// Run the worker and collect its events. The stream is abandoned when
         /// this returns; use `run_worker_alive` to keep it playing.
         fn run_worker_against(url: String) -> Vec<EngineEvent> {
-            let (events, active, _rx) = run_worker_alive(url, false);
+            let (events, active, _rx) =
+                run_worker_alive(url, false, Arc::new(LevelControl::default()));
             active.store(0, SeqCst);
             events
         }
@@ -802,6 +816,7 @@ mod tests {
         fn run_worker_alive(
             url: String,
             metadata_enabled: bool,
+            level: Arc<LevelControl>,
         ) -> (
             Vec<EngineEvent>,
             Arc<AtomicU64>,
@@ -812,6 +827,7 @@ mod tests {
             let mut req = request(Duration::from_secs(8), 4096, 512 * 1024);
             req.url = url;
             req.options.metadata_enabled = metadata_enabled;
+            req.options.level = level;
 
             run_worker(
                 req,
@@ -901,13 +917,24 @@ mod tests {
 
         /// Manual check against a real station; needs network access:
         /// `PULSEDECK_HLS_URL=<playlist url> cargo test manual_real_hls -- --ignored --nocapture`
+        /// Also set `PULSEDECK_SECONDS=<n>` (default 15) to listen longer and
+        /// `PULSEDECK_LOUDNESS=off` to switch loudness normalisation off; the
+        /// output prints the loudness of the last 3 s and the gain applied.
         #[test]
         #[ignore = "needs network and PULSEDECK_HLS_URL"]
         fn manual_real_hls_stream_connects() {
             let Ok(url) = std::env::var("PULSEDECK_HLS_URL") else {
                 return;
             };
-            let (events, active, event_rx) = run_worker_alive(url, true);
+            let level = Arc::new(LevelControl::new(
+                std::env::var("PULSEDECK_LOUDNESS").as_deref() != Ok("off"),
+                -16.0,
+            ));
+            let seconds: usize = std::env::var("PULSEDECK_SECONDS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(15);
+            let (events, active, event_rx) = run_worker_alive(url, true, Arc::clone(&level));
             let mut titles: Vec<String> = events
                 .iter()
                 .filter_map(|event| match event {
@@ -930,7 +957,7 @@ mod tests {
             );
 
             // 15 seconds of audio crosses several segment boundaries.
-            let wanted = format.sample_rate as usize * usize::from(format.channels) * 15;
+            let wanted = format.sample_rate as usize * usize::from(format.channels) * seconds;
             let samples: Vec<f32> = source.take(wanted).collect();
             active.store(0, SeqCst);
             titles.extend(event_rx.try_iter().filter_map(|event| match event {
@@ -938,6 +965,22 @@ mod tests {
                 _ => None,
             }));
             println!("TITLES {titles:?}");
+            if let Ok(mut meter) = ebur128::EbuR128::new(
+                u32::from(format.channels),
+                format.sample_rate,
+                ebur128::Mode::S,
+            ) {
+                if format.channels == 1 {
+                    let _ = meter.set_channel_map(&[ebur128::Channel::DualMono]);
+                }
+                let tail = format.sample_rate as usize * usize::from(format.channels) * 3;
+                let _ = meter.add_frames_f32(&samples[samples.len().saturating_sub(tail)..]);
+                println!(
+                    "LOUDNESS {:.1} LUFS (last 3 s), gain {:+.1} dB",
+                    meter.loudness_shortterm().unwrap_or(f64::NAN),
+                    level.gain_db()
+                );
+            }
             let peak = samples.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
             println!(
                 "DECODED {} of {} samples, peak {peak:.3}",
@@ -980,9 +1023,59 @@ mod tests {
             DecodePipeline::build(
                 Cursor::new(bytes.to_vec()),
                 Arc::new(Mutex::new(VecDeque::new())),
+                None,
                 detect_codec(bytes, "", ""),
                 None,
             )
+        }
+
+        /// A mono 16-bit WAV of a loud 997 Hz sine.
+        fn loud_wav(secs: usize) -> Vec<u8> {
+            let rate = 16_000_u32;
+            let count = rate as usize * secs;
+            let mut wav = Vec::with_capacity(44 + count * 2);
+            wav.extend_from_slice(b"RIFF");
+            wav.extend_from_slice(&(36 + count as u32 * 2).to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt ");
+            wav.extend_from_slice(&16_u32.to_le_bytes());
+            wav.extend_from_slice(&1_u16.to_le_bytes());
+            wav.extend_from_slice(&1_u16.to_le_bytes());
+            wav.extend_from_slice(&rate.to_le_bytes());
+            wav.extend_from_slice(&(rate * 2).to_le_bytes());
+            wav.extend_from_slice(&2_u16.to_le_bytes());
+            wav.extend_from_slice(&16_u16.to_le_bytes());
+            wav.extend_from_slice(b"data");
+            wav.extend_from_slice(&(count as u32 * 2).to_le_bytes());
+            for index in 0..count {
+                let phase = 2.0 * std::f32::consts::PI * 997.0 * index as f32 / rate as f32;
+                wav.extend_from_slice(&((phase.sin() * 20_000.0) as i16).to_le_bytes());
+            }
+            wav
+        }
+
+        fn rms_of_last_second(level: Option<Arc<LevelControl>>) -> f32 {
+            let bytes = loud_wav(8);
+            let (source, _) = DecodePipeline::build(
+                Cursor::new(bytes.clone()),
+                Arc::new(Mutex::new(VecDeque::new())),
+                level,
+                detect_codec(&bytes, "", ""),
+                None,
+            )
+            .unwrap_or_else(|e| panic!("{}", e.to_status_string()));
+            let samples: Vec<f32> = source.collect();
+            let tail = &samples[samples.len() - 16_000..];
+            (tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32).sqrt()
+        }
+
+        #[test]
+        fn loudness_normalisation_is_applied_to_the_decoded_stream() {
+            let plain = rms_of_last_second(None);
+            let leveled = rms_of_last_second(Some(Arc::new(LevelControl::new(true, -23.0))));
+            let off = rms_of_last_second(Some(Arc::new(LevelControl::new(false, -23.0))));
+
+            assert!(leveled < plain * 0.5, "{leveled} vs {plain}");
+            assert_eq!(off, plain, "switched off it must not touch the audio");
         }
 
         fn first_samples(bytes: &[u8], count: usize) -> (StreamFormat, Vec<f32>) {
@@ -1040,6 +1133,7 @@ mod tests {
             let result = DecodePipeline::build(
                 Endless(Arc::clone(&read)),
                 Arc::new(Mutex::new(VecDeque::new())),
+                None,
                 detect_codec(&[0u8; 64], "audio/aac", ""),
                 None,
             );
@@ -1243,6 +1337,7 @@ mod tests {
             let (source, _) = DecodePipeline::build(
                 Cursor::new(stream),
                 Arc::new(Mutex::new(VecDeque::new())),
+                None,
                 detect_codec(AC3, "", ""),
                 Some(sink),
             )

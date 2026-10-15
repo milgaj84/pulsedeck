@@ -244,7 +244,8 @@ pub(super) fn run(ctx: HlsContext<'_>, playlist_url: &str, body: Vec<u8>) {
         let event_tx = event_tx.clone();
         Box::new(move |error| send_failure(&event_tx, generation, error))
     };
-    match DecodePipeline::build(chained, sample_buffer, detection, Some(failures)) {
+    let level = Some(Arc::clone(&request.options.level));
+    match DecodePipeline::build(chained, sample_buffer, level, detection, Some(failures)) {
         Ok((decoded, mut format)) => {
             format.codec = format!("HLS {}", format.codec);
             let _ = event_tx.send(EngineEvent::Connected {

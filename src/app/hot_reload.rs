@@ -41,6 +41,8 @@ impl App {
     pub(super) fn apply_hot_reload(&mut self, new_config: AppConfig, new_preserved: toml::Value) {
         self.config.ui = new_config.ui.clone();
         self.config.audio.default_volume = new_config.audio.default_volume;
+        self.config.audio.loudness_normalization = new_config.audio.loudness_normalization;
+        self.config.audio.loudness_target_lufs = new_config.audio.loudness_target_lufs;
         self.config.playback = new_config.playback.clone();
         self.config.discover = new_config.discover.clone();
         self.config_preserved = new_preserved;
@@ -53,6 +55,7 @@ impl App {
         let theme = crate::theme_name::ThemeName::from_key(&new_config.ui.theme);
         crate::ui::theme::set_active(theme);
         self.sync_stream_metadata();
+        self.sync_loudness();
     }
 }
 

@@ -92,9 +92,29 @@ fn parse_audio_section(
         .map(|v| clamp_volume(v, warnings))
         .unwrap_or(80);
 
+    let defaults = AudioConfig::default();
+    let loudness_normalization = sec
+        .get("loudness_normalization")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(defaults.loudness_normalization);
+
+    let loudness_target_lufs = match sec.get("loudness_target_lufs").and_then(|v| v.as_integer()) {
+        Some(raw) if (-30..=-10).contains(&raw) => raw as i8,
+        Some(raw) => {
+            warnings.push(format!(
+                "audio.loudness_target_lufs: '{raw}' is outside -30 to -10, using {}",
+                defaults.loudness_target_lufs
+            ));
+            defaults.loudness_target_lufs
+        }
+        None => defaults.loudness_target_lufs,
+    };
+
     AudioConfig {
         output_device,
         default_volume,
+        loudness_normalization,
+        loudness_target_lufs,
     }
 }
 
@@ -461,6 +481,51 @@ fn line_col_from_offset(input: &str, offset: usize) -> (Option<usize>, Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loudness_settings_default_to_on_at_minus_16() {
+        let result = parse_toml("[audio]\ndefault_volume = 50\n").unwrap();
+        assert!(result.config.audio.loudness_normalization);
+        assert_eq!(result.config.audio.loudness_target_lufs, -16);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn loudness_settings_are_read() {
+        let result =
+            parse_toml("[audio]\nloudness_normalization = false\nloudness_target_lufs = -23\n")
+                .unwrap();
+        assert!(!result.config.audio.loudness_normalization);
+        assert_eq!(result.config.audio.loudness_target_lufs, -23);
+    }
+
+    #[test]
+    fn an_out_of_range_loudness_target_is_replaced_with_a_warning() {
+        for raw in ["-3", "-60", "0", "100"] {
+            let result = parse_toml(&format!("[audio]\nloudness_target_lufs = {raw}\n")).unwrap();
+            assert_eq!(result.config.audio.loudness_target_lufs, -16, "{raw}");
+            assert!(
+                result
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("loudness_target_lufs")),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn loudness_settings_survive_a_write_and_read() {
+        let mut config = AppConfig::default();
+        config.audio.loudness_normalization = false;
+        config.audio.loudness_target_lufs = -18;
+        let preserved = toml::Value::Table(toml::map::Map::new());
+
+        let text = crate::config_toml::serialize::serialize_toml(&config, &preserved);
+        let back = parse_toml(&text).unwrap();
+
+        assert_eq!(back.config.audio, config.audio);
+    }
 
     const FULL_CONFIG: &str = r#"
 [audio]

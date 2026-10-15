@@ -46,6 +46,14 @@ fn set_audio_section(table: &mut toml::map::Map<String, toml::Value>, audio: &Au
         "default_volume".into(),
         toml::Value::Integer(audio.default_volume as i64),
     );
+    sec.insert(
+        "loudness_normalization".into(),
+        toml::Value::Boolean(audio.loudness_normalization),
+    );
+    sec.insert(
+        "loudness_target_lufs".into(),
+        toml::Value::Integer(i64::from(audio.loudness_target_lufs)),
+    );
 }
 
 fn set_ui_section(table: &mut toml::map::Map<String, toml::Value>, ui: &UiConfig) {
@@ -247,6 +255,7 @@ mod property_tests {
                     audio: AudioConfig {
                         output_device,
                         default_volume,
+                        ..AudioConfig::default()
                     },
                     ui: UiConfig {
                         theme,
@@ -303,6 +312,7 @@ mod tests {
             audio: AudioConfig {
                 output_device: Some("Built-in Speakers".to_string()),
                 default_volume: 75,
+                ..AudioConfig::default()
             },
             ui: UiConfig {
                 theme: "Retrowave".to_string(),
@@ -378,6 +388,7 @@ stream_metadata_enabled = true
             audio: AudioConfig {
                 output_device: None,
                 default_volume: 50,
+                ..AudioConfig::default()
             },
             ..AppConfig::default()
         };
@@ -472,6 +483,7 @@ stream_metadata_enabled = true
             audio: AudioConfig {
                 output_device: Some("Headphones".to_string()),
                 default_volume: 60,
+                ..AudioConfig::default()
             },
             ui: UiConfig {
                 theme: "Terminal".to_string(),

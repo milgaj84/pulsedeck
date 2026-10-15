@@ -113,6 +113,7 @@ impl App {
             Action::ToggleSettings => self.toggle_settings(),
             Action::CycleThemeSetting => self.cycle_theme_setting(),
             Action::ToggleStreamMetadata => self.toggle_stream_metadata_setting(),
+            Action::ToggleLoudness => self.toggle_loudness_setting(),
             Action::RefreshLibraryMetadata => self.request_metadata_refresh(),
             Action::CycleLayout => self.cycle_layout(),
             Action::ToggleVisualizerMode => self.toggle_visualizer_mode(),

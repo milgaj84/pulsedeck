@@ -12,13 +12,23 @@ pub struct AudioConfig {
     pub output_device: Option<String>,
     /// Volume level clamped to 0–100.
     pub default_volume: u8,
+    /// Even out the loudness of different stations.
+    pub loudness_normalization: bool,
+    /// The loudness to aim for, in whole LUFS (-30 to -10).
+    pub loudness_target_lufs: i8,
 }
+
+/// The targets the settings screen offers (streaming services use -14 to -16;
+/// -23 is the broadcast standard).
+pub const LOUDNESS_TARGETS: [i8; 4] = [-14, -16, -18, -23];
 
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             output_device: None,
             default_volume: 80,
+            loudness_normalization: true,
+            loudness_target_lufs: -16,
         }
     }
 }
@@ -119,6 +129,8 @@ mod tests {
 
         assert_eq!(config.output_device, None);
         assert_eq!(config.default_volume, 80);
+        assert!(config.loudness_normalization);
+        assert_eq!(config.loudness_target_lufs, -16);
     }
 
     #[test]

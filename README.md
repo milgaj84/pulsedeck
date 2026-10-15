@@ -60,7 +60,8 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 - Smooth fade transitions between stations
 - Auto-reconnect on stream dropout
 - HLS (`.m3u8`) radio streams in MPEG-TS, packed audio or fragmented MP4 (CMAF), AAC, MP3, Opus, AC-3 and E-AC-3, with track titles and AES-128 or SAMPLE-AES encryption (DRM-protected and video streams are not supported)
-- Opus, Vorbis, FLAC, AAC, MP3, AC-3 and E-AC-3 stations
+- Opus, Vorbis, FLAC, AAC (including HE-AAC at full quality), MP3, AC-3 and E-AC-3 stations
+- Loudness normalisation: stations that are mastered 10 LU louder or quieter than the rest are brought to one level, gently and with a limiter against clipping (on by default; switch it off in settings)
 - Live audio output device switching
 - Sleep timer (fade out and stop)
 - Desktop notifications for track changes
@@ -181,6 +182,8 @@ Press `,` to open settings, or edit `~/.config/pulsedeck/pulsedeck.toml`:
 [audio]
 output_device = "Built-in Speakers"
 default_volume = 80
+loudness_normalization = true   # even out the volume of different stations
+loudness_target_lufs = -16      # -30 to -10; settings offer -14, -16, -18, -23
 
 [ui]
 theme = "Retrowave"        # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal

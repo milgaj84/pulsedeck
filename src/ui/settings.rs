@@ -7,10 +7,10 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 const MIN_SETTINGS_WIDTH: u16 = 60;
-const MIN_SETTINGS_HEIGHT: u16 = 18;
+const MIN_SETTINGS_HEIGHT: u16 = 22;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &UiModel<'_>) {
-    let popup_area = super::centered_rect(54, 64, area);
+    let popup_area = super::centered_rect(54, 80, area);
 
     if settings_area_is_compact(popup_area) {
         frame.render_widget(Clear, popup_area);
@@ -139,6 +139,12 @@ fn setting_description(row: SettingRow) -> &'static str {
         SettingRow::SaveHistory => {
             "Save played tracks to history.json so they persist across restarts."
         }
+        SettingRow::LoudnessNormalization => {
+            "Keep stations at a similar volume, so you do not reach for the volume key."
+        }
+        SettingRow::LoudnessTarget => {
+            "How loud stations are made: -14 louder, -16 default, -23 broadcast standard."
+        }
     }
 }
 
@@ -189,6 +195,22 @@ fn setting_row_spans(app: &UiModel<'_>, row: SettingRow, label_style: Style) -> 
             "Save Track History (g Overlay)",
             label_style,
         ),
+        SettingRow::LoudnessNormalization => checkbox_row(
+            app.config.audio.loudness_normalization,
+            "Even Out Station Loudness",
+            label_style,
+        ),
+        SettingRow::LoudnessTarget => vec![
+            icon_span("[ level ] "),
+            Span::styled("Loudness Target: ", label_style),
+            Span::styled(
+                format!("{} LUFS ", app.config.audio.loudness_target_lufs),
+                Style::default()
+                    .fg(theme::highlight())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("(Space/Right louder, Left quieter)", theme::dim()),
+        ],
     }
 }
 
@@ -287,12 +309,19 @@ mod tests {
 
     #[test]
     fn settings_overlay_rejects_tiny_area() {
-        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 18)));
-        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 17)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 59, 22)));
+        assert!(settings_area_is_compact(Rect::new(0, 0, 60, 21)));
     }
 
     #[test]
     fn settings_overlay_accepts_minimum_area() {
-        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 18)));
+        assert!(!settings_area_is_compact(Rect::new(0, 0, 60, 22)));
+    }
+
+    #[test]
+    fn every_row_fits_in_the_minimum_area() {
+        // The header, one two-line row each, the description and the footer.
+        let needed = 1 + 2 * SettingRow::COUNT as u16 + 2 + 1;
+        assert!(needed + 2 <= MIN_SETTINGS_HEIGHT, "{needed}");
     }
 }

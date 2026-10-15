@@ -54,6 +54,7 @@ oxideav-ac3 = "0.0.11"
 oxideav-core = "=0.1.39"
 rusty_aac = { version = "=1.1.0", default-features = false }
 symphonia-codec-aac = "0.5"
+ebur128 = { version = "0.1.10", default-features = false }
 
 [dev-dependencies]
 proptest = "1"

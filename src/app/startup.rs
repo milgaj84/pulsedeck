@@ -329,6 +329,7 @@ impl App {
     fn sync_startup_audio_settings(&mut self) {
         self.sync_output_device();
         self.sync_stream_metadata();
+        self.sync_loudness();
         self.sync_volume();
     }
 

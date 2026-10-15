@@ -667,6 +667,21 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_loudness_toggle_persists_to_toml() {
+        let dir = unique_temp_dir("loudness-persist");
+        let mut app = app_with_config_dir(&dir);
+        assert!(app.config.audio.loudness_normalization);
+
+        app.update(Action::ToggleLoudness);
+        assert!(!app.config.audio.loudness_normalization);
+
+        let reloaded = reload_config_from_dir(&dir);
+        assert!(!reloaded.audio.loudness_normalization);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     // ── Discover Integration ──────────────────────────────────────────
 
     #[test]
@@ -835,6 +850,7 @@ mod tests {
             Action::ToggleSettings,
             Action::CycleThemeSetting,
             Action::ToggleStreamMetadata,
+            Action::ToggleLoudness,
             Action::RefreshLibraryMetadata,
             Action::ToggleVisualizerMode,
             Action::CycleSortMode,

@@ -6,6 +6,7 @@ pub enum SettingSnapshot {
     Bool(bool),
     String(String),
     OptionalString(Option<String>),
+    Int(i32),
 }
 
 /// Per-row single-level undo buffer.

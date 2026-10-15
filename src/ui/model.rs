@@ -46,6 +46,8 @@ pub struct UiModel<'a> {
     pub display_mode: DisplayMode,
     pub elapsed_display: Option<String>,
     pub volume_flash_active: bool,
+    /// Loudness normalisation as shown in the Playback Doctor.
+    pub loudness_label: String,
     pub discover_results: &'a [ScoredStation],
     pub discover_cursor: usize,
     pub discover_results_empty: bool,
@@ -145,6 +147,11 @@ impl<'a> From<&'a App> for UiModel<'a> {
             display_mode: app.ui.display_mode,
             elapsed_display,
             volume_flash_active: app.ui.volume_flash_remaining > Duration::ZERO,
+            loudness_label: loudness_label(
+                app.config.audio.loudness_normalization,
+                app.config.audio.loudness_target_lufs,
+                app.playback.audio.loudness_gain_db(),
+            ),
             discover_results: &app.discover_results,
             discover_cursor: app.discover_cursor,
             discover_results_empty: app.discover_results.is_empty(),
@@ -167,6 +174,17 @@ impl<'a> From<&'a App> for UiModel<'a> {
             visible_stations: app.visible_stations(),
             now_playing: app.now_playing(),
         }
+    }
+}
+
+/// "Off", or "On, -16 LUFS, +3.2 dB" once the gain being applied is known.
+fn loudness_label(enabled: bool, target_lufs: i8, gain_db: Option<f32>) -> String {
+    if !enabled {
+        return "Off".to_string();
+    }
+    match gain_db {
+        Some(gain) => format!("On, {target_lufs} LUFS, {gain:+.1} dB"),
+        None => format!("On, {target_lufs} LUFS"),
     }
 }
 
@@ -405,5 +423,19 @@ mod tests {
         for row in SettingRow::ALL {
             assert!(!model.has_settings_undo(row));
         }
+    }
+
+    #[test]
+    fn loudness_label_says_off_on_and_the_gain() {
+        assert_eq!(loudness_label(false, -16, Some(3.0)), "Off");
+        assert_eq!(loudness_label(true, -16, None), "On, -16 LUFS");
+        assert_eq!(
+            loudness_label(true, -16, Some(3.24)),
+            "On, -16 LUFS, +3.2 dB"
+        );
+        assert_eq!(
+            loudness_label(true, -23, Some(-7.0)),
+            "On, -23 LUFS, -7.0 dB"
+        );
     }
 }

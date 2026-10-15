@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::loudness::LevelControl;
 use super::output::normalize_output_device_name;
 use super::output_manager::OutputManager;
 use super::supervisor::ConnectionSupervisor;
@@ -88,8 +89,10 @@ impl EngineLoop {
         status_tx: mpsc::Sender<AudioStatus>,
         sample_buffer: Arc<Mutex<VecDeque<f32>>>,
         recovery_config: DeviceRecoveryConfig,
+        level: Arc<LevelControl>,
     ) {
         let mut engine = Self::new(status_tx, sample_buffer, recovery_config);
+        engine.options.level = level;
 
         loop {
             match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -156,6 +159,12 @@ impl EngineLoop {
             }
             AudioCommand::SetStreamMetadata(enabled) => {
                 self.options.metadata_enabled = enabled;
+            }
+            AudioCommand::SetLoudness {
+                enabled,
+                target_lufs,
+            } => {
+                self.options.level.set(enabled, target_lufs);
             }
         }
     }
@@ -555,5 +564,20 @@ mod tests {
         let (mut engine, _) = make_engine();
         engine.handle_command(AudioCommand::SetStreamMetadata(false));
         assert!(!engine.options.metadata_enabled);
+    }
+
+    #[test]
+    fn loudness_setting_reaches_the_shared_control() {
+        let (mut engine, _) = make_engine();
+        assert!(engine.options.level.enabled());
+        let level = Arc::clone(&engine.options.level);
+
+        engine.handle_command(AudioCommand::SetLoudness {
+            enabled: false,
+            target_lufs: -23.0,
+        });
+
+        assert!(!level.enabled());
+        assert_eq!(level.target_lufs(), -23.0);
     }
 }

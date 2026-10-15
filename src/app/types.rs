@@ -111,16 +111,20 @@ pub enum SettingRow {
     Theme,
     StreamMetadata,
     SaveHistory,
+    LoudnessNormalization,
+    LoudnessTarget,
 }
 
 impl SettingRow {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Notifications,
         Self::AutoplayLast,
         Self::OutputDevice,
         Self::Theme,
         Self::StreamMetadata,
         Self::SaveHistory,
+        Self::LoudnessNormalization,
+        Self::LoudnessTarget,
     ];
 
     pub const COUNT: usize = Self::ALL.len();
@@ -137,6 +141,8 @@ impl SettingRow {
             Self::Theme => 3,
             Self::StreamMetadata => 4,
             Self::SaveHistory => 5,
+            Self::LoudnessNormalization => 6,
+            Self::LoudnessTarget => 7,
         }
     }
 }

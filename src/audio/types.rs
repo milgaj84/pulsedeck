@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use super::loudness::LevelControl;
+
 /// Monotonically increasing counter allocated per `Play` command.
 /// Used to discard stale worker results on rapid station switching.
 pub(super) type Generation = u64;
@@ -198,6 +202,9 @@ pub(super) struct PlaybackOptions {
     pub(super) target_volume: f32,
     /// Preferred output device name, or `None` for the system default.
     pub(super) preferred_device: Option<String>,
+    /// Loudness normalisation settings, shared with the streams being played so
+    /// that changes reach the one that is already running.
+    pub(super) level: Arc<LevelControl>,
 }
 
 impl Default for PlaybackOptions {
@@ -206,6 +213,7 @@ impl Default for PlaybackOptions {
             metadata_enabled: true,
             target_volume: 0.8,
             preferred_device: None,
+            level: Arc::new(LevelControl::default()),
         }
     }
 }

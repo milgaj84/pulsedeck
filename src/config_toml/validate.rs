@@ -99,6 +99,7 @@ mod property_tests {
                     audio: AudioConfig {
                         output_device,
                         default_volume,
+                        ..AudioConfig::default()
                     },
                     ui: UiConfig {
                         theme,
@@ -165,6 +166,7 @@ mod tests {
             audio: AudioConfig {
                 output_device: Some("Headphones".to_string()),
                 default_volume: 65,
+                ..AudioConfig::default()
             },
             ui: UiConfig {
                 theme: "Terminal".to_string(),

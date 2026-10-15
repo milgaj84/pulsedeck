@@ -34,12 +34,19 @@ pub(super) trait FrameBackend: Send {
     fn next_frame(&mut self, out: &mut Vec<f32>) -> Result<Option<SignalInfo>, String>;
 }
 
+/// Changes each decoded frame in place before it is played (loudness
+/// levelling, say). Runs once per frame, so it sees format changes as they happen.
+pub(super) trait FrameProcessor: Send {
+    fn process(&mut self, frame: &mut [f32], info: SignalInfo);
+}
+
 pub(super) struct PcmSource<B: FrameBackend> {
     backend: B,
     frame: Vec<f32>,
     pos: usize,
     info: SignalInfo,
     failure: Option<FailureSink>,
+    processor: Option<Box<dyn FrameProcessor>>,
 }
 
 impl<B: FrameBackend> PcmSource<B> {
@@ -55,6 +62,7 @@ impl<B: FrameBackend> PcmSource<B> {
                 rate: 44_100,
             },
             failure: None,
+            processor: None,
         };
         match source.refill() {
             Ok(true) => Ok(source),
@@ -69,6 +77,25 @@ impl<B: FrameBackend> PcmSource<B> {
     pub(super) fn with_failure_sink(mut self, sink: FailureSink) -> Self {
         self.failure = Some(sink);
         self
+    }
+
+    /// Run every frame through `processor`, starting with the one already loaded.
+    /// A processor that panics is dropped and the audio plays on unchanged.
+    pub(super) fn with_processor(mut self, processor: Box<dyn FrameProcessor>) -> Self {
+        self.processor = Some(processor);
+        self.process_frame();
+        self
+    }
+
+    fn process_frame(&mut self) {
+        let Some(processor) = self.processor.as_mut() else {
+            return;
+        };
+        let frame = &mut self.frame;
+        let info = self.info;
+        if panic_guard::run_quiet(|| processor.process(frame, info)).is_err() {
+            self.processor = None;
+        }
     }
 
     fn report(&mut self, error: EngineError) {
@@ -88,6 +115,7 @@ impl<B: FrameBackend> PcmSource<B> {
             match panic_guard::run_quiet(|| backend.next_frame(frame)) {
                 Ok(Ok(Some(info))) if !self.frame.is_empty() => {
                     self.info = info;
+                    self.process_frame();
                     return Ok(true);
                 }
                 Ok(Ok(Some(_))) => continue,
@@ -302,5 +330,59 @@ mod tests {
         let backend = scripted(vec![(info(2, 44_100), vec![0.1])], Then::Error);
         let source = PcmSource::new(backend).unwrap();
         assert_eq!(source.collect::<Vec<_>>(), vec![0.1]);
+    }
+
+    /// Doubles every sample and records the formats it was given.
+    struct Doubler(std::sync::mpsc::Sender<SignalInfo>);
+
+    impl FrameProcessor for Doubler {
+        fn process(&mut self, frame: &mut [f32], info: SignalInfo) {
+            self.0.send(info).unwrap();
+            frame.iter_mut().for_each(|sample| *sample *= 2.0);
+        }
+    }
+
+    #[test]
+    fn a_processor_sees_every_frame_including_the_first() {
+        let (tx, seen) = std::sync::mpsc::channel();
+        let backend = scripted(
+            vec![
+                (info(2, 44_100), vec![0.1, 0.2]),
+                (info(1, 48_000), vec![0.3, 0.4, 0.5]),
+            ],
+            Then::End,
+        );
+        let source = PcmSource::new(backend)
+            .unwrap()
+            .with_processor(Box::new(Doubler(tx)));
+
+        assert_eq!(source.collect::<Vec<_>>(), vec![0.2, 0.4, 0.6, 0.8, 1.0]);
+        assert_eq!(
+            seen.try_iter().collect::<Vec<_>>(),
+            vec![info(2, 44_100), info(1, 48_000)]
+        );
+    }
+
+    #[test]
+    fn a_processor_that_panics_is_dropped_and_the_audio_plays_on() {
+        struct Bomb;
+        impl FrameProcessor for Bomb {
+            fn process(&mut self, _: &mut [f32], _: SignalInfo) {
+                panic!("processor blew up");
+            }
+        }
+        let backend = scripted(
+            vec![
+                (info(2, 44_100), vec![0.1, 0.2]),
+                (info(2, 44_100), vec![0.3]),
+            ],
+            Then::End,
+        );
+        let source = PcmSource::new(backend)
+            .unwrap()
+            .with_processor(Box::new(Bomb));
+
+        assert_eq!(source.collect::<Vec<_>>(), vec![0.1, 0.2, 0.3]);
+        assert!(!panic_guard::quiet_panics_on_this_thread());
     }
 }

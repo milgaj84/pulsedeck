@@ -21,6 +21,8 @@ pub const CONFIG_TEMPLATE: &str = r#"# PulseDeck Configuration File
 [audio]
 # output_device = "Built-in Speakers"  # Uncomment to set a specific device
 default_volume = 80  # 0–100
+loudness_normalization = true  # even out the volume of different stations
+loudness_target_lufs = -16     # -30 to -10; the settings screen offers -14, -16, -18, -23
 
 [ui]
 theme = "Retrowave"  # Retrowave | Catppuccin Mocha | Catppuccin Macchiato | Catppuccin Frappé | Catppuccin Latte | Terminal

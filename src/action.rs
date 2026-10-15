@@ -71,6 +71,7 @@ pub enum Action {
     ToggleSettings,
     CycleThemeSetting,
     ToggleStreamMetadata,
+    ToggleLoudness,
     RefreshLibraryMetadata,
     ToggleVisualizerMode,
 

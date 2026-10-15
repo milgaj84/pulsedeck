@@ -7,6 +7,7 @@ mod codecs;
 pub(super) mod decode;
 pub(super) mod engine_loop_v2;
 mod hls;
+mod loudness;
 mod metadata;
 mod output;
 mod output_manager;
@@ -34,6 +35,7 @@ use std::sync::{Arc, Mutex};
 
 pub(super) const HARDWARE_OUTPUT_ERROR_PREFIX: &str = "Hardware output error:";
 
+pub use loudness::LevelControl;
 pub use types::DeviceRecoveryConfig;
 
 /// Commands sent from the UI thread to the audio thread.
@@ -46,6 +48,11 @@ pub enum AudioCommand {
     SetVolume(f32),
     SetOutputDevice(Option<String>),
     SetStreamMetadata(bool),
+    /// Switch loudness normalisation on or off and set its target (LUFS).
+    SetLoudness {
+        enabled: bool,
+        target_lufs: f32,
+    },
 }
 
 /// Status updates sent from the audio thread back to the UI.
@@ -85,6 +92,11 @@ pub enum AudioStatus {
 pub trait AudioSink: Send {
     fn send(&self, command: AudioCommand) -> bool;
     fn try_recv_status(&self) -> Option<AudioStatus>;
+    /// The gain loudness normalisation is applying now, in dB; `None` when it
+    /// is off or not available.
+    fn loudness_gain_db(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// Handle to communicate with the audio engine running on a background thread.
@@ -92,6 +104,7 @@ pub trait AudioSink: Send {
 pub struct AudioEngine {
     cmd_tx: mpsc::Sender<AudioCommand>,
     pub status_rx: mpsc::Receiver<AudioStatus>,
+    level: Arc<LevelControl>,
 }
 
 #[cfg_attr(test, allow(dead_code))]
@@ -103,17 +116,24 @@ impl AudioEngine {
         let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
         let (status_tx, status_rx) = mpsc::channel::<AudioStatus>();
 
+        let level = Arc::new(LevelControl::default());
         let sample_buffer_clone = sample_buffer.clone();
+        let engine_level = Arc::clone(&level);
         std::thread::spawn(move || {
             engine_loop_v2::EngineLoop::run(
                 cmd_rx,
                 status_tx,
                 sample_buffer_clone,
                 recovery_config,
+                engine_level,
             );
         });
 
-        Self { cmd_tx, status_rx }
+        Self {
+            cmd_tx,
+            status_rx,
+            level,
+        }
     }
 }
 
@@ -124,6 +144,10 @@ impl AudioSink for AudioEngine {
 
     fn try_recv_status(&self) -> Option<AudioStatus> {
         self.status_rx.try_recv().ok()
+    }
+
+    fn loudness_gain_db(&self) -> Option<f32> {
+        self.level.enabled().then(|| self.level.gain_db())
     }
 }
 

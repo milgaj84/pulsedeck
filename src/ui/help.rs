@@ -197,6 +197,7 @@ fn settings_rows() -> Vec<Row<'static>> {
         shortcut("Audio Output", "Default, pulse, pipewire, or device"),
         shortcut("Theme", "Retrowave, Catppuccin ×4, Terminal"),
         shortcut("Metadata", "Toggle ICY now-playing metadata"),
+        shortcut("Loudness", "Even out station loudness; pick the target"),
         section("Customization"),
         note("Keybindings can be customized via keybindings.json"),
     ]
