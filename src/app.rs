@@ -24,6 +24,7 @@ mod recent;
 mod reconnect;
 pub(crate) mod recovery_actions;
 mod recovery_run;
+pub mod remote;
 mod search;
 mod selectors;
 mod settings;
@@ -112,6 +113,11 @@ pub struct App {
 
     /// Injected notifier for "now playing" desktop notifications.
     pub(crate) notifier: Box<dyn notifier::Notifier>,
+
+    /// Media keys and desktop media controls.
+    pub(crate) remote: Box<dyn remote::RemoteControl>,
+    /// What the remote control was last told, to publish only changes.
+    remote_published: Option<remote::NowPlaying>,
 
     /// Discovery results from the recommendation engine.
     pub discover_results: Vec<ScoredStation>,

@@ -14,6 +14,17 @@ pub(crate) mod input_mode;
 mod keybindings;
 mod library_filter;
 pub mod library_sort;
+#[cfg(all(
+    feature = "mpris",
+    any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )
+))]
+mod mpris;
 pub(crate) mod mtime_debounce;
 mod number_jump;
 mod persistence;

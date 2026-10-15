@@ -71,6 +71,10 @@ fn set_ui_section(table: &mut toml::map::Map<String, toml::Value>, ui: &UiConfig
         "sort_mode".into(),
         toml::Value::String(ui.sort_mode.clone()),
     );
+    sec.insert(
+        "media_controls".into(),
+        toml::Value::Boolean(ui.media_controls),
+    );
 }
 
 fn set_playback_section(
@@ -262,6 +266,7 @@ mod property_tests {
                         notifications_enabled,
                         stream_metadata_enabled,
                         sort_mode,
+                        ..UiConfig::default()
                     },
                     playback: PlaybackConfig {
                         autoplay_last,
@@ -319,6 +324,7 @@ mod tests {
                 notifications_enabled: false,
                 stream_metadata_enabled: true,
                 sort_mode: "favorites_first".to_string(),
+                ..UiConfig::default()
             },
             playback: PlaybackConfig {
                 autoplay_last: true,
@@ -490,6 +496,7 @@ stream_metadata_enabled = true
                 notifications_enabled: false,
                 stream_metadata_enabled: false,
                 sort_mode: "alphabetical".to_string(),
+                ..UiConfig::default()
             },
             playback: PlaybackConfig {
                 autoplay_last: true,

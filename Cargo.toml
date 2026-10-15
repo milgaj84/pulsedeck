@@ -56,6 +56,17 @@ rusty_aac = { version = "=1.1.0", default-features = false }
 symphonia-codec-aac = "0.5"
 ebur128 = { version = "0.1.10", default-features = false }
 
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
+# Media keys and desktop media widgets (MPRIS over D-Bus); see src/mpris.rs.
+mpris-server = { version = "0.10", optional = true }
+async-io = { version = "2", optional = true }
+futures-lite = { version = "2", optional = true }
+
+[features]
+default = ["mpris"]
+# Media keys and desktop media controls on Linux and the BSDs. No effect elsewhere.
+mpris = ["dep:mpris-server", "dep:async-io", "dep:futures-lite"]
+
 [dev-dependencies]
 proptest = "1"
 

@@ -270,6 +270,13 @@ impl App {
         #[cfg(test)]
         let app_notifier: Box<dyn notifier::Notifier> = Box::new(notifier::CountingNotifier::new());
 
+        // Tests must not claim a name on the developer's session bus.
+        let app_remote = if cfg!(test) {
+            Box::new(remote::NullRemote)
+        } else {
+            remote::system_remote(config.ui.media_controls)
+        };
+
         let mut app = Self {
             library: parts.library,
             search: SearchState::default(),
@@ -288,6 +295,8 @@ impl App {
                 .unwrap_or(crate::library_sort::SortMode::FavoritesFirst),
             notification_cooldown: NotificationCooldown::new(),
             notifier: app_notifier,
+            remote: app_remote,
+            remote_published: None,
             discover_results: Vec::new(),
             discover_cursor: 0,
             discover_fetch_pending: None,

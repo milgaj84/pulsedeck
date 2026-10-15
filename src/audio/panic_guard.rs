@@ -21,7 +21,7 @@ pub fn quiet_panics_on_this_thread() -> bool {
 }
 
 /// Run `f`, returning `Err(())` if it panicked. Nested calls are fine.
-pub(super) fn run_quiet<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
+pub fn run_quiet<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
     QUIET_DEPTH.with(|depth| depth.set(depth.get() + 1));
     let result = catch_unwind(AssertUnwindSafe(f));
     QUIET_DEPTH.with(|depth| depth.set(depth.get() - 1));

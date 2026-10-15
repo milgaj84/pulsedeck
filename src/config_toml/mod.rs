@@ -40,6 +40,8 @@ pub struct UiConfig {
     pub notifications_enabled: bool,
     pub stream_metadata_enabled: bool,
     pub sort_mode: String,
+    /// Offer media keys and desktop media controls (MPRIS on Linux and the BSDs).
+    pub media_controls: bool,
 }
 
 impl Default for UiConfig {
@@ -49,6 +51,7 @@ impl Default for UiConfig {
             notifications_enabled: true,
             stream_metadata_enabled: true,
             sort_mode: "favorites_first".to_string(),
+            media_controls: true,
         }
     }
 }

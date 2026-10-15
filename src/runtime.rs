@@ -50,6 +50,7 @@ impl<A: RadioApi + 'static> AppDriver<A> {
     }
 
     pub fn tick(&mut self, app: &mut App) {
+        app.process_remote();
         self.update_search_debounce(app);
         self.spawn_ready_search(app);
         self.drain_search_responses(app);

@@ -24,6 +24,8 @@ pub(super) mod volume;
 
 pub use capability::{codec_capability, PlaybackCapability};
 pub use panic_guard::quiet_panics_on_this_thread;
+#[allow(unused_imports)]
+pub use panic_guard::run_quiet;
 
 use std::collections::VecDeque;
 

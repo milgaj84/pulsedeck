@@ -56,6 +56,21 @@ https://datatracker.ietf.org/ipr/1914/
 Broadcom Corporation:
 https://datatracker.ietf.org/ipr/1526/
 
+mpris-server (media keys and desktop media controls on Linux and the BSDs)
+---------------------------------------------------------------------------
+https://crates.io/crates/mpris-server
+
+Licensed under the Mozilla Public License, Version 2.0. The source of the
+version used, unmodified, is at https://crates.io/crates/mpris-server and the
+license text at https://www.mozilla.org/MPL/2.0/.
+
+ebur128 (loudness measurement for loudness normalisation)
+---------------------------------------------------------
+https://crates.io/crates/ebur128
+
+Licensed under the MIT license, a Rust port of libebur128 by Jan Kokemüller
+(also MIT).
+
 rusty_aac (used to play HE-AAC and HE-AAC v2 streams)
 -----------------------------------------------------
 https://crates.io/crates/rusty_aac

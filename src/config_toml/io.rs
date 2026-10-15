@@ -338,6 +338,7 @@ save_history = true
                 notifications_enabled: false,
                 stream_metadata_enabled: false,
                 sort_mode: "favorites_first".to_string(),
+                ..UiConfig::default()
             },
             playback: PlaybackConfig {
                 autoplay_last: true,

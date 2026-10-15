@@ -63,6 +63,7 @@ That's the loop. **Search → Preview → Save → Listen.** Everything else is 
 - Opus, Vorbis, FLAC, AAC (including HE-AAC at full quality), MP3, AC-3 and E-AC-3 stations
 - Loudness normalisation: stations that are mastered 10 LU louder or quieter than the rest are brought to one level, gently and with a limiter against clipping (on by default; switch it off in settings)
 - Live audio output device switching
+- Media keys and desktop player widgets on Linux and the BSDs (MPRIS): play/pause, next/previous station, stop and volume from your keyboard, GNOME/KDE panel or `playerctl`, with the station and song shown
 - Sleep timer (fade out and stop)
 - Desktop notifications for track changes
 
@@ -174,6 +175,20 @@ PulseDeck is keyboard-driven. Press `h` anytime for the full reference.
 
 ---
 
+## Media keys and desktop controls
+
+On Linux and the BSDs PulseDeck registers with the desktop as a media player (MPRIS, as `org.mpris.MediaPlayer2.pulsedeck`), so the keyboard's play/pause, next and previous keys, the GNOME and KDE media widgets, lock-screen controls and command-line tools work with it. Next and previous move to the next or previous station in the list on screen. For example:
+
+```bash
+playerctl -p pulsedeck play-pause
+playerctl -p pulsedeck next
+playerctl -p pulsedeck metadata
+```
+
+It needs a D-Bus session bus (every desktop session has one); without one, or with `media_controls = false`, PulseDeck simply runs without it. macOS and Windows media keys are not supported yet. To build without it: `cargo install --locked pulsedeck --no-default-features`.
+
+---
+
 ## Making it yours
 
 Press `,` to open settings, or edit `~/.config/pulsedeck/pulsedeck.toml`:
@@ -188,6 +203,7 @@ loudness_target_lufs = -16      # -30 to -10; settings offer -14, -16, -18, -23
 [ui]
 theme = "Retrowave"        # Retrowave | Catppuccin Mocha | Macchiato | Frappé | Latte | Terminal
 notifications_enabled = true
+media_controls = true      # media keys and desktop player widgets (Linux and BSD; needs a restart)
 
 [playback]
 autoplay_last = true       # pick up where you left off

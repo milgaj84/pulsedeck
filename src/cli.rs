@@ -28,6 +28,7 @@ loudness_target_lufs = -16     # -30 to -10; the settings screen offers -14, -16
 theme = "Retrowave"  # Retrowave | Catppuccin Mocha | Catppuccin Macchiato | Catppuccin Frappé | Catppuccin Latte | Terminal
 notifications_enabled = true
 stream_metadata_enabled = true
+media_controls = true  # media keys and desktop player widgets (Linux and BSD; needs a restart)
 
 [playback]
 autoplay_last = false

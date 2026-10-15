@@ -163,11 +163,17 @@ fn parse_ui_section(
 
     let sort_mode = parse_sort_mode(sec, warnings);
 
+    let media_controls = sec
+        .get("media_controls")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     UiConfig {
         theme,
         notifications_enabled,
         stream_metadata_enabled,
         sort_mode,
+        media_controls,
     }
 }
 
@@ -481,6 +487,21 @@ fn line_col_from_offset(input: &str, offset: usize) -> (Option<usize>, Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_controls_default_on_and_can_be_switched_off() {
+        let default = parse_toml("[ui]\ntheme = \"Terminal\"\n").unwrap();
+        assert!(default.config.ui.media_controls);
+
+        let off = parse_toml("[ui]\nmedia_controls = false\n").unwrap();
+        assert!(!off.config.ui.media_controls);
+
+        let mut config = AppConfig::default();
+        config.ui.media_controls = false;
+        let preserved = toml::Value::Table(toml::map::Map::new());
+        let text = crate::config_toml::serialize::serialize_toml(&config, &preserved);
+        assert!(!parse_toml(&text).unwrap().config.ui.media_controls);
+    }
 
     #[test]
     fn loudness_settings_default_to_on_at_minus_16() {

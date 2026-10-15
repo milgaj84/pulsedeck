@@ -106,6 +106,7 @@ mod property_tests {
                         notifications_enabled,
                         stream_metadata_enabled,
                         sort_mode,
+                        ..UiConfig::default()
                     },
                     playback: PlaybackConfig {
                         autoplay_last,
@@ -173,6 +174,7 @@ mod tests {
                 notifications_enabled: false,
                 stream_metadata_enabled: true,
                 sort_mode: "favorites_first".to_string(),
+                ..UiConfig::default()
             },
             playback: PlaybackConfig {
                 autoplay_last: true,

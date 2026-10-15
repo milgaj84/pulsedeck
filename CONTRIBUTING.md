@@ -19,6 +19,8 @@ Thanks for your interest in helping make PulseDeck better! This document explain
 - **Test** — `cargo test --locked --all-targets --all-features`
 - **Build** — `cargo build --locked --release`
 
+Media keys (MPRIS, Linux and the BSDs) sit behind the default-on cargo feature `mpris`; `cargo build --no-default-features` builds without it. The D-Bus test starts a private `dbus-daemon` and skips itself if there is none, so install the `dbus` package to run it.
+
 CI runs all of these on every push/PR across Ubuntu, macOS, and Windows, plus a `cargo audit` job.
 
 ## Test strategy
