@@ -18,6 +18,7 @@ use super::fmp4::{Fmp4Demuxer, Fmp4Init};
 use super::id3;
 use super::playlist::HlsError;
 use crate::audio::ac3::{self, Dolby};
+use crate::audio::metadata::clean_title;
 
 pub(crate) const PACKET_SIZE: usize = 188;
 const PACKET: usize = PACKET_SIZE;
@@ -643,6 +644,7 @@ impl AudioExtractor {
     }
 
     fn note_title(&mut self, title: String) {
+        let title = clean_title(&title);
         if self.last_title.as_deref() != Some(title.as_str()) {
             self.last_title = Some(title.clone());
             self.titles.push(title);

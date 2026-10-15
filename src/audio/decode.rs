@@ -14,13 +14,19 @@ use super::visualizer::VisualizerSource;
 use rodio::Source;
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Cursor, Read};
-use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_ICY_METAINT: usize = 16 * 1024 * 1024;
+
+/// How much of a stream may be read while its format is being identified,
+/// before it is given up as unrecognisable. Symphonia's own limit is 1 MiB,
+/// which on a live stream of 16-32 KB/s is a minute or more of "Connecting".
+const PROBE_MAX_BYTES: u64 = 512 * 1024;
+const PROBE_MAX_TIME: Duration = Duration::from_secs(20);
 
 /// Builds a decoded, visualizer-tapped rodio source from a live byte stream.
 ///
@@ -47,14 +53,18 @@ impl DecodePipeline {
 
         // Third-party decoders can panic on input they cannot handle, so the
         // probe runs inside a guard that turns a panic into an error.
+        // The limit on identifying the stream ends once it has been (or has failed to be).
+        let probing = Arc::new(AtomicBool::new(true));
+        let limit = ProbeLimit::new(Arc::clone(&probing), PROBE_MAX_BYTES, PROBE_MAX_TIME);
         let opened = panic_guard::run_quiet(|| match detection.hint {
             // Symphonia has no AC-3 decoder; these go to their own backend.
             CodecHint::Ac3 | CodecHint::Eac3 => open_pcm(Ok(Ac3Backend::new(reader)), failures),
             _ => open_pcm(
-                SymphoniaBackend::open(ReadWrapper::new(reader), extension),
+                SymphoniaBackend::open(ReadWrapper::new(reader).with_probe_limit(limit), extension),
                 failures,
             ),
         });
+        probing.store(false, SeqCst);
         let (pcm, sample_rate, channels) = match opened {
             Ok(Ok(opened)) => opened,
             Ok(Err(message)) if verified_mp3 => {
@@ -108,16 +118,73 @@ pub(super) fn decoder_crashed() -> EngineError {
 struct ReadWrapper<R: Read> {
     inner: R,
     pos: u64,
+    probe: Option<ProbeLimit>,
+}
+
+/// Cuts off the reading of a stream whose format cannot be identified, while
+/// `armed` is set.
+struct ProbeLimit {
+    armed: Arc<AtomicBool>,
+    max_bytes: u64,
+    max_time: Duration,
+    started: Instant,
+}
+
+impl ProbeLimit {
+    fn new(armed: Arc<AtomicBool>, max_bytes: u64, max_time: Duration) -> Self {
+        Self {
+            armed,
+            max_bytes,
+            max_time,
+            started: Instant::now(),
+        }
+    }
+
+    /// Why reading must stop now, if it must.
+    fn exceeded(&self, read: u64) -> Option<String> {
+        if !self.armed.load(SeqCst) {
+            return None;
+        }
+        if read >= self.max_bytes {
+            return Some(format!(
+                "no recognisable audio found in the first {} KiB of the stream",
+                self.max_bytes / 1024
+            ));
+        }
+        if self.started.elapsed() >= self.max_time {
+            return Some(format!(
+                "no recognisable audio found in the first {} seconds of the stream",
+                self.max_time.as_secs()
+            ));
+        }
+        None
+    }
 }
 
 impl<R: Read> ReadWrapper<R> {
     fn new(inner: R) -> Self {
-        Self { inner, pos: 0 }
+        Self {
+            inner,
+            pos: 0,
+            probe: None,
+        }
+    }
+
+    fn with_probe_limit(mut self, limit: ProbeLimit) -> Self {
+        self.probe = Some(limit);
+        self
     }
 }
 
 impl<R: Read> Read for ReadWrapper<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(reason) = self
+            .probe
+            .as_ref()
+            .and_then(|limit| limit.exceeded(self.pos))
+        {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, reason));
+        }
         let n = self.inner.read(buf)?;
         self.pos += n as u64;
         Ok(n)
@@ -951,6 +1018,93 @@ mod tests {
             assert_eq!(format.sample_rate, 48_000);
             assert_eq!(samples.len(), 4000);
             assert!(samples.iter().fold(0.0_f32, |m, s| m.max(s.abs())) > 0.01);
+        }
+
+        /// A stream of zeros that counts how much of it was read (stopping at
+        /// 8 MiB, so that a missing limit shows up as a failed test, not a hang).
+        struct Endless(Arc<std::sync::atomic::AtomicU64>);
+        impl Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.0.load(SeqCst) >= 8 * 1024 * 1024 {
+                    return Ok(0);
+                }
+                buf.fill(0);
+                self.0.fetch_add(buf.len() as u64, SeqCst);
+                Ok(buf.len())
+            }
+        }
+
+        #[test]
+        fn an_unrecognisable_stream_is_given_up_quickly_not_after_a_megabyte() {
+            let read = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let result = DecodePipeline::build(
+                Endless(Arc::clone(&read)),
+                Arc::new(Mutex::new(VecDeque::new())),
+                detect_codec(&[0u8; 64], "audio/aac", ""),
+                None,
+            );
+
+            let Err(EngineError::Decode(message)) = result else {
+                panic!("an unrecognisable stream must fail");
+            };
+            assert!(message.contains("no recognisable audio"), "{message}");
+            // Symphonia alone would read 1 MiB or more before giving up.
+            let read = read.load(SeqCst);
+            assert!(read < 800 * 1024, "read {read} bytes");
+        }
+
+        #[test]
+        fn a_large_id3_tag_before_the_audio_is_still_fine() {
+            // 300 KB of tag (cover art), well inside the limit.
+            let mp3 = include_bytes!("hls/testdata/tone.mp3");
+            let mut stream = b"ID3\x04\x00\x00".to_vec();
+            let size = 300_000usize;
+            stream.extend_from_slice(&[
+                ((size >> 21) & 0x7F) as u8,
+                ((size >> 14) & 0x7F) as u8,
+                ((size >> 7) & 0x7F) as u8,
+                (size & 0x7F) as u8,
+            ]);
+            stream.extend(std::iter::repeat_n(0u8, size));
+            stream.extend_from_slice(mp3);
+
+            let (format, samples) = first_samples(&stream, 4000);
+
+            assert_eq!(format.codec, "MP3");
+            assert_eq!(samples.len(), 4000);
+        }
+
+        #[test]
+        fn the_probe_limit_stops_a_slow_stream_by_time_and_lifts_once_disarmed() {
+            struct Slow;
+            impl Read for Slow {
+                fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                    std::thread::sleep(Duration::from_millis(20));
+                    let n = buf.len().min(100);
+                    buf[..n].fill(0);
+                    Ok(n)
+                }
+            }
+            let armed = Arc::new(AtomicBool::new(true));
+            let limit = ProbeLimit::new(Arc::clone(&armed), u64::MAX, Duration::from_millis(150));
+            let mut reader = ReadWrapper::new(Slow).with_probe_limit(limit);
+            let mut buf = [0u8; 100];
+            let started = Instant::now();
+
+            let error = loop {
+                if let Err(error) = reader.read(&mut buf) {
+                    break error;
+                }
+                assert!(started.elapsed() < Duration::from_secs(5), "never stopped");
+            };
+
+            assert!(
+                error.to_string().contains("seconds of the stream"),
+                "{error}"
+            );
+            // Once the stream is identified, reading is unlimited again.
+            armed.store(false, SeqCst);
+            assert!(reader.read(&mut buf).is_ok());
         }
 
         #[test]

@@ -54,7 +54,13 @@ impl SymphoniaBackend {
                 },
                 &MetadataOptions::default(),
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| match error {
+                // The probe found nothing it can read.
+                Error::Unsupported(_) => {
+                    "no recognisable audio format found in the stream".to_string()
+                }
+                other => other.to_string(),
+            })?;
         let format = probed.format;
         let picked = pick_track(format.as_ref())?;
         Ok(Self {
