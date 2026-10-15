@@ -14,6 +14,8 @@ pub(super) fn codec_registry() -> &'static CodecRegistry {
         let mut registry = CodecRegistry::new();
         symphonia::default::register_enabled_codecs(&mut registry);
         registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
+        // Replaces Symphonia's AAC decoder, which cannot decode SBR (HE-AAC).
+        registry.register_all::<super::aac_decoder::HeAacDecoder>();
         registry
     })
 }

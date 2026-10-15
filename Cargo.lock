@@ -2312,10 +2312,12 @@ dependencies = [
  "ratatui",
  "reqwest",
  "rodio",
+ "rusty_aac",
  "serde",
  "serde_json",
  "symphonia",
  "symphonia-adapter-libopus",
+ "symphonia-codec-aac",
  "tokio",
  "toml",
 ]
@@ -2703,6 +2705,12 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
+
+[[package]]
+name = "rusty_aac"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be358888c3ae0cc16d17f50c76b76d8ce903845a97413559cecf38db1ca9c62d"
 
 [[package]]
 name = "ryu"

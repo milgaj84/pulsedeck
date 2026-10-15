@@ -415,10 +415,8 @@ fn parse_iv(value: &str) -> Result<[u8; 16], HlsError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodecClass {
-    /// AAC-LC or MP3: decodes correctly.
+    /// AAC (LC, HE-AAC, HE-AAC v2) or MP3.
     Good,
-    /// HE-AAC: Symphonia decodes only the LC core (half rate, muffled).
-    HeAac,
     /// Opus (in fragmented MP4).
     Opus,
     /// AC-3 or E-AC-3.
@@ -446,8 +444,6 @@ fn classify_codecs(codecs: &str) -> CodecClass {
             CodecClass::Opus
         } else if ["ac-3", "ec-3", "mp4a.a5", "mp4a.a6"].contains(&codec.as_str()) {
             CodecClass::Dolby
-        } else if codec == "mp4a.40.5" || codec == "mp4a.40.29" {
-            CodecClass::HeAac
         } else if codec.starts_with("mp4a.40.") {
             CodecClass::Good
         } else {
@@ -458,7 +454,6 @@ fn classify_codecs(codecs: &str) -> CodecClass {
             (CodecClass::Other, _) | (_, CodecClass::Other) => CodecClass::Other,
             (CodecClass::Opus, _) | (_, CodecClass::Opus) => CodecClass::Opus,
             (CodecClass::Dolby, _) | (_, CodecClass::Dolby) => CodecClass::Dolby,
-            (CodecClass::HeAac, _) | (_, CodecClass::HeAac) => CodecClass::HeAac,
             _ => CodecClass::Good,
         };
     }
@@ -468,8 +463,8 @@ fn classify_codecs(codecs: &str) -> CodecClass {
 /// Pick the playlist to play from a master playlist.
 ///
 /// An audio rendition with its own URI wins (default first). Otherwise the
-/// lowest-bandwidth audio-only variant is chosen, preferring AAC-LC/MP3 over
-/// HE-AAC, and all of them over Opus and Dolby. A variant without a `CODECS` attribute is accepted as a last resort
+/// lowest-bandwidth audio-only variant is chosen, preferring AAC/MP3 over Opus
+/// and Dolby. A variant without a `CODECS` attribute is accepted as a last resort
 /// and the demuxer decides what it really contains.
 pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
     if let Some(rendition) = master
@@ -500,7 +495,6 @@ pub(crate) fn select_variant(master: &Master) -> Result<Url, HlsError> {
     };
 
     if let Some(uri) = lowest(Some(CodecClass::Good))
-        .or_else(|| lowest(Some(CodecClass::HeAac)))
         .or_else(|| lowest(Some(CodecClass::Opus)))
         .or_else(|| lowest(Some(CodecClass::Dolby)))
         .or_else(|| lowest(None))
@@ -956,14 +950,14 @@ mod tests {
     }
 
     #[test]
-    fn master_prefers_aac_lc_over_he_aac_even_at_higher_bandwidth() {
+    fn master_treats_he_aac_like_aac_lc_and_picks_the_lowest_bandwidth() {
         let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=32000,CODECS=\"mp4a.40.5\"\nhe.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=96000,CODECS=\"mp4a.40.2\"\nlc.m3u8\n";
         let uri = select_variant(&master(text)).unwrap();
-        assert!(uri.as_str().ends_with("lc.m3u8"));
+        assert!(uri.as_str().ends_with("he.m3u8"));
     }
 
     #[test]
-    fn master_falls_back_to_he_aac_when_it_is_all_there_is() {
+    fn master_picks_he_aac_when_it_is_all_there_is() {
         let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=32000,CODECS=\"mp4a.40.5\"\nhe.m3u8\n";
         let uri = select_variant(&master(text)).unwrap();
         assert!(uri.as_str().ends_with("he.m3u8"));
@@ -1036,8 +1030,8 @@ mod tests {
         assert_eq!(classify_codecs("mp4a.40.2"), CodecClass::Good);
         assert_eq!(classify_codecs("mp3"), CodecClass::Good);
         assert_eq!(classify_codecs("mp4a.40.34"), CodecClass::Good);
-        assert_eq!(classify_codecs("mp4a.40.5"), CodecClass::HeAac);
-        assert_eq!(classify_codecs("mp4a.40.29"), CodecClass::HeAac);
+        assert_eq!(classify_codecs("mp4a.40.5"), CodecClass::Good);
+        assert_eq!(classify_codecs("mp4a.40.29"), CodecClass::Good);
         assert_eq!(classify_codecs("avc1.4d401f,mp4a.40.2"), CodecClass::Video);
         assert_eq!(classify_codecs("ec-3"), CodecClass::Dolby);
         assert_eq!(classify_codecs("ac-3"), CodecClass::Dolby);

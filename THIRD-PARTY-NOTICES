@@ -55,3 +55,20 @@ https://datatracker.ietf.org/ipr/1914/
 
 Broadcom Corporation:
 https://datatracker.ietf.org/ipr/1526/
+
+rusty_aac (used to play HE-AAC and HE-AAC v2 streams)
+-----------------------------------------------------
+https://crates.io/crates/rusty_aac
+
+Copyright Mata Network, licensed under the Apache License, Version 2.0. You may
+obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+The Apache License grants rights under the copyright holder's own patents only.
+AAC, HE-AAC and HE-AAC v2 may be covered by patents of other parties; PulseDeck
+makes no claim of a patent license for them.

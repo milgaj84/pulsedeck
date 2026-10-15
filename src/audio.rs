@@ -1,3 +1,4 @@
+mod aac_decoder;
 mod ac3;
 mod adts_stream;
 mod capability;

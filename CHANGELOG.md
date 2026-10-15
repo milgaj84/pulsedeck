@@ -4,6 +4,13 @@ All notable changes to the PulseDeck project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Full-quality HE-AAC and HE-AAC v2.** About a quarter of popular AAC stations (Q-music, JOE, KIIS FM, NHK, RTL, Kisstory and many more) broadcast HE-AAC, whose upper half of the spectrum is carried as a compact "spectral band replication" layer (and, for v2, the second stereo channel as "parametric stereo"). Symphonia decodes only the core, so these stations played at half the sample rate (22.05 or 24 kHz) and sounded dull, and v2 stations came out mono. They are now decoded in full, at 44.1 or 48 kHz and in stereo, with the pure-Rust `rusty_aac` decoder (pinned to one exact version). If that decoder cannot start for a stream, PulseDeck falls back to Symphonia's AAC-LC decoder, as before. Checked against FFmpeg's decoding of three real station captures: same length, no offset, 133 dB signal-to-error ratio. This also covers HE-AAC in HLS (MPEG-TS and fragmented MP4), where HE-AAC variants are no longer ranked below AAC-LC ones.
+
+---
+
 ## [1.3.2] - 2026-10-15
 
 ### Fixed

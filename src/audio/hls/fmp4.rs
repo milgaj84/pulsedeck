@@ -531,8 +531,9 @@ fn parse_aac_config(config: &[u8]) -> Result<Codec, HlsError> {
     let frequency_index = bits.frequency_index().ok_or(BAD)?;
     let channel_config = bits.read(4).ok_or(BAD)?;
     if object_type == 5 || object_type == 29 {
-        // Explicit SBR/PS: the AAC-LC core follows. Symphonia decodes only the
-        // core, exactly as for HE-AAC in MPEG-TS.
+        // Explicit SBR/PS: the AAC-LC core follows. The ADTS header describes
+        // the core; the decoder finds the SBR layer in the frames themselves,
+        // as for HE-AAC in MPEG-TS.
         bits.frequency_index().ok_or(BAD)?;
         object_type = bits.audio_object_type().ok_or(BAD)?;
     }
